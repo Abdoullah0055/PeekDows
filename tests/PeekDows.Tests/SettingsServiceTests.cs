@@ -59,6 +59,7 @@ public class SettingsServiceTests : IDisposable
         Assert.False(settings.AutoArrange); // Should be default
         
         var directory = Path.GetDirectoryName(_testSettingsPath);
+        Assert.NotNull(directory);
         var files = Directory.GetFiles(directory, "settings.corrupted.*.json");
         Assert.Single(files);
     }
