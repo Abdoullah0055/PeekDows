@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
-using System.Text;
 using PeekDows.Core.Models;
 using PeekDows.Core.Win32;
 
@@ -11,8 +9,82 @@ namespace PeekDows.Core.Services;
 public class WindowDiscoveryService
 {
     private Dictionary<IntPtr, ManagedWindow> _knownWindows = new();
+    private readonly Func<IReadOnlyList<RawWindowInfo>> _windowSource;
+
+    public WindowDiscoveryService() : this(DefaultWindowSource) { }
+
+    internal WindowDiscoveryService(Func<IReadOnlyList<RawWindowInfo>> windowSource)
+    {
+        _windowSource = windowSource;
+    }
 
     public IReadOnlyList<RawWindowInfo> GetTopLevelWindows()
+    {
+        return _windowSource();
+    }
+
+    public WindowDiff Refresh(WindowClassifier classifier)
+    {
+        var rawWindows = _windowSource();
+        var now = DateTime.Now;
+
+        var previousSnapshot = new Dictionary<IntPtr, ManagedWindow>(_knownWindows);
+
+        var currentEligible = new List<ManagedWindow>();
+
+        foreach (var raw in rawWindows)
+        {
+            if (!classifier.IsEligible(raw))
+                continue;
+
+            if (previousSnapshot.TryGetValue(raw.Hwnd, out var existing))
+            {
+                existing.Title = raw.Title;
+                existing.CurrentRect = raw.CurrentRect;
+                existing.IsVisible = raw.IsVisible;
+                existing.IsMinimized = raw.IsMinimized;
+                existing.IsMaximized = raw.IsMaximized;
+                existing.IsForeground = raw.IsForeground;
+                existing.LastSeenAt = now;
+
+                if (existing.IsForeground)
+                {
+                    existing.LastFocusedAt = now;
+                }
+
+                currentEligible.Add(existing);
+            }
+            else
+            {
+                var managed = ManagedWindow.FromRaw(raw, now);
+                if (managed.IsForeground)
+                {
+                    managed.LastFocusedAt = now;
+                }
+
+                currentEligible.Add(managed);
+            }
+        }
+
+        var previousHwnds = new HashSet<IntPtr>(previousSnapshot.Keys);
+        var currentHwnds = new HashSet<IntPtr>(currentEligible.Select(w => w.Hwnd));
+
+        var added = currentEligible.Where(w => !previousHwnds.Contains(w.Hwnd)).ToList();
+        var removed = previousSnapshot.Values.Where(w => !currentHwnds.Contains(w.Hwnd)).ToList();
+
+        _knownWindows = currentEligible.ToDictionary(w => w.Hwnd);
+
+        return new WindowDiff
+        {
+            Added = added,
+            Removed = removed,
+            Current = currentEligible
+        };
+    }
+
+    public IReadOnlyList<ManagedWindow> GetKnownWindows() => _knownWindows.Values.ToList();
+
+    private static IReadOnlyList<RawWindowInfo> DefaultWindowSource()
     {
         var windows = new List<RawWindowInfo>();
 
@@ -22,10 +94,10 @@ public class WindowDiscoveryService
             bool isMinimized = NativeMethods.IsIconic(hwnd);
             bool isMaximized = NativeMethods.IsZoomed(hwnd);
 
-            var sbTitle = new StringBuilder(256);
+            var sbTitle = new System.Text.StringBuilder(256);
             NativeMethods.GetWindowText(hwnd, sbTitle, sbTitle.Capacity);
 
-            var sbClass = new StringBuilder(256);
+            var sbClass = new System.Text.StringBuilder(256);
             NativeMethods.GetClassName(hwnd, sbClass, sbClass.Capacity);
 
             NativeMethods.GetWindowRect(hwnd, out var nativeRect);
@@ -35,7 +107,7 @@ public class WindowDiscoveryService
             string processName = "";
             try
             {
-                using var process = Process.GetProcessById((int)pid);
+                using var process = System.Diagnostics.Process.GetProcessById((int)pid);
                 processName = process.ProcessName + ".exe";
             }
             catch
@@ -70,75 +142,5 @@ public class WindowDiscoveryService
         }, IntPtr.Zero);
 
         return windows;
-    }
-
-    public IReadOnlyList<ManagedWindow> GetEligibleWindows(WindowClassifier classifier)
-    {
-        var allWindows = GetTopLevelWindows();
-        var now = DateTime.Now;
-        var validWindows = new List<ManagedWindow>();
-
-        foreach (var rawInfo in allWindows)
-        {
-            if (!classifier.IsEligible(rawInfo))
-                continue;
-
-            if (!_knownWindows.TryGetValue(rawInfo.Hwnd, out var managed))
-            {
-                managed = ManagedWindow.FromRaw(rawInfo, now);
-                _knownWindows[rawInfo.Hwnd] = managed;
-            }
-            else
-            {
-                managed.Title = rawInfo.Title;
-                managed.CurrentRect = rawInfo.CurrentRect;
-                managed.IsVisible = rawInfo.IsVisible;
-                managed.IsMinimized = rawInfo.IsMinimized;
-                managed.IsMaximized = rawInfo.IsMaximized;
-                managed.IsForeground = rawInfo.IsForeground;
-                managed.LastSeenAt = now;
-            }
-
-            if (managed.IsForeground)
-            {
-                managed.LastFocusedAt = now;
-            }
-
-            validWindows.Add(managed);
-        }
-
-        var deadHwnds = _knownWindows.Keys.Except(validWindows.Select(w => w.Hwnd)).ToList();
-        foreach (var deadHwnd in deadHwnds)
-        {
-            _knownWindows.Remove(deadHwnd);
-        }
-
-        return validWindows;
-    }
-
-    public WindowDiff CompareWithPreviousSnapshot(IReadOnlyList<ManagedWindow> currentEligible)
-    {
-        var previousHwnds = new HashSet<IntPtr>(_knownWindows.Keys);
-        var currentHwnds = new HashSet<IntPtr>(currentEligible.Select(w => w.Hwnd));
-
-        var added = currentEligible.Where(w => !previousHwnds.Contains(w.Hwnd)).ToList();
-        var removed = _knownWindows.Values.Where(w => !currentHwnds.Contains(w.Hwnd)).ToList();
-
-        foreach (var dead in removed)
-        {
-            _knownWindows.Remove(dead.Hwnd);
-        }
-
-        foreach (var win in currentEligible)
-        {
-            _knownWindows[win.Hwnd] = win;
-        }
-
-        return new WindowDiff
-        {
-            Added = added,
-            Removed = removed,
-            Current = currentEligible
-        };
     }
 }

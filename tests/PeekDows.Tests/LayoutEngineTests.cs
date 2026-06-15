@@ -279,6 +279,32 @@ public class LayoutEngineTests
     }
 
     [Fact]
+    public void CalculatePlacements_5Windows_ReturnsOnly4Placements_A_B_C_D()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var now = DateTime.Now;
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, IsPinned = true, FirstSeenAt = now },
+            new() { Hwnd = (IntPtr)2, IsForeground = true, FirstSeenAt = now, LastFocusedAt = now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = now },
+            new() { Hwnd = (IntPtr)5, FirstSeenAt = now.AddHours(-1) }
+        };
+
+        var placements = _engine.CalculatePlacements(windows, workArea, settings);
+
+        Assert.Equal(4, placements.Count);
+        var slotIds = placements.Select(p => p.SlotId).ToList();
+        Assert.Contains("A", slotIds);
+        Assert.Contains("B", slotIds);
+        Assert.Contains("C", slotIds);
+        Assert.Contains("D", slotIds);
+        Assert.DoesNotContain(placements, p => p.Hwnd == (IntPtr)5);
+    }
+
+    [Fact]
     public void CalculatePlacements_ExactRects_1920x1080()
     {
         var settings = new AppSettings();
