@@ -480,3 +480,8 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+
+# Keep PeekDows Win32 interop source files tracked
+!src/PeekDows.Core/Win32/
+!src/PeekDows.Core/Win32/**
