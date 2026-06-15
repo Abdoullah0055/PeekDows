@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PeekDows.App/PeekDows.App.csproj" />
+    <Project Path="src/PeekDows.Core/PeekDows.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PeekDows.Tests/PeekDows.Tests.csproj" />
+  </Folder>
+</Solution>
