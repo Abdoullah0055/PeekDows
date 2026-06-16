@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using PeekDows.App.Settings;
 using PeekDows.Core.Models;
+using PeekDows.Core.Services;
 
 namespace PeekDows.App.Tray;
 
@@ -11,14 +12,18 @@ public class TrayIconController : IDisposable
     private readonly NotifyIcon _notifyIcon;
     private readonly TrayMenuBuilder _menuBuilder;
     private readonly IPeekDowsController _controller;
+    private readonly FileLogger? _logger;
     private SettingsWindow? _settingsWindow;
 
     private ToolStripMenuItem? _statusItem;
     private ToolStripMenuItem? _pauseResumeItem;
 
-    public TrayIconController(IPeekDowsController controller)
+    public TrayIconController(IPeekDowsController controller) : this(controller, null) { }
+
+    public TrayIconController(IPeekDowsController controller, FileLogger? logger)
     {
         _controller = controller;
+        _logger = logger;
         _menuBuilder = new TrayMenuBuilder(controller, this);
 
         _notifyIcon = new NotifyIcon

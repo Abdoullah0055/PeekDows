@@ -32,6 +32,16 @@ public class TrayMenuBuilder
 
         menu.Items.Add(new ToolStripSeparator());
 
+        var openLogItem = new ToolStripMenuItem("Open Log File");
+        openLogItem.Click += (s, e) => _controller.OpenLogFile();
+        menu.Items.Add(openLogItem);
+
+        var openLogsFolderItem = new ToolStripMenuItem("Open Logs Folder");
+        openLogsFolderItem.Click += (s, e) => _controller.OpenLogsFolder();
+        menu.Items.Add(openLogsFolderItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+
         var settingsItem = new ToolStripMenuItem("Settings");
         settingsItem.Click += (s, e) => _trayIcon.OpenSettings();
         menu.Items.Add(settingsItem);
