@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using PeekDows.App.Settings;
+using PeekDows.Core.Models;
 
 namespace PeekDows.App.Tray;
 
@@ -9,12 +10,17 @@ public class TrayIconController : IDisposable
 {
     private readonly NotifyIcon _notifyIcon;
     private readonly TrayMenuBuilder _menuBuilder;
+    private readonly IPeekDowsController _controller;
     private SettingsWindow? _settingsWindow;
 
-    public TrayIconController()
+    private ToolStripMenuItem? _statusItem;
+    private ToolStripMenuItem? _pauseResumeItem;
+
+    public TrayIconController(IPeekDowsController controller)
     {
-        _menuBuilder = new TrayMenuBuilder(this);
-        
+        _controller = controller;
+        _menuBuilder = new TrayMenuBuilder(controller, this);
+
         _notifyIcon = new NotifyIcon
         {
             Icon = SystemIcons.Application,
@@ -23,7 +29,18 @@ public class TrayIconController : IDisposable
             Visible = true
         };
 
-        _notifyIcon.DoubleClick += (s, e) => OpenSettings();
+        _notifyIcon.DoubleClick += (s, e) => _controller.OpenSettings();
+
+        _controller.StateChanged += OnStateChanged;
+
+        UpdateMenuState(_controller.State);
+    }
+
+    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem)
+    {
+        _statusItem = statusItem;
+        _pauseResumeItem = pauseResumeItem;
+        UpdateMenuState(_controller.State);
     }
 
     public void OpenSettings()
@@ -43,19 +60,23 @@ public class TrayIconController : IDisposable
         }
     }
 
-    public void Exit()
+    private void OnStateChanged(RuntimeState state)
     {
-        Application.Exit();
+        UpdateMenuState(state);
+        _notifyIcon.Text = state == RuntimeState.Paused ? "PeekDows (Paused)" : "PeekDows";
     }
 
-    public void ArrangeNow()
+    private void UpdateMenuState(RuntimeState state)
     {
-        // To be implemented in next batch
-    }
+        if (_statusItem != null)
+        {
+            _statusItem.Text = state == RuntimeState.Paused ? "Status: Paused" : "Status: Running";
+        }
 
-    public void Pause()
-    {
-        // To be implemented in next batch
+        if (_pauseResumeItem != null)
+        {
+            _pauseResumeItem.Text = state == RuntimeState.Paused ? "Resume" : "Pause";
+        }
     }
 
     public void Dispose()

@@ -1,29 +1,133 @@
 using System;
+using System.Linq;
 using System.Windows.Forms;
+using PeekDows.App.Hotkeys;
 using PeekDows.App.Tray;
+using PeekDows.Core.Models;
 using PeekDows.Core.Services;
+using PeekDows.Core.Win32;
 
 namespace PeekDows.App;
 
-public class PeekDowsAppContext : ApplicationContext
+public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 {
-    private readonly TrayIconController _trayController;
     private readonly SettingsService _settingsService;
+    private readonly WindowDiscoveryService _discoveryService;
+    private readonly WindowClassifier _classifier;
+    private readonly MonitorService _monitorService;
+    private readonly LayoutEngine _layoutEngine;
+    private readonly WindowPlacementService _placementService;
+    private readonly HotkeyService _hotkeyService;
+    private readonly TrayIconController _trayController;
+
+    private RuntimeState _state = RuntimeState.Running;
+    private AppSettings _settings;
+
+    public RuntimeState State => _state;
+
+    public event Action<RuntimeState>? StateChanged;
 
     public PeekDowsAppContext()
     {
-        // Initialize Core services
         _settingsService = new SettingsService();
-        _settingsService.Load(); // Ensure it creates / loads the config at startup
+        _settings = _settingsService.Load();
 
-        // Initialize Tray App
-        _trayController = new TrayIconController();
+        _discoveryService = new WindowDiscoveryService();
+        _classifier = new WindowClassifier(_settings);
+        _monitorService = new MonitorService();
+        _layoutEngine = new LayoutEngine();
+        _placementService = new WindowPlacementService();
+
+        _hotkeyService = new HotkeyService();
+        _hotkeyService.ArrangeNowRequested += OnArrangeNowRequested;
+
+        bool hotkeyRegistered = _hotkeyService.RegisterArrangeHotkey();
+
+        _trayController = new TrayIconController(this);
+    }
+
+    public void ArrangeNow()
+    {
+        if (_state == RuntimeState.Paused) return;
+        if (!_settings.Enabled) return;
+
+        ExecuteArrange();
+    }
+
+    public void TogglePause()
+    {
+        _state = _state == RuntimeState.Running ? RuntimeState.Paused : RuntimeState.Running;
+        StateChanged?.Invoke(_state);
+    }
+
+    public void OpenSettings()
+    {
+        _trayController.OpenSettings();
+    }
+
+    public void Exit()
+    {
+        _hotkeyService.Dispose();
+        Application.Exit();
+    }
+
+    private void OnArrangeNowRequested()
+    {
+        ArrangeNow();
+    }
+
+    private void ExecuteArrange()
+    {
+        try
+        {
+            var diff = _discoveryService.Refresh(_classifier);
+            var eligibleWindows = diff.Current;
+
+            if (eligibleWindows.Count == 0) return;
+
+            var foregroundWindow = eligibleWindows.FirstOrDefault(w => w.IsForeground);
+            Rect workArea;
+
+            if (foregroundWindow != null)
+            {
+                var monitorInfo = _monitorService.GetMonitorForWindow(foregroundWindow.Hwnd);
+                workArea = _monitorService.GetWorkArea(monitorInfo);
+            }
+            else
+            {
+                var primaryMonitor = _monitorService.GetPrimaryMonitor();
+                workArea = _monitorService.GetWorkArea(primaryMonitor);
+            }
+
+            var fullscreenHwnds = eligibleWindows
+                .Where(w => _classifier.IsFullscreen(new RawWindowInfo
+                {
+                    Hwnd = w.Hwnd,
+                    CurrentRect = w.CurrentRect,
+                    IsVisible = w.IsVisible,
+                    IsMinimized = w.IsMinimized
+                }, workArea))
+                .Select(w => w.Hwnd)
+                .ToHashSet();
+
+            var arrangeable = eligibleWindows.Where(w => !fullscreenHwnds.Contains(w.Hwnd)).ToList();
+
+            if (arrangeable.Count == 0) return;
+
+            var placements = _layoutEngine.CalculatePlacements(arrangeable, workArea, _settings);
+
+            _placementService.ApplyPlacements(placements);
+        }
+        catch
+        {
+        }
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            _hotkeyService.Dispose();
             _trayController.Dispose();
         }
         base.Dispose(disposing);
