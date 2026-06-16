@@ -7,6 +7,15 @@ namespace PeekDows.Core.Services;
 
 public class MonitorService
 {
+    private readonly FileLogger? _logger;
+
+    public MonitorService() { }
+
+    public MonitorService(FileLogger? logger)
+    {
+        _logger = logger;
+    }
+
     public MonitorInfo GetPrimaryMonitor()
     {
         var hMonitor = MonitorNativeMethods.MonitorFromWindow(IntPtr.Zero, MonitorNativeMethods.MONITOR_DEFAULTTOPRIMARY);
@@ -29,9 +38,10 @@ public class MonitorService
         var mi = new MonitorNativeMethods.MONITORINFOEX();
         mi.cbSize = Marshal.SizeOf(mi);
 
-        if (MonitorNativeMethods.GetMonitorInfoEx(hMonitor, ref mi))
+        if (MonitorNativeMethods.GetMonitorInfo(hMonitor, ref mi))
         {
             bool isPrimary = assumePrimary || (mi.dwFlags & 1) != 0;
+            _logger?.Info($"GetMonitorInfo succeeded: device={mi.szDevice}, workArea=({mi.rcWork.left},{mi.rcWork.top},{mi.rcWork.right},{mi.rcWork.bottom}), isPrimary={isPrimary}");
             return new MonitorInfo
             {
                 Handle = hMonitor,
@@ -50,6 +60,9 @@ public class MonitorService
                 IsPrimary = isPrimary
             };
         }
+
+        int win32Error = Marshal.GetLastWin32Error();
+        _logger?.Warn($"GetMonitorInfo failed: hMonitor={hMonitor}, win32Error={win32Error}, using fallback 1920x1080");
 
         return new MonitorInfo
         {

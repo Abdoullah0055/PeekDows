@@ -47,7 +47,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
         _discoveryService = new WindowDiscoveryService();
         _classifier = new WindowClassifier(_settings);
-        _monitorService = new MonitorService();
+        _monitorService = new MonitorService(_logger);
         _layoutEngine = new LayoutEngine();
         _placementService = new WindowPlacementService(_logger);
 
