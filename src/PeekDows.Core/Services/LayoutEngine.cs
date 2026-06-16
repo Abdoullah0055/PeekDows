@@ -17,20 +17,23 @@ public class LayoutEngine
 
         var priorityWindows = PrioritizeForClassicPeekGrid(windows);
 
-        double cellW = workArea.Width / 4.0;
-        double cellH = workArea.Height / 3.0;
+        int spanW = (int)Math.Round(workArea.Width * 0.8125);
+        int spanH = (int)Math.Round(workArea.Height * 0.7222);
 
-        int spanW = (int)Math.Round(cellW * 3.25);
-        int spanH = (int)Math.Round(cellH * 2.17);
-        int offsetC = (int)Math.Round(cellW * 0.75);
-        int offsetR = (int)Math.Round(cellH * 0.67);
+        spanW = Math.Min(spanW, workArea.Width);
+        spanH = Math.Min(spanH, workArea.Height);
+
+        int leftX = workArea.Left;
+        int rightX = workArea.Right - spanW;
+        int topY = workArea.Top;
+        int bottomY = workArea.Bottom - spanH;
 
         var slotRects = new Dictionary<string, Rect>
         {
-            ["A"] = new Rect(workArea.Left, workArea.Top, spanW, spanH),
-            ["B"] = new Rect(workArea.Left + offsetC, workArea.Top + offsetR, spanW, spanH),
-            ["C"] = new Rect(workArea.Left + offsetC, workArea.Top, spanW, spanH),
-            ["D"] = new Rect(workArea.Left, workArea.Top + offsetR, spanW, spanH)
+            ["A"] = new Rect(leftX, topY, spanW, spanH),
+            ["B"] = new Rect(rightX, bottomY, spanW, spanH),
+            ["C"] = new Rect(rightX, topY, spanW, spanH),
+            ["D"] = new Rect(leftX, bottomY, spanW, spanH)
         };
 
         if (priorityWindows.Count == 1)

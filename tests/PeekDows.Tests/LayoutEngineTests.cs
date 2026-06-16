@@ -443,29 +443,29 @@ public class LayoutEngineTests
         Assert.Equal(0, a.TargetRect.Left);
         Assert.Equal(0, a.TargetRect.Top);
         Assert.Equal(1040, a.TargetRect.Width);
-        Assert.Equal(521, a.TargetRect.Height);
+        Assert.Equal(520, a.TargetRect.Height);
 
         var b = placements.First(p => p.SlotId == "B");
         Assert.Equal(240, b.TargetRect.Left);
-        Assert.Equal(161, b.TargetRect.Top);
+        Assert.Equal(200, b.TargetRect.Top);
         Assert.Equal(1040, b.TargetRect.Width);
-        Assert.Equal(521, b.TargetRect.Height);
+        Assert.Equal(520, b.TargetRect.Height);
 
         var c = placements.First(p => p.SlotId == "C");
         Assert.Equal(240, c.TargetRect.Left);
         Assert.Equal(0, c.TargetRect.Top);
         Assert.Equal(1040, c.TargetRect.Width);
-        Assert.Equal(521, c.TargetRect.Height);
+        Assert.Equal(520, c.TargetRect.Height);
 
         var d = placements.First(p => p.SlotId == "D");
         Assert.Equal(0, d.TargetRect.Left);
-        Assert.Equal(161, d.TargetRect.Top);
+        Assert.Equal(200, d.TargetRect.Top);
         Assert.Equal(1040, d.TargetRect.Width);
-        Assert.Equal(521, d.TargetRect.Height);
+        Assert.Equal(520, d.TargetRect.Height);
     }
 
     [Fact]
-    public void ClassicPeekGrid_SecondariesAreAnchoredToCorners()
+    public void ClassicPeekGrid_BottomSlots_AreAnchoredToBottom()
     {
         var settings = new AppSettings();
         var workArea = new Rect(0, 0, 1280, 720);
@@ -479,21 +479,33 @@ public class LayoutEngineTests
 
         var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
 
-        var a = placements.First(p => p.SlotId == "A");
-        Assert.Equal(workArea.Left, a.TargetRect.Left);
-        Assert.Equal(workArea.Top, a.TargetRect.Top);
-
         var b = placements.First(p => p.SlotId == "B");
-        Assert.True(b.TargetRect.Left > workArea.Left, "B should be offset from left");
-        Assert.True(b.TargetRect.Top > workArea.Top, "B should be offset from top");
-
-        var c = placements.First(p => p.SlotId == "C");
-        Assert.True(c.TargetRect.Left > workArea.Left, "C should be offset from left");
-        Assert.Equal(workArea.Top, c.TargetRect.Top);
+        Assert.Equal(workArea.Bottom, b.TargetRect.Bottom);
 
         var d = placements.First(p => p.SlotId == "D");
-        Assert.Equal(workArea.Left, d.TargetRect.Left);
-        Assert.True(d.TargetRect.Top > workArea.Top, "D should be offset from top");
+        Assert.Equal(workArea.Bottom, d.TargetRect.Bottom);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_RightSlots_AreAnchoredToRight()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        var b = placements.First(p => p.SlotId == "B");
+        Assert.Equal(workArea.Right, b.TargetRect.Right);
+
+        var c = placements.First(p => p.SlotId == "C");
+        Assert.Equal(workArea.Right, c.TargetRect.Right);
     }
 
     [Fact]
