@@ -27,4 +27,5 @@ public sealed class WindowPlacement
     public Rect TargetRect { get; init; }
     public bool Activate { get; init; }
     public bool PreserveZOrder { get; init; }
+    public bool BringToFront { get; init; }
 }

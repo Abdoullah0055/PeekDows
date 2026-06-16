@@ -5,5 +5,5 @@ namespace PeekDows.Core.Services;
 
 internal interface IWindowPositioner
 {
-    bool SetWindowPosition(IntPtr hwnd, Rect rect);
+    bool SetWindowPosition(IntPtr hwnd, Rect rect, bool bringToFront = false);
 }

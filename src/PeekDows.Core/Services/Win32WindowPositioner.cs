@@ -6,10 +6,24 @@ namespace PeekDows.Core.Services;
 
 internal sealed class Win32WindowPositioner : IWindowPositioner
 {
-    public bool SetWindowPosition(IntPtr hwnd, Rect rect)
-    {
-        uint flags = (uint)(NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+    private static readonly IntPtr HWND_TOP = IntPtr.Zero;
 
-        return NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, rect.Left, rect.Top, rect.Width, rect.Height, flags);
+    public bool SetWindowPosition(IntPtr hwnd, Rect rect, bool bringToFront = false)
+    {
+        uint flags;
+        IntPtr hWndInsertAfter;
+
+        if (bringToFront)
+        {
+            flags = (uint)(NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+            hWndInsertAfter = HWND_TOP;
+        }
+        else
+        {
+            flags = (uint)(NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+            hWndInsertAfter = IntPtr.Zero;
+        }
+
+        return NativeMethods.SetWindowPos(hwnd, hWndInsertAfter, rect.Left, rect.Top, rect.Width, rect.Height, flags);
     }
 }

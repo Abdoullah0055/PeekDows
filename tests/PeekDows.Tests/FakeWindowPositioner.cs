@@ -8,7 +8,7 @@ namespace PeekDows.Tests;
 public class FakeWindowPositioner : IWindowPositioner
 {
     private readonly HashSet<IntPtr> _failHwnds;
-    public List<(IntPtr Hwnd, Rect Rect)> Calls { get; } = [];
+    public List<(IntPtr Hwnd, Rect Rect, bool BringToFront)> Calls { get; } = [];
 
     public FakeWindowPositioner()
     {
@@ -20,9 +20,9 @@ public class FakeWindowPositioner : IWindowPositioner
         _failHwnds = new HashSet<IntPtr>(failHwnds);
     }
 
-    public bool SetWindowPosition(IntPtr hwnd, Rect rect)
+    public bool SetWindowPosition(IntPtr hwnd, Rect rect, bool bringToFront = false)
     {
-        Calls.Add((hwnd, rect));
+        Calls.Add((hwnd, rect, bringToFront));
         return !_failHwnds.Contains(hwnd);
     }
 }

@@ -421,4 +421,181 @@ public class LayoutEngineTests
 
         Assert.Equal(slotIds.Distinct().Count(), slotIds.Count);
     }
+
+    [Fact]
+    public void FocusPeek_OneWindow_ReturnsOnePlacement()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, IsVisible = true, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateFocusPeekPlacements(windows, workArea, settings);
+
+        Assert.Single(placements);
+        Assert.Equal("Focus", placements[0].SlotId);
+    }
+
+    [Fact]
+    public void FocusPeek_TwoWindows_ReturnsFocusAndOnePeek()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateFocusPeekPlacements(windows, workArea, settings);
+
+        Assert.Equal(2, placements.Count);
+        Assert.Contains(placements, p => p.SlotId == "Focus");
+        Assert.Contains(placements, p => p.SlotId == "PeekLeft");
+    }
+
+    [Fact]
+    public void FocusPeek_ThreeWindows_ReturnsFocusLeftRight()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateFocusPeekPlacements(windows, workArea, settings);
+
+        Assert.Equal(3, placements.Count);
+        Assert.Contains(placements, p => p.SlotId == "Focus");
+        Assert.Contains(placements, p => p.SlotId == "PeekLeft");
+        Assert.Contains(placements, p => p.SlotId == "PeekRight");
+    }
+
+    [Fact]
+    public void FocusPeek_FourWindows_ReturnsFocusLeftRightBottom()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateFocusPeekPlacements(windows, workArea, settings);
+
+        Assert.Equal(4, placements.Count);
+        Assert.Contains(placements, p => p.SlotId == "Focus");
+        Assert.Contains(placements, p => p.SlotId == "PeekLeft");
+        Assert.Contains(placements, p => p.SlotId == "PeekRight");
+        Assert.Contains(placements, p => p.SlotId == "PeekBottom");
+    }
+
+    [Fact]
+    public void FocusPeek_FiveWindows_ReturnsOnlyFivePlacements()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>();
+        for (int i = 1; i <= 5; i++)
+        {
+            windows.Add(new ManagedWindow { Hwnd = (IntPtr)i, FirstSeenAt = DateTime.Now.AddMinutes(-i) });
+        }
+
+        var placements = _engine.CalculateFocusPeekPlacements(windows, workArea, settings);
+
+        Assert.Equal(5, placements.Count);
+        Assert.Contains(placements, p => p.SlotId == "Focus");
+        Assert.Contains(placements, p => p.SlotId == "PeekLeft");
+        Assert.Contains(placements, p => p.SlotId == "PeekRight");
+        Assert.Contains(placements, p => p.SlotId == "PeekBottom");
+        Assert.Contains(placements, p => p.SlotId == "PeekTop");
+    }
+
+    [Fact]
+    public void FocusPeek_FocusWindow_IsLargestArea()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateFocusPeekPlacements(windows, workArea, settings);
+        var focus = placements.First(p => p.SlotId == "Focus");
+        var peek = placements.First(p => p.SlotId != "Focus");
+
+        int focusArea = focus.TargetRect.Width * focus.TargetRect.Height;
+        var workAreaVisible = workArea;
+        int leftPeekVisible = Math.Min(peek.TargetRect.Right, workAreaVisible.Right) - Math.Max(peek.TargetRect.Left, workAreaVisible.Left);
+        int peekVisibleArea = leftPeekVisible * peek.TargetRect.Height;
+
+        Assert.True(focusArea > peekVisibleArea);
+    }
+
+    [Fact]
+    public void FocusPeek_SecondaryWindows_AreMostlyOffscreen()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateFocusPeekPlacements(windows, workArea, settings);
+        var peek = placements.First(p => p.SlotId != "Focus");
+
+        bool mostlyOffscreen = peek.TargetRect.Left < workArea.Left
+                             || peek.TargetRect.Right > workArea.Right
+                             || peek.TargetRect.Top < workArea.Top
+                             || peek.TargetRect.Bottom > workArea.Bottom;
+
+        Assert.True(mostlyOffscreen);
+    }
+
+    [Fact]
+    public void FocusPeek_FocusPlacement_HasBringToFrontTrue()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateFocusPeekPlacements(windows, workArea, settings);
+        var focus = placements.First(p => p.SlotId == "Focus");
+
+        Assert.True(focus.BringToFront);
+    }
+
+    [Fact]
+    public void FocusPeek_PeekPlacements_HaveBringToFrontFalse()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateFocusPeekPlacements(windows, workArea, settings);
+        var peeks = placements.Where(p => p.SlotId != "Focus").ToList();
+
+        Assert.All(peeks, p => Assert.False(p.BringToFront));
+    }
 }

@@ -205,4 +205,38 @@ public class WindowPlacementServiceTests
         Assert.Equal(1, result.SucceededCount);
         Assert.Single(fake.Calls);
     }
+
+    [Fact]
+    public void ApplyPlacements_FocusPlacement_PassesBringToFrontTrue()
+    {
+        var fake = new FakeWindowPositioner();
+        var service = new WindowPlacementService(fake, _ => true, _ => false, null);
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)100, SlotId = "Focus", TargetRect = new Rect(0, 0, 1120, 600), BringToFront = true }
+        };
+
+        service.ApplyPlacements(placements);
+
+        Assert.Single(fake.Calls);
+        Assert.True(fake.Calls[0].BringToFront);
+    }
+
+    [Fact]
+    public void ApplyPlacements_PeekPlacement_PassesBringToFrontFalse()
+    {
+        var fake = new FakeWindowPositioner();
+        var service = new WindowPlacementService(fake, _ => true, _ => false, null);
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)100, SlotId = "PeekLeft", TargetRect = new Rect(-1000, 0, 1120, 600), BringToFront = false }
+        };
+
+        service.ApplyPlacements(placements);
+
+        Assert.Single(fake.Calls);
+        Assert.False(fake.Calls[0].BringToFront);
+    }
 }
