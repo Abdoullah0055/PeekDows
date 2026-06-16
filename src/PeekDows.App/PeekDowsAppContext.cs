@@ -220,8 +220,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return;
             }
 
-            _logger.Info("FocusPeek layout selected");
-            var placements = _layoutEngine.CalculateFocusPeekPlacements(arrangeable, workArea, _settings);
+            _logger.Info("EnhancedPeekGrid layout selected");
+            var placements = _layoutEngine.CalculateEnhancedPeekGridPlacements(arrangeable, workArea, _settings);
             _logger.Info($"Placement count={placements.Count}");
 
             if (placements.Count == 0)
@@ -244,7 +244,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 if (!p.BringToFront)
                 {
                     var peekWindow = arrangeable.FirstOrDefault(w => w.Hwnd == p.Hwnd);
-                    _logger.Info($"Peek window {p.SlotId}: hwnd={p.Hwnd}, title={peekWindow?.Title ?? "unknown"}, rect={p.TargetRect}");
+                    _logger.Info($"Secondary window {p.SlotId}: hwnd={p.Hwnd}, title={peekWindow?.Title ?? "unknown"}, rect={p.TargetRect}");
                 }
             }
 

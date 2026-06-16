@@ -124,6 +124,123 @@ public class LayoutEngine
             .ToList();
     }
 
+    public IReadOnlyList<WindowPlacement> CalculateEnhancedPeekGridPlacements(
+        IReadOnlyList<ManagedWindow> windows,
+        Rect workArea,
+        AppSettings settings)
+    {
+        var result = new List<WindowPlacement>();
+        if (windows.Count == 0) return result;
+
+        var priorityWindows = PrioritizeForEnhancedPeekGrid(windows);
+
+        int focusMarginH = (int)(workArea.Width * 0.06);
+        int focusMarginV = (int)(workArea.Height * 0.06);
+        focusMarginH = Math.Clamp(focusMarginH, 40, 100);
+        focusMarginV = Math.Clamp(focusMarginV, 30, 70);
+
+        var focusRect = new Rect(
+            workArea.Left + focusMarginH,
+            workArea.Top + focusMarginV,
+            workArea.Width - (focusMarginH * 2),
+            workArea.Height - (focusMarginV * 2)
+        );
+
+        if (priorityWindows.Count == 1)
+        {
+            Rect targetRect;
+            string slotId;
+
+            if (settings.SingleWindowMode != "TopLeftSlot")
+            {
+                targetRect = focusRect;
+                slotId = "Focus";
+            }
+            else
+            {
+                var grid = CreateDefaultGrid(workArea);
+                var slots = CreateDefaultSlots(grid);
+                targetRect = CalculateSlotRect(slots.First(s => s.Id == "A"), grid);
+                slotId = "A";
+            }
+
+            result.Add(new WindowPlacement
+            {
+                Hwnd = priorityWindows[0].Hwnd,
+                SlotId = slotId,
+                TargetRect = targetRect,
+                BringToFront = true
+            });
+
+            return result;
+        }
+
+        var focusWindow = priorityWindows[0];
+        var secondaryWindows = priorityWindows.Skip(1).Take(3).ToList();
+
+        int secondaryW = (int)(workArea.Width * 0.67);
+        int secondaryH = (int)(workArea.Height * 0.64);
+
+        int secondaryInsetH = (int)(workArea.Width * 0.08);
+        int secondaryInsetV = (int)(workArea.Height * 0.08);
+
+        var bottomRightRect = new Rect(
+            workArea.Left + secondaryInsetH,
+            workArea.Top + workArea.Height - secondaryH - secondaryInsetV,
+            secondaryW,
+            secondaryH
+        );
+
+        var topRightRect = new Rect(
+            workArea.Left + secondaryInsetH,
+            workArea.Top + secondaryInsetV,
+            secondaryW,
+            secondaryH
+        );
+
+        var bottomLeftRect = new Rect(
+            workArea.Left + workArea.Width - secondaryW - secondaryInsetH,
+            workArea.Top + workArea.Height - secondaryH - secondaryInsetV,
+            secondaryW,
+            secondaryH
+        );
+
+        Rect[] secondaryRects = [bottomRightRect, topRightRect, bottomLeftRect];
+        string[] secondarySlotIds = ["BottomRight", "TopRight", "BottomLeft"];
+
+        for (int i = 0; i < secondaryWindows.Count; i++)
+        {
+            result.Add(new WindowPlacement
+            {
+                Hwnd = secondaryWindows[i].Hwnd,
+                SlotId = secondarySlotIds[i],
+                TargetRect = secondaryRects[i],
+                BringToFront = false
+            });
+        }
+
+        result.Add(new WindowPlacement
+        {
+            Hwnd = focusWindow.Hwnd,
+            SlotId = "Focus",
+            TargetRect = focusRect,
+            BringToFront = true
+        });
+
+        return result;
+    }
+
+    private IReadOnlyList<ManagedWindow> PrioritizeForEnhancedPeekGrid(IReadOnlyList<ManagedWindow> windows)
+    {
+        return windows
+            .OrderByDescending(w => w.IsPinned)
+            .ThenByDescending(w => w.IsForeground)
+            .ThenByDescending(w => w.LastFocusedAt ?? DateTime.MinValue)
+            .ThenByDescending(w => w.CurrentRect.Width * w.CurrentRect.Height)
+            .Take(4)
+            .ToList();
+    }
+
     public GridSpec CreateDefaultGrid(Rect workArea)
     {
         return new GridSpec

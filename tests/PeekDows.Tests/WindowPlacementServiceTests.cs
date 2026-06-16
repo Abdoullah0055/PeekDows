@@ -231,7 +231,7 @@ public class WindowPlacementServiceTests
 
         var placements = new List<WindowPlacement>
         {
-            new() { Hwnd = (IntPtr)100, SlotId = "PeekLeft", TargetRect = new Rect(-1000, 0, 1120, 600), BringToFront = false }
+            new() { Hwnd = (IntPtr)100, SlotId = "BottomRight", TargetRect = new Rect(200, 260, 860, 460), BringToFront = false }
         };
 
         service.ApplyPlacements(placements);
