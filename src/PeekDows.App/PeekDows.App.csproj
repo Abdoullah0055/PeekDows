@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PeekDows.Core\PeekDows.Core.csproj" />
+    <InternalsVisibleTo Include="PeekDows.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

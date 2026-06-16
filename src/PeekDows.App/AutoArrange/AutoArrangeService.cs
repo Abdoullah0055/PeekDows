@@ -21,6 +21,8 @@ public sealed class AutoArrangeService : IDisposable
     private bool _isArranging;
     private DateTime _lastArrangeTime = DateTime.MinValue;
     private bool _disposed;
+    private bool _baselineCreated;
+    private System.Windows.Forms.Timer? _pendingDelayTimer;
 
     public bool IsRunning { get; private set; }
 
@@ -48,6 +50,14 @@ public sealed class AutoArrangeService : IDisposable
         if (IsRunning) return;
 
         _timer.Interval = Math.Max(500, settings.WindowDetectionIntervalMs);
+
+        if (!_baselineCreated)
+        {
+            var initialDiff = _discoveryService.Refresh(_classifier);
+            _baselineCreated = true;
+            _logger.Info($"AutoArrange baseline created: {initialDiff.Current.Count} existing windows ignored (Added={initialDiff.Added.Count})");
+        }
+
         IsRunning = true;
         _timer.Start();
         _logger.Info("AutoArrangeService started");
@@ -59,6 +69,15 @@ public sealed class AutoArrangeService : IDisposable
 
         IsRunning = false;
         _timer.Stop();
+
+        if (_pendingDelayTimer != null)
+        {
+            _pendingDelayTimer.Stop();
+            _pendingDelayTimer.Dispose();
+            _pendingDelayTimer = null;
+            _logger.Info("AutoArrange pending delay timer disposed on stop");
+        }
+
         _logger.Info("AutoArrangeService stopped");
     }
 
@@ -140,12 +159,19 @@ public sealed class AutoArrangeService : IDisposable
 
     private void ScheduleArrangeAfterDelay(int delayMs)
     {
-        _logger.Info($"AutoArrange scheduling arrange after stabilization delay={delayMs}");
-        var delayTimer = new System.Windows.Forms.Timer { Interval = delayMs };
-        delayTimer.Tick += (s, e) =>
+        if (_pendingDelayTimer != null)
         {
-            delayTimer.Stop();
-            delayTimer.Dispose();
+            _logger.Info("AutoArrange delayed arrange already pending, skipping duplicate");
+            return;
+        }
+
+        _logger.Info($"AutoArrange scheduling arrange after stabilization delay={delayMs}");
+        _pendingDelayTimer = new System.Windows.Forms.Timer { Interval = delayMs };
+        _pendingDelayTimer.Tick += (s, e) =>
+        {
+            _pendingDelayTimer.Stop();
+            _pendingDelayTimer.Dispose();
+            _pendingDelayTimer = null;
 
             lock (_lock)
             {
@@ -160,7 +186,7 @@ public sealed class AutoArrangeService : IDisposable
                 TriggerArrangeNow();
             }
         };
-        delayTimer.Start();
+        _pendingDelayTimer.Start();
     }
 
     private void TriggerArrangeNow()
@@ -183,5 +209,7 @@ public sealed class AutoArrangeService : IDisposable
         _disposed = true;
         Stop();
         _timer.Dispose();
+        _pendingDelayTimer?.Dispose();
+        _pendingDelayTimer = null;
     }
 }
