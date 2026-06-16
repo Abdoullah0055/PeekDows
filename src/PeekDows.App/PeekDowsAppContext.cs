@@ -195,13 +195,18 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
             _logger.Info("Fullscreen check started");
             var fullscreenHwnds = eligibleWindows
-                .Where(w => !w.IsMinimized && w.IsVisible && IsRectFullscreen(w.CurrentRect, workArea))
+                .Where(w => _classifier.IsConsideredFullscreen(w.IsMaximized, w.IsVisible, w.IsMinimized, w.CurrentRect, workArea))
                 .Select(w => w.Hwnd)
                 .ToHashSet();
 
             foreach (var fsw in eligibleWindows.Where(w => fullscreenHwnds.Contains(w.Hwnd)))
             {
-                _logger.Info($"Skipped fullscreen window: hwnd={fsw.Hwnd}, title={fsw.Title}, rect={fsw.CurrentRect}");
+                _logger.Info($"Skipped fullscreen non-maximized window: hwnd={fsw.Hwnd}, title={fsw.Title}, rect={fsw.CurrentRect}");
+            }
+
+            foreach (var mw in eligibleWindows.Where(w => w.IsMaximized && IsRectFullscreen(w.CurrentRect, workArea)))
+            {
+                _logger.Info($"Maximized window will be restored and arranged: hwnd={mw.Hwnd}, title={mw.Title}");
             }
 
             _logger.Info($"Fullscreen windows skipped count={fullscreenHwnds.Count}");

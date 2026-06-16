@@ -147,4 +147,62 @@ public class WindowPlacementServiceTests
         Assert.Equal(0, result.SucceededCount);
         Assert.Empty(fake.Calls);
     }
+
+    [Fact]
+    public void ApplyPlacements_MaximizedWindow_RestoresBeforeSetWindowPos()
+    {
+        var fake = new FakeWindowPositioner();
+        var restored = new List<IntPtr>();
+        Func<IntPtr, bool> isMaximized = hwnd => { restored.Add(hwnd); return hwnd == (IntPtr)100; };
+        var service = new WindowPlacementService(fake, _ => true, isMaximized, null);
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)100, SlotId = "A", TargetRect = new Rect(0, 0, 640, 360) }
+        };
+
+        var result = service.ApplyPlacements(placements);
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Contains((IntPtr)100, restored);
+        Assert.Single(fake.Calls);
+    }
+
+    [Fact]
+    public void ApplyPlacements_NormalWindow_DoesNotCallRestore()
+    {
+        var fake = new FakeWindowPositioner();
+        var restoreChecks = new List<IntPtr>();
+        Func<IntPtr, bool> isMaximized = hwnd => { restoreChecks.Add(hwnd); return false; };
+        var service = new WindowPlacementService(fake, _ => true, isMaximized, null);
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)100, SlotId = "A", TargetRect = new Rect(0, 0, 640, 360) }
+        };
+
+        var result = service.ApplyPlacements(placements);
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Single(restoreChecks);
+        Assert.Single(fake.Calls);
+    }
+
+    [Fact]
+    public void ApplyPlacements_RestoreFailure_DoesNotStopSetWindowPos()
+    {
+        var fake = new FakeWindowPositioner();
+        Func<IntPtr, bool> isMaximized = hwnd => true;
+        var service = new WindowPlacementService(fake, _ => true, isMaximized, null);
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)100, SlotId = "A", TargetRect = new Rect(0, 0, 640, 360) }
+        };
+
+        var result = service.ApplyPlacements(placements);
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Single(fake.Calls);
+    }
 }

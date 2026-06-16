@@ -80,4 +80,15 @@ public class WindowClassifier
             && window.CurrentRect.Right >= monitorWorkArea.Right
             && window.CurrentRect.Bottom >= monitorWorkArea.Bottom;
     }
+
+    public bool IsConsideredFullscreen(bool isMaximized, bool isVisible, bool isMinimized, Rect windowRect, Rect monitorWorkArea)
+    {
+        if (isMaximized) return false;
+        if (!isVisible || isMinimized) return false;
+
+        return windowRect.Left <= monitorWorkArea.Left
+            && windowRect.Top <= monitorWorkArea.Top
+            && windowRect.Right >= monitorWorkArea.Right
+            && windowRect.Bottom >= monitorWorkArea.Bottom;
+    }
 }

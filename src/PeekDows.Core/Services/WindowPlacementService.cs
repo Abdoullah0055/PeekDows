@@ -10,20 +10,24 @@ public sealed class WindowPlacementService
 {
     private readonly IWindowPositioner _positioner;
     private readonly Func<IntPtr, bool> _isWindowValid;
+    private readonly Func<IntPtr, bool> _isWindowMaximized;
     private readonly FileLogger? _logger;
 
-    public WindowPlacementService() : this(new Win32WindowPositioner(), hwnd => NativeMethods.IsWindow(hwnd), null) { }
+    public WindowPlacementService() : this(new Win32WindowPositioner(), hwnd => NativeMethods.IsWindow(hwnd), hwnd => NativeMethods.IsZoomed(hwnd), null) { }
 
-    public WindowPlacementService(FileLogger logger) : this(new Win32WindowPositioner(), hwnd => NativeMethods.IsWindow(hwnd), logger) { }
+    public WindowPlacementService(FileLogger logger) : this(new Win32WindowPositioner(), hwnd => NativeMethods.IsWindow(hwnd), hwnd => NativeMethods.IsZoomed(hwnd), logger) { }
 
-    internal WindowPlacementService(IWindowPositioner positioner) : this(positioner, _ => true, null) { }
+    internal WindowPlacementService(IWindowPositioner positioner) : this(positioner, _ => true, _ => false, null) { }
 
-    internal WindowPlacementService(IWindowPositioner positioner, Func<IntPtr, bool> isWindowValid) : this(positioner, isWindowValid, null) { }
+    internal WindowPlacementService(IWindowPositioner positioner, Func<IntPtr, bool> isWindowValid) : this(positioner, isWindowValid, _ => false, null) { }
 
-    internal WindowPlacementService(IWindowPositioner positioner, Func<IntPtr, bool> isWindowValid, FileLogger? logger)
+    internal WindowPlacementService(IWindowPositioner positioner, Func<IntPtr, bool> isWindowValid, FileLogger? logger) : this(positioner, isWindowValid, _ => false, logger) { }
+
+    internal WindowPlacementService(IWindowPositioner positioner, Func<IntPtr, bool> isWindowValid, Func<IntPtr, bool> isWindowMaximized, FileLogger? logger)
     {
         _positioner = positioner;
         _isWindowValid = isWindowValid;
+        _isWindowMaximized = isWindowMaximized;
         _logger = logger;
     }
 
@@ -77,6 +81,14 @@ public sealed class WindowPlacementService
                     errors.Add(msg);
                     _logger?.Warn($"Placement skipped: {msg}");
                     continue;
+                }
+
+                if (_isWindowMaximized(placement.Hwnd))
+                {
+                    _logger?.Info($"Maximized window detected: hwnd={placement.Hwnd}, slot={placement.SlotId}");
+                    _logger?.Info($"Restoring maximized window before placement: hwnd={placement.Hwnd}, slot={placement.SlotId}");
+                    bool restoreResult = NativeMethods.ShowWindow(placement.Hwnd, NativeMethods.SW_RESTORE);
+                    _logger?.Info($"ShowWindow(SW_RESTORE) result={restoreResult} for hwnd={placement.Hwnd}");
                 }
 
                 bool result = _positioner.SetWindowPosition(placement.Hwnd, placement.TargetRect);

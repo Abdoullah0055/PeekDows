@@ -306,4 +306,37 @@ public class WindowClassifierTests
 
         Assert.False(_classifier.IsEligible(window));
     }
+
+    [Fact]
+    public void IsConsideredFullscreen_MaximizedWindowCoveringWorkArea_IsNotSkipped()
+    {
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var windowRect = new Rect(-7, -7, 1934, 1094);
+
+        Assert.False(_classifier.IsConsideredFullscreen(
+            isMaximized: true, isVisible: true, isMinimized: false,
+            windowRect: windowRect, monitorWorkArea: workArea));
+    }
+
+    [Fact]
+    public void IsConsideredFullscreen_NonMaximizedCoveringWorkArea_IsSkipped()
+    {
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var windowRect = new Rect(-7, -7, 1934, 1094);
+
+        Assert.True(_classifier.IsConsideredFullscreen(
+            isMaximized: false, isVisible: true, isMinimized: false,
+            windowRect: windowRect, monitorWorkArea: workArea));
+    }
+
+    [Fact]
+    public void IsConsideredFullscreen_NormalWindow_NotSkipped()
+    {
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var windowRect = new Rect(0, 0, 960, 540);
+
+        Assert.False(_classifier.IsConsideredFullscreen(
+            isMaximized: false, isVisible: true, isMinimized: false,
+            windowRect: windowRect, monitorWorkArea: workArea));
+    }
 }
