@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Windows.Forms;
 using PeekDows.App.Hotkeys;
@@ -41,7 +42,10 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _hotkeyService = new HotkeyService();
         _hotkeyService.ArrangeNowRequested += OnArrangeNowRequested;
 
-        bool hotkeyRegistered = _hotkeyService.RegisterArrangeHotkey();
+        if (!_hotkeyService.RegisterArrangeHotkey())
+        {
+            Debug.WriteLine("PeekDows: failed to register Ctrl+Alt+Space hotkey. It may already be in use.");
+        }
 
         _trayController = new TrayIconController(this);
     }
@@ -116,10 +120,20 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
             var placements = _layoutEngine.CalculatePlacements(arrangeable, workArea, _settings);
 
-            _placementService.ApplyPlacements(placements);
+            var result = _placementService.ApplyPlacements(placements);
+
+            if (result.FailedCount > 0)
+            {
+                Debug.WriteLine($"PeekDows: Arrange completed with failures. Attempted={result.AttemptedCount}, Succeeded={result.SucceededCount}, Failed={result.FailedCount}");
+                foreach (var error in result.Errors)
+                {
+                    Debug.WriteLine($"PeekDows: {error}");
+                }
+            }
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine($"PeekDows: ArrangeNow failed: {ex}");
         }
     }
 
