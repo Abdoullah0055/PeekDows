@@ -30,6 +30,10 @@ public class TrayMenuBuilder
         pauseResumeItem.Click += (s, e) => _controller.TogglePause();
         menu.Items.Add(pauseResumeItem);
 
+        var autoArrangeItem = new ToolStripMenuItem("Enable Auto Arrange");
+        autoArrangeItem.Click += (s, e) => _controller.ToggleAutoArrange();
+        menu.Items.Add(autoArrangeItem);
+
         menu.Items.Add(new ToolStripSeparator());
 
         var openLogItem = new ToolStripMenuItem("Open Log File");
@@ -52,7 +56,7 @@ public class TrayMenuBuilder
         exitItem.Click += (s, e) => _controller.Exit();
         menu.Items.Add(exitItem);
 
-        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem);
+        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem);
 
         return menu;
     }

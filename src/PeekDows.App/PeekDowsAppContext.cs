@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Windows.Forms;
+using PeekDows.App.AutoArrange;
 using PeekDows.App.Hotkeys;
 using PeekDows.App.Tray;
 using PeekDows.Core.Models;
@@ -21,13 +22,19 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private readonly HotkeyService _hotkeyService;
     private readonly TrayIconController _trayController;
     private readonly FileLogger _logger;
+    private readonly AutoArrangeService _autoArrangeService;
 
     private RuntimeState _state = RuntimeState.Running;
     private AppSettings _settings;
 
     public RuntimeState State => _state;
 
+    public AppSettings CurrentSettings => _settings;
+
+    public bool IsAutoArrangeRunning => _autoArrangeService.IsRunning;
+
     public event Action<RuntimeState>? StateChanged;
+    public event Action<bool>? AutoArrangeChanged;
 
     public string LogFilePath => _logger.LogFilePath;
 
@@ -62,6 +69,21 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
         _trayController = new TrayIconController(this, _logger);
         _logger.Info("Tray initialized");
+
+        _autoArrangeService = new AutoArrangeService(
+            _discoveryService, _classifier, this, _logger);
+
+        if (_settings.AutoArrange)
+        {
+            _autoArrangeService.Start(_settings);
+        }
+
+        if (_settings.ArrangeOnStartup)
+        {
+            _logger.Info("ArrangeOnStartup=true, triggering initial arrange");
+            ArrangeNow();
+        }
+
         _logger.Info("PeekDows ready");
     }
 
@@ -91,6 +113,24 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         StateChanged?.Invoke(_state);
     }
 
+    public void ToggleAutoArrange()
+    {
+        _settings.AutoArrange = !_settings.AutoArrange;
+        _settingsService.Save(_settings);
+        _logger.Info($"AutoArrange toggled to {_settings.AutoArrange}");
+
+        if (_settings.AutoArrange)
+        {
+            _autoArrangeService.Start(_settings);
+        }
+        else
+        {
+            _autoArrangeService.Stop();
+        }
+
+        AutoArrangeChanged?.Invoke(_settings.AutoArrange);
+    }
+
     public void OpenSettings()
     {
         _trayController.OpenSettings();
@@ -99,6 +139,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     public void Exit()
     {
         _logger.Info("PeekDows exiting");
+        _autoArrangeService.Dispose();
         _hotkeyService.Dispose();
         Application.Exit();
     }
@@ -269,6 +310,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     {
         if (disposing)
         {
+            _autoArrangeService.Dispose();
             _hotkeyService.Dispose();
             _trayController.Dispose();
         }

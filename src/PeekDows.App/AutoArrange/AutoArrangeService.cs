@@ -1,0 +1,187 @@
+using System;
+using System.Windows.Forms;
+using PeekDows.App.Tray;
+using PeekDows.Core.Models;
+using PeekDows.Core.Services;
+
+namespace PeekDows.App.AutoArrange;
+
+public sealed class AutoArrangeService : IDisposable
+{
+    private const int AutoArrangeCooldownMs = 1000;
+
+    private readonly WindowDiscoveryService _discoveryService;
+    private readonly WindowClassifier _classifier;
+    private readonly AutoArrangeDecisionEngine _decisionEngine;
+    private readonly IPeekDowsController _controller;
+    private readonly FileLogger _logger;
+    private readonly System.Windows.Forms.Timer _timer;
+    private readonly object _lock = new();
+
+    private bool _isArranging;
+    private DateTime _lastArrangeTime = DateTime.MinValue;
+    private bool _disposed;
+
+    public bool IsRunning { get; private set; }
+
+    public AutoArrangeService(
+        WindowDiscoveryService discoveryService,
+        WindowClassifier classifier,
+        IPeekDowsController controller,
+        FileLogger logger)
+    {
+        _discoveryService = discoveryService;
+        _classifier = classifier;
+        _decisionEngine = new AutoArrangeDecisionEngine();
+        _controller = controller;
+        _logger = logger;
+
+        _timer = new System.Windows.Forms.Timer
+        {
+            Interval = 1000
+        };
+        _timer.Tick += OnTimerTick;
+    }
+
+    public void Start(AppSettings settings)
+    {
+        if (IsRunning) return;
+
+        _timer.Interval = Math.Max(500, settings.WindowDetectionIntervalMs);
+        IsRunning = true;
+        _timer.Start();
+        _logger.Info("AutoArrangeService started");
+    }
+
+    public void Stop()
+    {
+        if (!IsRunning) return;
+
+        IsRunning = false;
+        _timer.Stop();
+        _logger.Info("AutoArrangeService stopped");
+    }
+
+    private void OnTimerTick(object? sender, EventArgs e)
+    {
+        Tick();
+    }
+
+    internal void Tick()
+    {
+        lock (_lock)
+        {
+            if (!IsRunning) return;
+
+            var settings = _controller.CurrentSettings;
+            if (settings == null) return;
+
+            _logger.Info("AutoArrange tick");
+
+            if (!settings.Enabled)
+            {
+                _logger.Info("AutoArrange skipped: disabled");
+                return;
+            }
+
+            if (_controller.State == RuntimeState.Paused)
+            {
+                _logger.Info("AutoArrange skipped: paused");
+                return;
+            }
+
+            if (!settings.AutoArrange)
+            {
+                _logger.Info("AutoArrange skipped: AutoArrange=false");
+                return;
+            }
+
+            if (_isArranging)
+            {
+                _logger.Info("AutoArrange skipped because arrange already running");
+                return;
+            }
+
+            if ((DateTime.Now - _lastArrangeTime).TotalMilliseconds < AutoArrangeCooldownMs)
+            {
+                _logger.Info("AutoArrange skipped: cooldown active");
+                return;
+            }
+
+            var diff = _discoveryService.Refresh(_classifier);
+
+            var decision = _decisionEngine.Decide(
+                diff,
+                settings.Enabled,
+                settings.AutoArrange,
+                _controller.State == RuntimeState.Paused,
+                _isArranging,
+                settings.ArrangeAfterWindowCloses);
+
+            switch (decision)
+            {
+                case AutoArrangeDecision.ArrangeAfterDelay:
+                    _logger.Info($"AutoArrange detected added windows count={diff.Added.Count}");
+                    ScheduleArrangeAfterDelay(settings.NewWindowStabilizationDelayMs);
+                    break;
+
+                case AutoArrangeDecision.ArrangeImmediately:
+                    _logger.Info($"AutoArrange detected removed windows count={diff.Removed.Count}");
+                    _logger.Info("AutoArrange triggering ArrangeNow");
+                    TriggerArrangeNow();
+                    break;
+
+                case AutoArrangeDecision.NoOp:
+                default:
+                    break;
+            }
+        }
+    }
+
+    private void ScheduleArrangeAfterDelay(int delayMs)
+    {
+        _logger.Info($"AutoArrange scheduling arrange after stabilization delay={delayMs}");
+        var delayTimer = new System.Windows.Forms.Timer { Interval = delayMs };
+        delayTimer.Tick += (s, e) =>
+        {
+            delayTimer.Stop();
+            delayTimer.Dispose();
+
+            lock (_lock)
+            {
+                if (!IsRunning) return;
+
+                var settings = _controller.CurrentSettings;
+                if (settings == null) return;
+                if (!settings.Enabled || !settings.AutoArrange || _controller.State == RuntimeState.Paused)
+                    return;
+
+                _logger.Info("AutoArrange triggering ArrangeNow (after stabilization)");
+                TriggerArrangeNow();
+            }
+        };
+        delayTimer.Start();
+    }
+
+    private void TriggerArrangeNow()
+    {
+        _isArranging = true;
+        try
+        {
+            _controller.ArrangeNow();
+        }
+        finally
+        {
+            _isArranging = false;
+            _lastArrangeTime = DateTime.Now;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        Stop();
+        _timer.Dispose();
+    }
+}

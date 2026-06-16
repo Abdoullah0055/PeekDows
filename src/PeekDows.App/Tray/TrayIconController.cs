@@ -17,6 +17,7 @@ public class TrayIconController : IDisposable
 
     private ToolStripMenuItem? _statusItem;
     private ToolStripMenuItem? _pauseResumeItem;
+    private ToolStripMenuItem? _autoArrangeItem;
 
     public TrayIconController(IPeekDowsController controller) : this(controller, null) { }
 
@@ -37,15 +38,19 @@ public class TrayIconController : IDisposable
         _notifyIcon.DoubleClick += (s, e) => _controller.OpenSettings();
 
         _controller.StateChanged += OnStateChanged;
+        _controller.AutoArrangeChanged += OnAutoArrangeChanged;
 
         UpdateMenuState(_controller.State);
+        UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
     }
 
-    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem)
+    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem, ToolStripMenuItem autoArrangeItem)
     {
         _statusItem = statusItem;
         _pauseResumeItem = pauseResumeItem;
+        _autoArrangeItem = autoArrangeItem;
         UpdateMenuState(_controller.State);
+        UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
     }
 
     public void OpenSettings()
@@ -71,6 +76,11 @@ public class TrayIconController : IDisposable
         _notifyIcon.Text = state == RuntimeState.Paused ? "PeekDows (Paused)" : "PeekDows";
     }
 
+    private void OnAutoArrangeChanged(bool isAutoArrange)
+    {
+        UpdateAutoArrangeMenu(isAutoArrange);
+    }
+
     private void UpdateMenuState(RuntimeState state)
     {
         if (_statusItem != null)
@@ -81,6 +91,14 @@ public class TrayIconController : IDisposable
         if (_pauseResumeItem != null)
         {
             _pauseResumeItem.Text = state == RuntimeState.Paused ? "Resume" : "Pause";
+        }
+    }
+
+    private void UpdateAutoArrangeMenu(bool isAutoArrange)
+    {
+        if (_autoArrangeItem != null)
+        {
+            _autoArrangeItem.Text = isAutoArrange ? "Disable Auto Arrange" : "Enable Auto Arrange";
         }
     }
 
