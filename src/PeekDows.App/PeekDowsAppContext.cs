@@ -220,8 +220,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return;
             }
 
-            _logger.Info("EnhancedPeekGrid layout selected");
-            var placements = _layoutEngine.CalculateEnhancedPeekGridPlacements(arrangeable, workArea, _settings);
+            _logger.Info("ClassicPeekGrid layout selected");
+            var placements = _layoutEngine.CalculateClassicPeekGridPlacements(arrangeable, workArea, _settings);
             _logger.Info($"Placement count={placements.Count}");
 
             if (placements.Count == 0)
@@ -230,22 +230,10 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return;
             }
 
-            var focusPlacement = placements.FirstOrDefault(p => p.BringToFront);
-            if (focusPlacement != null && focusPlacement.Hwnd != IntPtr.Zero)
-            {
-                var focusWindow = arrangeable.FirstOrDefault(w => w.Hwnd == focusPlacement.Hwnd);
-                _logger.Info($"Focus window selected: hwnd={focusPlacement.Hwnd}, title={focusWindow?.Title ?? "unknown"}");
-                _logger.Info($"Focus rect: {focusPlacement.TargetRect}");
-                _logger.Info("BringToFront=true for focus window");
-            }
-
             foreach (var p in placements)
             {
-                if (!p.BringToFront)
-                {
-                    var peekWindow = arrangeable.FirstOrDefault(w => w.Hwnd == p.Hwnd);
-                    _logger.Info($"Secondary window {p.SlotId}: hwnd={p.Hwnd}, title={peekWindow?.Title ?? "unknown"}, rect={p.TargetRect}");
-                }
+                var window = arrangeable.FirstOrDefault(w => w.Hwnd == p.Hwnd);
+                _logger.Info($"Placement {p.SlotId}: hwnd={p.Hwnd}, title={window?.Title ?? "unknown"}, rect={p.TargetRect}, bringToFront={p.BringToFront}");
             }
 
             var result = _placementService.ApplyPlacements(placements);

@@ -423,219 +423,257 @@ public class LayoutEngineTests
     }
 
     [Fact]
-    public void EnhancedPeekGrid_OneWindow_ReturnsFocus()
+    public void ClassicPeekGrid_1280x720_ReturnsExpectedRects()
     {
         var settings = new AppSettings();
         var workArea = new Rect(0, 0, 1280, 720);
         var windows = new List<ManagedWindow>
         {
-            new() { Hwnd = (IntPtr)1, IsVisible = true, FirstSeenAt = DateTime.Now }
-        };
-
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
-
-        Assert.Single(placements);
-        Assert.Equal("Focus", placements[0].SlotId);
-    }
-
-    [Fact]
-    public void EnhancedPeekGrid_TwoWindows_ReturnsFocusAndBottomRight()
-    {
-        var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1280, 720);
-        var windows = new List<ManagedWindow>
-        {
-            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
-        };
-
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
-
-        Assert.Equal(2, placements.Count);
-        Assert.Contains(placements, p => p.SlotId == "Focus");
-        Assert.Contains(placements, p => p.SlotId == "BottomRight");
-    }
-
-    [Fact]
-    public void EnhancedPeekGrid_ThreeWindows_ReturnsFocusBottomRightTopRight()
-    {
-        var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1280, 720);
-        var windows = new List<ManagedWindow>
-        {
-            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now }
-        };
-
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
-
-        Assert.Equal(3, placements.Count);
-        Assert.Contains(placements, p => p.SlotId == "Focus");
-        Assert.Contains(placements, p => p.SlotId == "BottomRight");
-        Assert.Contains(placements, p => p.SlotId == "TopRight");
-    }
-
-    [Fact]
-    public void EnhancedPeekGrid_FourWindows_ReturnsFocusBottomRightTopRightBottomLeft()
-    {
-        var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1280, 720);
-        var windows = new List<ManagedWindow>
-        {
-            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
             new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
             new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
             new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
         };
 
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
 
         Assert.Equal(4, placements.Count);
-        Assert.Contains(placements, p => p.SlotId == "Focus");
-        Assert.Contains(placements, p => p.SlotId == "BottomRight");
-        Assert.Contains(placements, p => p.SlotId == "TopRight");
-        Assert.Contains(placements, p => p.SlotId == "BottomLeft");
+
+        var a = placements.First(p => p.SlotId == "A");
+        Assert.Equal(0, a.TargetRect.Left);
+        Assert.Equal(0, a.TargetRect.Top);
+        Assert.Equal(1040, a.TargetRect.Width);
+        Assert.Equal(521, a.TargetRect.Height);
+
+        var b = placements.First(p => p.SlotId == "B");
+        Assert.Equal(240, b.TargetRect.Left);
+        Assert.Equal(161, b.TargetRect.Top);
+        Assert.Equal(1040, b.TargetRect.Width);
+        Assert.Equal(521, b.TargetRect.Height);
+
+        var c = placements.First(p => p.SlotId == "C");
+        Assert.Equal(240, c.TargetRect.Left);
+        Assert.Equal(0, c.TargetRect.Top);
+        Assert.Equal(1040, c.TargetRect.Width);
+        Assert.Equal(521, c.TargetRect.Height);
+
+        var d = placements.First(p => p.SlotId == "D");
+        Assert.Equal(0, d.TargetRect.Left);
+        Assert.Equal(161, d.TargetRect.Top);
+        Assert.Equal(1040, d.TargetRect.Width);
+        Assert.Equal(521, d.TargetRect.Height);
     }
 
     [Fact]
-    public void EnhancedPeekGrid_FocusWindow_IsLargest()
+    public void ClassicPeekGrid_SecondariesAreAnchoredToCorners()
     {
         var settings = new AppSettings();
         var workArea = new Rect(0, 0, 1280, 720);
         var windows = new List<ManagedWindow>
         {
-            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
-        };
-
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
-        var focus = placements.First(p => p.SlotId == "Focus");
-        var secondary = placements.First(p => p.SlotId != "Focus");
-
-        int focusArea = focus.TargetRect.Width * focus.TargetRect.Height;
-        int secondaryArea = secondary.TargetRect.Width * secondary.TargetRect.Height;
-
-        Assert.True(focusArea > secondaryArea);
-    }
-
-    [Fact]
-    public void EnhancedPeekGrid_SecondaryWindowsRemainClearlyVisible()
-    {
-        var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1280, 720);
-        var windows = new List<ManagedWindow>
-        {
-            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
             new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now }
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
         };
 
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
-        var secondaries = placements.Where(p => p.SlotId != "Focus").ToList();
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
 
-        foreach (var sec in secondaries)
+        var a = placements.First(p => p.SlotId == "A");
+        Assert.Equal(workArea.Left, a.TargetRect.Left);
+        Assert.Equal(workArea.Top, a.TargetRect.Top);
+
+        var b = placements.First(p => p.SlotId == "B");
+        Assert.True(b.TargetRect.Left > workArea.Left, "B should be offset from left");
+        Assert.True(b.TargetRect.Top > workArea.Top, "B should be offset from top");
+
+        var c = placements.First(p => p.SlotId == "C");
+        Assert.True(c.TargetRect.Left > workArea.Left, "C should be offset from left");
+        Assert.Equal(workArea.Top, c.TargetRect.Top);
+
+        var d = placements.First(p => p.SlotId == "D");
+        Assert.Equal(workArea.Left, d.TargetRect.Left);
+        Assert.True(d.TargetRect.Top > workArea.Top, "D should be offset from top");
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_DoesNotPlaceSecondariesInsideFocusOnly()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
         {
-            int visibleLeft = Math.Max(sec.TargetRect.Left, workArea.Left);
-            int visibleTop = Math.Max(sec.TargetRect.Top, workArea.Top);
-            int visibleRight = Math.Min(sec.TargetRect.Right, workArea.Right);
-            int visibleBottom = Math.Min(sec.TargetRect.Bottom, workArea.Bottom);
-            int visibleW = Math.Max(0, visibleRight - visibleLeft);
-            int visibleH = Math.Max(0, visibleBottom - visibleTop);
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
 
-            Assert.True(visibleW >= 200, $"Secondary {sec.SlotId} visible width too small: {visibleW}px");
-            Assert.True(visibleH >= 150, $"Secondary {sec.SlotId} visible height too small: {visibleH}px");
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        foreach (var sec in placements.Where(p => p.SlotId != "A"))
+        {
+            bool entirelyInsideA =
+                sec.TargetRect.Left >= placements[0].TargetRect.Left &&
+                sec.TargetRect.Top >= placements[0].TargetRect.Top &&
+                sec.TargetRect.Right <= placements[0].TargetRect.Right &&
+                sec.TargetRect.Bottom <= placements[0].TargetRect.Bottom;
+
+            Assert.False(entirelyInsideA, $"Secondary {sec.SlotId} is entirely contained inside slot A — would be hidden");
         }
     }
 
     [Fact]
-    public void EnhancedPeekGrid_NoWindowMostlyOffscreen()
+    public void ClassicPeekGrid_NoForcedFocusBringToFront()
     {
         var settings = new AppSettings();
         var workArea = new Rect(0, 0, 1280, 720);
         var windows = new List<ManagedWindow>
         {
-            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
             new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
             new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now }
         };
 
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
-        var secondaries = placements.Where(p => p.SlotId != "Focus").ToList();
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
 
-        foreach (var sec in secondaries)
+        Assert.All(placements, p => Assert.False(p.BringToFront));
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_OneWindow_FullWorkArea()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
         {
-            int totalArea = sec.TargetRect.Width * sec.TargetRect.Height;
-            int visibleLeft = Math.Max(sec.TargetRect.Left, workArea.Left);
-            int visibleTop = Math.Max(sec.TargetRect.Top, workArea.Top);
-            int visibleRight = Math.Min(sec.TargetRect.Right, workArea.Right);
-            int visibleBottom = Math.Min(sec.TargetRect.Bottom, workArea.Bottom);
-            int visibleW = Math.Max(0, visibleRight - visibleLeft);
-            int visibleH = Math.Max(0, visibleBottom - visibleTop);
-            int visibleArea = visibleW * visibleH;
-            double ratio = (double)visibleArea / totalArea;
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now }
+        };
 
-            Assert.True(ratio >= 0.25, $"Secondary {sec.SlotId} is mostly offscreen: only {ratio:P0} visible");
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        Assert.Single(placements);
+        Assert.Equal("FocusLarge", placements[0].SlotId);
+        Assert.Equal(workArea, placements[0].TargetRect);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_TwoWindows_A_and_B()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        Assert.Equal(2, placements.Count);
+        Assert.Equal("A", placements[0].SlotId);
+        Assert.Equal("B", placements[1].SlotId);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_FourWindows_AllSlots()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        Assert.Equal(4, placements.Count);
+        var slotIds = placements.Select(p => p.SlotId).ToList();
+        Assert.Contains("A", slotIds);
+        Assert.Contains("B", slotIds);
+        Assert.Contains("C", slotIds);
+        Assert.Contains("D", slotIds);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_SecondariesHaveVisibleAreaOutsideA()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+        var aRect = placements.First(p => p.SlotId == "A").TargetRect;
+
+        foreach (var sec in placements.Where(p => p.SlotId != "A"))
+        {
+            int outsideLeft = Math.Max(0, aRect.Left - sec.TargetRect.Left);
+            int outsideTop = Math.Max(0, aRect.Top - sec.TargetRect.Top);
+            int outsideRight = Math.Max(0, sec.TargetRect.Right - aRect.Right);
+            int outsideBottom = Math.Max(0, sec.TargetRect.Bottom - aRect.Bottom);
+
+            bool hasVisibleOutside = outsideLeft > 0 || outsideTop > 0 || outsideRight > 0 || outsideBottom > 0;
+            Assert.True(hasVisibleOutside, $"Secondary {sec.SlotId} has no visible area outside slot A");
         }
     }
 
     [Fact]
-    public void EnhancedPeekGrid_SecondaryWindows_AreNotAlmostFullyOffscreen()
+    public void ClassicPeekGrid_WindowsRemainOnScreen()
     {
         var settings = new AppSettings();
         var workArea = new Rect(0, 0, 1280, 720);
         var windows = new List<ManagedWindow>
         {
-            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
-        };
-
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
-        var secondary = placements.First(p => p.SlotId != "Focus");
-
-        int visibleLeft = Math.Max(secondary.TargetRect.Left, workArea.Left);
-        int visibleTop = Math.Max(secondary.TargetRect.Top, workArea.Top);
-        int visibleRight = Math.Min(secondary.TargetRect.Right, workArea.Right);
-        int visibleBottom = Math.Min(secondary.TargetRect.Bottom, workArea.Bottom);
-        int visibleW = Math.Max(0, visibleRight - visibleLeft);
-        int visibleH = Math.Max(0, visibleBottom - visibleTop);
-
-        Assert.True(visibleW > 150, $"Secondary window only {visibleW}px visible horizontally — too small");
-        Assert.True(visibleH > 120, $"Secondary window only {visibleH}px visible vertically — too small");
-    }
-
-    [Fact]
-    public void EnhancedPeekGrid_FocusBringToFrontTrue()
-    {
-        var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1280, 720);
-        var windows = new List<ManagedWindow>
-        {
-            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
-        };
-
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
-        var focus = placements.First(p => p.SlotId == "Focus");
-
-        Assert.True(focus.BringToFront);
-    }
-
-    [Fact]
-    public void EnhancedPeekGrid_SecondaryBringToFrontFalse()
-    {
-        var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1280, 720);
-        var windows = new List<ManagedWindow>
-        {
-            new() { Hwnd = (IntPtr)1, IsForeground = true, FirstSeenAt = DateTime.Now, LastFocusedAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
             new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now }
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
         };
 
-        var placements = _engine.CalculateEnhancedPeekGridPlacements(windows, workArea, settings);
-        var secondaries = placements.Where(p => p.SlotId != "Focus").ToList();
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
 
-        Assert.All(secondaries, p => Assert.False(p.BringToFront));
+        foreach (var p in placements)
+        {
+            Assert.True(p.TargetRect.Left >= workArea.Left, $"{p.SlotId} left out of bounds");
+            Assert.True(p.TargetRect.Top >= workArea.Top, $"{p.SlotId} top out of bounds");
+            Assert.True(p.TargetRect.Right <= workArea.Right, $"{p.SlotId} right out of bounds");
+            Assert.True(p.TargetRect.Bottom <= workArea.Bottom, $"{p.SlotId} bottom out of bounds");
+        }
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_SecondariesAreNotAlmostFullyOffscreen()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1280, 720);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        foreach (var p in placements)
+        {
+            int visibleLeft = Math.Max(p.TargetRect.Left, workArea.Left);
+            int visibleTop = Math.Max(p.TargetRect.Top, workArea.Top);
+            int visibleRight = Math.Min(p.TargetRect.Right, workArea.Right);
+            int visibleBottom = Math.Min(p.TargetRect.Bottom, workArea.Bottom);
+            int visibleW = Math.Max(0, visibleRight - visibleLeft);
+            int visibleH = Math.Max(0, visibleBottom - visibleTop);
+
+            Assert.True(visibleW > 150, $"Window {p.SlotId} only {visibleW}px visible horizontally");
+            Assert.True(visibleH > 120, $"Window {p.SlotId} only {visibleH}px visible vertically");
+        }
     }
 }

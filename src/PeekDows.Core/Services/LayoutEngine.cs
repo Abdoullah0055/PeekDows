@@ -7,6 +7,86 @@ namespace PeekDows.Core.Services;
 
 public class LayoutEngine
 {
+    public IReadOnlyList<WindowPlacement> CalculateClassicPeekGridPlacements(
+        IReadOnlyList<ManagedWindow> windows,
+        Rect workArea,
+        AppSettings settings)
+    {
+        var result = new List<WindowPlacement>();
+        if (windows.Count == 0) return result;
+
+        var priorityWindows = PrioritizeForClassicPeekGrid(windows);
+
+        double cellW = workArea.Width / 4.0;
+        double cellH = workArea.Height / 3.0;
+
+        int spanW = (int)Math.Round(cellW * 3.25);
+        int spanH = (int)Math.Round(cellH * 2.17);
+        int offsetC = (int)Math.Round(cellW * 0.75);
+        int offsetR = (int)Math.Round(cellH * 0.67);
+
+        var slotRects = new Dictionary<string, Rect>
+        {
+            ["A"] = new Rect(workArea.Left, workArea.Top, spanW, spanH),
+            ["B"] = new Rect(workArea.Left + offsetC, workArea.Top + offsetR, spanW, spanH),
+            ["C"] = new Rect(workArea.Left + offsetC, workArea.Top, spanW, spanH),
+            ["D"] = new Rect(workArea.Left, workArea.Top + offsetR, spanW, spanH)
+        };
+
+        if (priorityWindows.Count == 1)
+        {
+            Rect targetRect;
+            string slotId;
+
+            if (settings.SingleWindowMode != "TopLeftSlot")
+            {
+                targetRect = workArea;
+                slotId = "FocusLarge";
+            }
+            else
+            {
+                targetRect = slotRects["A"];
+                slotId = "A";
+            }
+
+            result.Add(new WindowPlacement
+            {
+                Hwnd = priorityWindows[0].Hwnd,
+                SlotId = slotId,
+                TargetRect = targetRect,
+                BringToFront = false
+            });
+
+            return result;
+        }
+
+        string[] slotOrder = { "A", "B", "C", "D" };
+
+        for (int i = 0; i < priorityWindows.Count; i++)
+        {
+            var slotId = slotOrder[i % slotOrder.Length];
+            result.Add(new WindowPlacement
+            {
+                Hwnd = priorityWindows[i].Hwnd,
+                SlotId = slotId,
+                TargetRect = slotRects[slotId],
+                BringToFront = false
+            });
+        }
+
+        return result;
+    }
+
+    private IReadOnlyList<ManagedWindow> PrioritizeForClassicPeekGrid(IReadOnlyList<ManagedWindow> windows)
+    {
+        return windows
+            .OrderByDescending(w => w.IsPinned)
+            .ThenByDescending(w => w.IsForeground)
+            .ThenByDescending(w => w.LastFocusedAt ?? w.FirstSeenAt)
+            .Take(4)
+            .ToList();
+    }
+
     public IReadOnlyList<WindowPlacement> CalculateFocusPeekPlacements(
         IReadOnlyList<ManagedWindow> windows,
         Rect workArea,
