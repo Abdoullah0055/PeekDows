@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 using PeekDows.App.Settings;
 using PeekDows.Core.Models;
@@ -13,6 +14,7 @@ public class TrayIconController : IDisposable
     private readonly TrayMenuBuilder _menuBuilder;
     private readonly IPeekDowsController _controller;
     private readonly FileLogger? _logger;
+    private readonly Icon _trayIcon;
     private SettingsWindow? _settingsWindow;
 
     private ToolStripMenuItem? _statusItem;
@@ -27,9 +29,11 @@ public class TrayIconController : IDisposable
         _logger = logger;
         _menuBuilder = new TrayMenuBuilder(controller, this);
 
+        _trayIcon = LoadTrayIcon();
+
         _notifyIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = _trayIcon,
             Text = "PeekDows",
             ContextMenuStrip = _menuBuilder.Build(),
             Visible = true
@@ -76,6 +80,19 @@ public class TrayIconController : IDisposable
         _notifyIcon.Text = state == RuntimeState.Paused ? "PeekDows (Paused)" : "PeekDows";
     }
 
+    private Icon LoadTrayIcon()
+    {
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "peekdows_tray_icon_bw.ico");
+
+        if (File.Exists(iconPath))
+        {
+            return new Icon(iconPath);
+        }
+
+        _logger?.Warn($"Tray icon file not found: {iconPath}. Falling back to default icon.");
+        return SystemIcons.Application;
+    }
+
     private void OnAutoArrangeChanged(bool isAutoArrange)
     {
         UpdateAutoArrangeMenu(isAutoArrange);
@@ -106,6 +123,7 @@ public class TrayIconController : IDisposable
     {
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+        _trayIcon.Dispose();
         _settingsWindow?.Dispose();
     }
 }
