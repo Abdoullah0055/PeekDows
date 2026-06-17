@@ -85,7 +85,7 @@ public class AutoArrangeServiceTests : IDisposable
     }
 
     [Fact]
-    public void Baseline_OnlyCalledOnceEvenAfterStopRestart()
+    public void Baseline_IsRecreatedAfterStopRestart()
     {
         int callIndex = 0;
         var snapshot = new List<RawWindowInfo>
@@ -108,7 +108,8 @@ public class AutoArrangeServiceTests : IDisposable
         _service.Stop();
         _service.Start(settings);
 
-        Assert.Equal(1, callIndex);
+        Assert.Equal(2, callIndex);
+        Assert.Equal(0, _controller.ArrangeNowCallCount);
     }
 
     [Fact]
@@ -228,6 +229,47 @@ public class AutoArrangeServiceTests : IDisposable
         _service.Start(settings);
 
         Assert.Equal(1, callIndex);
+    }
+
+    [Fact]
+    public void WindowsOpenedWhileStopped_AreBaselinedOnRestart()
+    {
+        var snapshotA = new List<RawWindowInfo>
+        {
+            MakeRaw((IntPtr)100, title: "Chrome")
+        };
+
+        var snapshotB = new List<RawWindowInfo>
+        {
+            MakeRaw((IntPtr)100, title: "Chrome"),
+            MakeRaw((IntPtr)200, title: "VS Code")
+        };
+
+        int callIndex = 0;
+        IReadOnlyList<RawWindowInfo> Source()
+        {
+            callIndex++;
+            return callIndex <= 1 ? snapshotA : snapshotB;
+        }
+
+        var discovery = new WindowDiscoveryService(Source);
+        _service = CreateService(discovery);
+
+        var settings = new AppSettings
+        {
+            Enabled = true,
+            AutoArrange = true,
+            ArrangeOnStartup = false
+        };
+
+        _service.Start(settings);
+        _service.Stop();
+
+        _service.Start(settings);
+        _controller.CurrentSettingsValue = settings;
+        _service.Tick();
+
+        Assert.Equal(0, _controller.ArrangeNowCallCount);
     }
 
     public void Dispose()

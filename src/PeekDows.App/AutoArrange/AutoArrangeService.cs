@@ -21,7 +21,6 @@ public sealed class AutoArrangeService : IDisposable
     private bool _isArranging;
     private DateTime _lastArrangeTime = DateTime.MinValue;
     private bool _disposed;
-    private bool _baselineCreated;
     private System.Windows.Forms.Timer? _pendingDelayTimer;
 
     public bool IsRunning { get; private set; }
@@ -51,12 +50,8 @@ public sealed class AutoArrangeService : IDisposable
 
         _timer.Interval = Math.Max(500, settings.WindowDetectionIntervalMs);
 
-        if (!_baselineCreated)
-        {
-            var initialDiff = _discoveryService.Refresh(_classifier);
-            _baselineCreated = true;
-            _logger.Info($"AutoArrange baseline created: {initialDiff.Current.Count} existing windows ignored (Added={initialDiff.Added.Count})");
-        }
+        var initialDiff = _discoveryService.Refresh(_classifier);
+        _logger.Info($"AutoArrange baseline created: current={initialDiff.Current.Count}, ignoredAdded={initialDiff.Added.Count}, ignoredRemoved={initialDiff.Removed.Count}");
 
         IsRunning = true;
         _timer.Start();
