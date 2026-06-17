@@ -261,7 +261,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return;
             }
 
-            _logger.Info("ClassicPeekGrid layout selected: 5x4 grid, 4x3 windows");
+            _logger.Info("ClassicPeekGrid layout selected: 90% overlap ratio");
             var placements = _layoutEngine.CalculateClassicPeekGridPlacements(arrangeable, workArea, _settings);
             _logger.Info($"Placement count={placements.Count}");
 

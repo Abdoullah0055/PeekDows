@@ -7,6 +7,9 @@ namespace PeekDows.Core.Services;
 
 public class LayoutEngine
 {
+    private const double ClassicPeekGridWidthRatio = 0.90;
+    private const double ClassicPeekGridHeightRatio = 0.90;
+
     public IReadOnlyList<WindowPlacement> CalculateClassicPeekGridPlacements(
         IReadOnlyList<ManagedWindow> windows,
         Rect workArea,
@@ -17,14 +20,11 @@ public class LayoutEngine
 
         var priorityWindows = PrioritizeForClassicPeekGrid(windows);
 
-        double cellW = workArea.Width / 5.0;
-        double cellH = workArea.Height / 4.0;
+        int spanW = (int)Math.Round(workArea.Width * ClassicPeekGridWidthRatio);
+        int spanH = (int)Math.Round(workArea.Height * ClassicPeekGridHeightRatio);
 
-        int spanW = (int)Math.Round(cellW * 4);
-        int spanH = (int)Math.Round(cellH * 3);
-
-        spanW = Math.Min(spanW, workArea.Width);
-        spanH = Math.Min(spanH, workArea.Height);
+        spanW = Math.Clamp(spanW, 1, workArea.Width);
+        spanH = Math.Clamp(spanH, 1, workArea.Height);
 
         int leftX = workArea.Left;
         int rightX = workArea.Right - spanW;

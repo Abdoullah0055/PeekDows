@@ -305,46 +305,6 @@ public class LayoutEngineTests
     }
 
     [Fact]
-    public void CalculatePlacements_ExactRects_1920x1080()
-    {
-        var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1920, 1080);
-        var windows = new List<ManagedWindow>
-        {
-            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
-        };
-
-        var placements = _engine.CalculatePlacements(windows, workArea, settings);
-
-        var slotA = placements.First(p => p.SlotId == "A");
-        Assert.Equal(0, slotA.TargetRect.Left);
-        Assert.Equal(0, slotA.TargetRect.Top);
-        Assert.Equal(1440, slotA.TargetRect.Width);
-        Assert.Equal(720, slotA.TargetRect.Height);
-
-        var slotB = placements.First(p => p.SlotId == "B");
-        Assert.Equal(480, slotB.TargetRect.Left);
-        Assert.Equal(360, slotB.TargetRect.Top);
-        Assert.Equal(1440, slotB.TargetRect.Width);
-        Assert.Equal(720, slotB.TargetRect.Height);
-
-        var slotC = placements.First(p => p.SlotId == "C");
-        Assert.Equal(480, slotC.TargetRect.Left);
-        Assert.Equal(0, slotC.TargetRect.Top);
-        Assert.Equal(1440, slotC.TargetRect.Width);
-        Assert.Equal(720, slotC.TargetRect.Height);
-
-        var slotD = placements.First(p => p.SlotId == "D");
-        Assert.Equal(0, slotD.TargetRect.Left);
-        Assert.Equal(360, slotD.TargetRect.Top);
-        Assert.Equal(1440, slotD.TargetRect.Width);
-        Assert.Equal(720, slotD.TargetRect.Height);
-    }
-
-    [Fact]
     public void CalculatePlacements_NonDivisible_1366x768()
     {
         var settings = new AppSettings();
@@ -442,30 +402,50 @@ public class LayoutEngineTests
         var a = placements.First(p => p.SlotId == "A");
         Assert.Equal(0, a.TargetRect.Left);
         Assert.Equal(0, a.TargetRect.Top);
-        Assert.Equal(1024, a.TargetRect.Width);
-        Assert.Equal(540, a.TargetRect.Height);
+        Assert.Equal(1152, a.TargetRect.Width);
+        Assert.Equal(648, a.TargetRect.Height);
 
         var b = placements.First(p => p.SlotId == "B");
-        Assert.Equal(256, b.TargetRect.Left);
-        Assert.Equal(180, b.TargetRect.Top);
-        Assert.Equal(1024, b.TargetRect.Width);
-        Assert.Equal(540, b.TargetRect.Height);
+        Assert.Equal(128, b.TargetRect.Left);
+        Assert.Equal(72, b.TargetRect.Top);
+        Assert.Equal(1152, b.TargetRect.Width);
+        Assert.Equal(648, b.TargetRect.Height);
 
         var c = placements.First(p => p.SlotId == "C");
-        Assert.Equal(256, c.TargetRect.Left);
+        Assert.Equal(128, c.TargetRect.Left);
         Assert.Equal(0, c.TargetRect.Top);
-        Assert.Equal(1024, c.TargetRect.Width);
-        Assert.Equal(540, c.TargetRect.Height);
+        Assert.Equal(1152, c.TargetRect.Width);
+        Assert.Equal(648, c.TargetRect.Height);
 
         var d = placements.First(p => p.SlotId == "D");
         Assert.Equal(0, d.TargetRect.Left);
-        Assert.Equal(180, d.TargetRect.Top);
-        Assert.Equal(1024, d.TargetRect.Width);
-        Assert.Equal(540, d.TargetRect.Height);
+        Assert.Equal(72, d.TargetRect.Top);
+        Assert.Equal(1152, d.TargetRect.Width);
+        Assert.Equal(648, d.TargetRect.Height);
     }
 
     [Fact]
-    public void ClassicPeekGrid_UsesFiveByFourGridWithFourByThreeWindows()
+    public void ClassicPeekGrid_UsesNinetyPercentWidthAndHeight()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+        var a = placements.First(p => p.SlotId == "A");
+
+        Assert.Equal((int)Math.Round(workArea.Width * 0.90), a.TargetRect.Width);
+        Assert.Equal((int)Math.Round(workArea.Height * 0.90), a.TargetRect.Height);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_LeavesTenPercentVisibleStrips()
     {
         var settings = new AppSettings();
         var workArea = new Rect(0, 0, 1280, 720);
@@ -478,12 +458,14 @@ public class LayoutEngineTests
         };
 
         var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
-        var a = placements.First(p => p.SlotId == "A");
 
-        Assert.Equal((int)Math.Round(workArea.Width * 4.0 / 5.0), a.TargetRect.Width);
-        Assert.Equal((int)Math.Round(workArea.Height * 3.0 / 4.0), a.TargetRect.Height);
-        Assert.Equal((int)Math.Round(workArea.Width * 1.0 / 5.0), workArea.Right - a.TargetRect.Right);
-        Assert.Equal((int)Math.Round(workArea.Height * 1.0 / 4.0), workArea.Bottom - a.TargetRect.Bottom);
+        var a = placements.First(p => p.SlotId == "A");
+        Assert.Equal(128, workArea.Right - a.TargetRect.Right);
+        Assert.Equal(72, workArea.Bottom - a.TargetRect.Bottom);
+
+        var b = placements.First(p => p.SlotId == "B");
+        Assert.Equal(128, b.TargetRect.Left - workArea.Left);
+        Assert.Equal(72, b.TargetRect.Top - workArea.Top);
     }
 
     [Fact]
@@ -545,6 +527,63 @@ public class LayoutEngineTests
         var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
 
         Assert.All(placements, p => Assert.False(p.BringToFront));
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_NonDivisibleWorkArea_StillUsesNinetyPercentAndAnchorsEdges()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1366, 768);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        var a = placements.First(p => p.SlotId == "A");
+        Assert.Equal((int)Math.Round(1366 * 0.90), a.TargetRect.Width);
+        Assert.Equal((int)Math.Round(768 * 0.90), a.TargetRect.Height);
+        Assert.Equal(workArea.Left, a.TargetRect.Left);
+        Assert.Equal(workArea.Top, a.TargetRect.Top);
+
+        var b = placements.First(p => p.SlotId == "B");
+        Assert.Equal(workArea.Right, b.TargetRect.Right);
+        Assert.Equal(workArea.Bottom, b.TargetRect.Bottom);
+
+        var c = placements.First(p => p.SlotId == "C");
+        Assert.Equal(workArea.Right, c.TargetRect.Right);
+        Assert.Equal(workArea.Top, c.TargetRect.Top);
+
+        var d = placements.First(p => p.SlotId == "D");
+        Assert.Equal(workArea.Left, d.TargetRect.Left);
+        Assert.Equal(workArea.Bottom, d.TargetRect.Bottom);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_1920x1080_UsesNinetyPercent()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        var a = placements.First(p => p.SlotId == "A");
+        Assert.Equal(1728, a.TargetRect.Width);
+        Assert.Equal(972, a.TargetRect.Height);
+
+        Assert.Equal(192, workArea.Right - a.TargetRect.Right);
+        Assert.Equal(108, workArea.Bottom - a.TargetRect.Bottom);
     }
 
     [Fact]
@@ -634,35 +673,20 @@ public class LayoutEngineTests
     }
 
     [Fact]
-    public void ClassicPeekGrid_NonDivisibleWorkArea_StillAnchorsEdges()
+    public void ClassicPeekGrid_OneWindow_FullWorkArea()
     {
         var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1366, 768);
+        var workArea = new Rect(0, 0, 1280, 720);
         var windows = new List<ManagedWindow>
         {
-            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
-            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now }
         };
 
         var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
 
-        var a = placements.First(p => p.SlotId == "A");
-        Assert.Equal(workArea.Left, a.TargetRect.Left);
-        Assert.Equal(workArea.Top, a.TargetRect.Top);
-
-        var b = placements.First(p => p.SlotId == "B");
-        Assert.Equal(workArea.Right, b.TargetRect.Right);
-        Assert.Equal(workArea.Bottom, b.TargetRect.Bottom);
-
-        var c = placements.First(p => p.SlotId == "C");
-        Assert.Equal(workArea.Right, c.TargetRect.Right);
-        Assert.Equal(workArea.Top, c.TargetRect.Top);
-
-        var d = placements.First(p => p.SlotId == "D");
-        Assert.Equal(workArea.Left, d.TargetRect.Left);
-        Assert.Equal(workArea.Bottom, d.TargetRect.Bottom);
+        Assert.Single(placements);
+        Assert.Equal("FocusLarge", placements[0].SlotId);
+        Assert.Equal(workArea, placements[0].TargetRect);
     }
 
     [Fact]
@@ -690,23 +714,6 @@ public class LayoutEngineTests
 
             Assert.False(entirelyInsideA, $"Secondary {sec.SlotId} is entirely contained inside slot A — would be hidden");
         }
-    }
-
-    [Fact]
-    public void ClassicPeekGrid_OneWindow_FullWorkArea()
-    {
-        var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1280, 720);
-        var windows = new List<ManagedWindow>
-        {
-            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now }
-        };
-
-        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
-
-        Assert.Single(placements);
-        Assert.Equal("FocusLarge", placements[0].SlotId);
-        Assert.Equal(workArea, placements[0].TargetRect);
     }
 
     [Fact]
