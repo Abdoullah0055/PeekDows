@@ -261,7 +261,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return;
             }
 
-            _logger.Info("ClassicPeekGrid layout selected");
+            _logger.Info("ClassicPeekGrid layout selected: 5x4 grid, 4x3 windows");
             var placements = _layoutEngine.CalculateClassicPeekGridPlacements(arrangeable, workArea, _settings);
             _logger.Info($"Placement count={placements.Count}");
 

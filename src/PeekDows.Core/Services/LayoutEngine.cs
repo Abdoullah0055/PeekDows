@@ -17,8 +17,11 @@ public class LayoutEngine
 
         var priorityWindows = PrioritizeForClassicPeekGrid(windows);
 
-        int spanW = (int)Math.Round(workArea.Width * 0.8125);
-        int spanH = (int)Math.Round(workArea.Height * 0.7222);
+        double cellW = workArea.Width / 5.0;
+        double cellH = workArea.Height / 4.0;
+
+        int spanW = (int)Math.Round(cellW * 4);
+        int spanH = (int)Math.Round(cellH * 3);
 
         spanW = Math.Min(spanW, workArea.Width);
         spanH = Math.Min(spanH, workArea.Height);
