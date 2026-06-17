@@ -23,6 +23,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private readonly TrayIconController _trayController;
     private readonly FileLogger _logger;
     private readonly AutoArrangeService _autoArrangeService;
+    private readonly MultiMonitorLayoutService _multiMonitorLayoutService;
 
     private RuntimeState _state = RuntimeState.Running;
     private AppSettings _settings;
@@ -56,6 +57,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _classifier = new WindowClassifier(_settings);
         _monitorService = new MonitorService(_logger);
         _layoutEngine = new LayoutEngine();
+        _multiMonitorLayoutService = new MultiMonitorLayoutService(_monitorService, _layoutEngine, _logger);
         _placementService = new WindowPlacementService(_logger);
 
         _logger.Info("Hotkey registration started");
@@ -216,38 +218,46 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             }
 
             var foregroundWindow = eligibleWindows.FirstOrDefault(w => w.IsForeground);
-            Rect workArea;
+            Rect primaryWorkArea;
 
             if (foregroundWindow != null)
             {
                 _logger.Info($"Foreground eligible window found: hwnd={foregroundWindow.Hwnd}");
                 var monitorInfo = _monitorService.GetMonitorForWindow(foregroundWindow.Hwnd);
-                workArea = _monitorService.GetWorkArea(monitorInfo);
-                _logger.Info($"Using monitor for foreground window");
+                primaryWorkArea = _monitorService.GetWorkArea(monitorInfo);
             }
             else
             {
                 _logger.Info("No foreground eligible window; using primary monitor");
                 var primaryMonitor = _monitorService.GetPrimaryMonitor();
-                workArea = _monitorService.GetWorkArea(primaryMonitor);
+                primaryWorkArea = _monitorService.GetWorkArea(primaryMonitor);
             }
 
-            _logger.Info($"WorkArea: left={workArea.Left}, top={workArea.Top}, width={workArea.Width}, height={workArea.Height}");
+            _logger.Info($"Primary WorkArea (for fullscreen check): left={primaryWorkArea.Left}, top={primaryWorkArea.Top}, width={primaryWorkArea.Width}, height={primaryWorkArea.Height}");
 
             _logger.Info("Fullscreen check started");
-            var fullscreenHwnds = eligibleWindows
-                .Where(w => _classifier.IsConsideredFullscreen(w.IsMaximized, w.IsVisible, w.IsMinimized, w.CurrentRect, workArea))
-                .Select(w => w.Hwnd)
-                .ToHashSet();
+            var fullscreenHwnds = new HashSet<IntPtr>();
 
-            foreach (var fsw in eligibleWindows.Where(w => fullscreenHwnds.Contains(w.Hwnd)))
+            foreach (var w in eligibleWindows)
             {
-                _logger.Info($"Skipped fullscreen non-maximized window: hwnd={fsw.Hwnd}, title={fsw.Title}, rect={fsw.CurrentRect}");
+                var windowMonitor = _monitorService.GetMonitorForWindow(w.Hwnd);
+                var windowWorkArea = _monitorService.GetWorkArea(windowMonitor);
+
+                if (_classifier.IsConsideredFullscreen(w.IsMaximized, w.IsVisible, w.IsMinimized, w.CurrentRect, windowWorkArea))
+                {
+                    fullscreenHwnds.Add(w.Hwnd);
+                    _logger.Info($"Skipped fullscreen non-maximized window: hwnd={w.Hwnd}, title={w.Title}, rect={w.CurrentRect}");
+                }
             }
 
-            foreach (var mw in eligibleWindows.Where(w => w.IsMaximized && IsRectFullscreen(w.CurrentRect, workArea)))
+            foreach (var mw in eligibleWindows.Where(w => w.IsMaximized && !fullscreenHwnds.Contains(w.Hwnd)))
             {
-                _logger.Info($"Maximized window will be restored and arranged: hwnd={mw.Hwnd}, title={mw.Title}");
+                var windowMonitor = _monitorService.GetMonitorForWindow(mw.Hwnd);
+                var windowWorkArea = _monitorService.GetWorkArea(windowMonitor);
+                if (IsRectFullscreen(mw.CurrentRect, windowWorkArea))
+                {
+                    _logger.Info($"Maximized window will be restored and arranged: hwnd={mw.Hwnd}, title={mw.Title}");
+                }
             }
 
             _logger.Info($"Fullscreen windows skipped count={fullscreenHwnds.Count}");
@@ -261,8 +271,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return;
             }
 
-            _logger.Info("ClassicPeekGrid layout selected: 90% overlap ratio");
-            var placements = _layoutEngine.CalculateClassicPeekGridPlacements(arrangeable, workArea, _settings);
+            _logger.Info("ClassicPeekGrid layout selected per monitor: 90% overlap ratio");
+            var placements = _multiMonitorLayoutService.CalculatePlacementsByMonitor(arrangeable, _settings);
             _logger.Info($"Placement count={placements.Count}");
 
             if (placements.Count == 0)

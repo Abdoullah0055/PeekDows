@@ -5,7 +5,7 @@ using PeekDows.Core.Win32;
 
 namespace PeekDows.Core.Services;
 
-public class MonitorService
+public class MonitorService : IMonitorResolver
 {
     private readonly FileLogger? _logger;
 
