@@ -1,3 +1,4 @@
+using System;
 using System.Windows.Forms;
 using PeekDows.Core.Models;
 
@@ -29,6 +30,26 @@ public class TrayMenuBuilder
         var pauseResumeItem = new ToolStripMenuItem("Pause");
         pauseResumeItem.Click += (s, e) => _controller.TogglePause();
         menu.Items.Add(pauseResumeItem);
+
+        var pauseForMenu = new ToolStripMenuItem("Pause for");
+
+        var pause5Item = new ToolStripMenuItem("5 minutes");
+        pause5Item.Click += (s, e) => _controller.PauseFor(TimeSpan.FromMinutes(5));
+        pauseForMenu.DropDownItems.Add(pause5Item);
+
+        var pause15Item = new ToolStripMenuItem("15 minutes");
+        pause15Item.Click += (s, e) => _controller.PauseFor(TimeSpan.FromMinutes(15));
+        pauseForMenu.DropDownItems.Add(pause15Item);
+
+        var pause1HourItem = new ToolStripMenuItem("1 hour");
+        pause1HourItem.Click += (s, e) => _controller.PauseFor(TimeSpan.FromHours(1));
+        pauseForMenu.DropDownItems.Add(pause1HourItem);
+
+        var pauseUntilResumedItem = new ToolStripMenuItem("Until manually resumed");
+        pauseUntilResumedItem.Click += (s, e) => _controller.PauseUntilResumed();
+        pauseForMenu.DropDownItems.Add(pauseUntilResumedItem);
+
+        menu.Items.Add(pauseForMenu);
 
         var autoArrangeItem = new ToolStripMenuItem("Enable Auto Arrange");
         autoArrangeItem.Click += (s, e) => _controller.ToggleAutoArrange();

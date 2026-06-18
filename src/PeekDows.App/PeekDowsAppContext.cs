@@ -26,11 +26,15 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private readonly AutoArrangeService _autoArrangeService;
     private readonly MultiMonitorLayoutService _multiMonitorLayoutService;
     private readonly IStartupService _startupService;
+    private readonly PauseStateService _pauseState;
+    private readonly System.Windows.Forms.Timer _pauseCheckTimer;
 
-    private RuntimeState _state = RuntimeState.Running;
     private AppSettings _settings;
 
-    public RuntimeState State => _state;
+    public RuntimeState State => _pauseState.State;
+    public bool IsPaused => _pauseState.IsPaused;
+    public DateTimeOffset? PauseUntil => _pauseState.PauseUntil;
+    public string? PauseDescription => _pauseState.GetPauseDescription();
 
     public AppSettings CurrentSettings => _settings;
 
@@ -65,13 +69,25 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _multiMonitorLayoutService = new MultiMonitorLayoutService(_monitorService, _layoutEngine, _logger);
         _placementService = new WindowPlacementService(_logger);
 
+        _pauseState = new PauseStateService();
+        _pauseState.StateChanged += OnPauseStateChanged;
+
+        _pauseCheckTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        _pauseCheckTimer.Tick += OnPauseCheckTimerTick;
+
         _logger.Info("Hotkey registration started");
         _hotkeyService = new HotkeyService(_logger);
         _hotkeyService.ArrangeNowRequested += OnArrangeNowRequested;
+        _hotkeyService.PauseResumeRequested += OnPauseResumeRequested;
 
         if (!_hotkeyService.RegisterArrangeHotkey())
         {
             _logger.Warn("Failed to register Ctrl+Alt+Space hotkey. It may already be in use.");
+        }
+
+        if (!_hotkeyService.RegisterPauseHotkey())
+        {
+            _logger.Warn("Failed to register Ctrl+Alt+P hotkey. It may already be in use.");
         }
 
         _trayController = new TrayIconController(this, _logger, _settingsService);
@@ -101,7 +117,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     {
         _logger.Info("ArrangeNow requested");
 
-        if (_state == RuntimeState.Paused)
+        if (_pauseState.IsPaused)
         {
             _logger.Info("ArrangeNow ignored because app is paused");
             return;
@@ -118,9 +134,68 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
     public void TogglePause()
     {
-        _state = _state == RuntimeState.Running ? RuntimeState.Paused : RuntimeState.Running;
-        _logger.Info($"State toggled to {_state}");
-        StateChanged?.Invoke(_state);
+        _pauseState.TogglePause();
+    }
+
+    public void PauseUntilResumed()
+    {
+        _logger.Info("Pause enabled until resumed");
+        _pauseState.PauseUntilResumed();
+        StartPauseCheckTimerIfNeeded();
+    }
+
+    public void PauseFor(TimeSpan duration)
+    {
+        if (duration == TimeSpan.FromMinutes(5))
+            _logger.Info("Pause enabled for 5 minutes");
+        else if (duration == TimeSpan.FromMinutes(15))
+            _logger.Info("Pause enabled for 15 minutes");
+        else if (duration == TimeSpan.FromHours(1))
+            _logger.Info("Pause enabled for 1 hour");
+        else
+            _logger.Info($"Pause enabled for {duration.TotalMinutes} minutes");
+
+        _pauseState.PauseFor(duration);
+        StartPauseCheckTimerIfNeeded();
+    }
+
+    public void Resume()
+    {
+        _logger.Info("Pause disabled, resumed");
+        _pauseState.Resume();
+    }
+
+    private void StartPauseCheckTimerIfNeeded()
+    {
+        if (_pauseState.PauseUntil != null && !_pauseCheckTimer.Enabled)
+        {
+            _pauseCheckTimer.Start();
+            _logger.Info("Pause check timer started");
+        }
+    }
+
+    private void OnPauseCheckTimerTick(object? sender, EventArgs e)
+    {
+        if (_pauseState.CheckExpired(DateTimeOffset.Now))
+        {
+            _pauseCheckTimer.Stop();
+            _logger.Info("Pause expired, resuming");
+        }
+
+        if (!_pauseState.IsPaused)
+        {
+            _pauseCheckTimer.Stop();
+        }
+    }
+
+    private void OnPauseStateChanged(RuntimeState state)
+    {
+        StateChanged?.Invoke(state);
+    }
+
+    private void OnPauseResumeRequested()
+    {
+        TogglePause();
     }
 
     public void ToggleAutoArrange()
@@ -193,6 +268,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     public void Exit()
     {
         _logger.Info("PeekDows exiting");
+        _pauseCheckTimer.Stop();
+        _pauseCheckTimer.Dispose();
         _autoArrangeService.Dispose();
         _hotkeyService.Dispose();
         Application.Exit();
@@ -378,6 +455,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     {
         if (disposing)
         {
+            _pauseCheckTimer.Stop();
+            _pauseCheckTimer.Dispose();
             _autoArrangeService.Dispose();
             _hotkeyService.Dispose();
             _trayController.Dispose();

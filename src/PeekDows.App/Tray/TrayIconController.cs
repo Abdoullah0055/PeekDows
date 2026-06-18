@@ -68,6 +68,14 @@ public class TrayIconController : IDisposable
         UpdateStartWithWindowsMenu(_controller.CurrentSettings?.StartWithWindows ?? false);
     }
 
+    internal void UpdatePauseState()
+    {
+        UpdateMenuState(_controller.State);
+        _notifyIcon.Text = _controller.State == RuntimeState.Paused
+            ? (_controller.PauseDescription ?? "PeekDows (Paused)")
+            : "PeekDows";
+    }
+
     public void OpenSettings()
     {
         if (_settingsWindow == null || _settingsWindow.IsDisposed)
@@ -93,7 +101,9 @@ public class TrayIconController : IDisposable
     private void OnStateChanged(RuntimeState state)
     {
         UpdateMenuState(state);
-        _notifyIcon.Text = state == RuntimeState.Paused ? "PeekDows (Paused)" : "PeekDows";
+        _notifyIcon.Text = state == RuntimeState.Paused
+            ? (_controller.PauseDescription ?? "PeekDows (Paused)")
+            : "PeekDows";
     }
 
     private Icon LoadTrayIcon()
@@ -123,7 +133,15 @@ public class TrayIconController : IDisposable
     {
         if (_statusItem != null)
         {
-            _statusItem.Text = state == RuntimeState.Paused ? "Status: Paused" : "Status: Running";
+            if (state == RuntimeState.Paused)
+            {
+                var desc = _controller.PauseDescription;
+                _statusItem.Text = desc ?? "Status: Paused";
+            }
+            else
+            {
+                _statusItem.Text = "Status: Running";
+            }
         }
 
         if (_pauseResumeItem != null)

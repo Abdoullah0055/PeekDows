@@ -285,6 +285,9 @@ public class AutoArrangeServiceTests : IDisposable
         public AppSettings CurrentSettings => CurrentSettingsValue;
         public bool IsAutoArrangeRunning => false;
         public bool IsStartWithWindowsEnabled => false;
+        public bool IsPaused => State == RuntimeState.Paused;
+        public DateTimeOffset? PauseUntil => null;
+        public string? PauseDescription => null;
         public int ArrangeNowCallCount { get; private set; }
 
         public event Action<RuntimeState>? StateChanged;
@@ -293,6 +296,9 @@ public class AutoArrangeServiceTests : IDisposable
 
         public void ArrangeNow() => ArrangeNowCallCount++;
         public void TogglePause() { }
+        public void PauseFor(TimeSpan duration) { }
+        public void PauseUntilResumed() { }
+        public void Resume() { }
         public void ToggleAutoArrange() { }
         public void ToggleStartWithWindows() { }
         public void OpenSettings() { }

@@ -9,14 +9,18 @@ namespace PeekDows.App.Hotkeys;
 public sealed class HotkeyService : IDisposable
 {
     private const int HOTKEY_ARRANGE_ID = 1;
+    private const int HOTKEY_PAUSE_ID = 2;
 
     private readonly Action _onArrangeNow;
+    private readonly Action _onPauseResume;
     private readonly HotkeyMessageWindow _messageWindow;
     private readonly FileLogger? _logger;
-    private bool _isRegistered;
+    private bool _arrangeRegistered;
+    private bool _pauseRegistered;
     private bool _disposed;
 
     public event Action? ArrangeNowRequested;
+    public event Action? PauseResumeRequested;
 
     public HotkeyService() : this(null) { }
 
@@ -25,21 +29,22 @@ public sealed class HotkeyService : IDisposable
         _logger = logger;
         _messageWindow = new HotkeyMessageWindow(this);
         _onArrangeNow = () => ArrangeNowRequested?.Invoke();
+        _onPauseResume = () => PauseResumeRequested?.Invoke();
         _logger?.Info("HotkeyService created");
     }
 
     public bool RegisterArrangeHotkey()
     {
-        if (_isRegistered) return true;
+        if (_arrangeRegistered) return true;
 
         _logger?.Info("RegisterArrangeHotkey called");
 
         uint modifiers = NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT;
         uint vk = NativeMethods.VK_SPACE;
 
-        _isRegistered = NativeMethods.RegisterHotKey(_messageWindow.Handle, HOTKEY_ARRANGE_ID, modifiers, vk);
+        _arrangeRegistered = NativeMethods.RegisterHotKey(_messageWindow.Handle, HOTKEY_ARRANGE_ID, modifiers, vk);
 
-        if (_isRegistered)
+        if (_arrangeRegistered)
         {
             _logger?.Info("RegisterHotKey succeeded: Ctrl+Alt+Space");
         }
@@ -49,16 +54,47 @@ public sealed class HotkeyService : IDisposable
             _logger?.Warn($"RegisterHotKey failed: Ctrl+Alt+Space, win32Error={win32Error}");
         }
 
-        return _isRegistered;
+        return _arrangeRegistered;
+    }
+
+    public bool RegisterPauseHotkey()
+    {
+        if (_pauseRegistered) return true;
+
+        _logger?.Info("RegisterPauseHotkey called");
+
+        uint modifiers = NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT;
+        uint vk = NativeMethods.VK_P;
+
+        _pauseRegistered = NativeMethods.RegisterHotKey(_messageWindow.Handle, HOTKEY_PAUSE_ID, modifiers, vk);
+
+        if (_pauseRegistered)
+        {
+            _logger?.Info("Ctrl+Alt+P hotkey registered");
+        }
+        else
+        {
+            int win32Error = Marshal.GetLastWin32Error();
+            _logger?.Warn($"Failed to register Ctrl+Alt+P hotkey. It may already be in use. win32Error={win32Error}");
+        }
+
+        return _pauseRegistered;
     }
 
     public void UnregisterAll()
     {
-        if (_isRegistered && _messageWindow.Handle != IntPtr.Zero)
+        if (_arrangeRegistered && _messageWindow.Handle != IntPtr.Zero)
         {
-            _logger?.Info("UnregisterHotKey called");
+            _logger?.Info("UnregisterHotKey called for arrange");
             NativeMethods.UnregisterHotKey(_messageWindow.Handle, HOTKEY_ARRANGE_ID);
-            _isRegistered = false;
+            _arrangeRegistered = false;
+        }
+
+        if (_pauseRegistered && _messageWindow.Handle != IntPtr.Zero)
+        {
+            _logger?.Info("UnregisterHotKey called for pause");
+            NativeMethods.UnregisterHotKey(_messageWindow.Handle, HOTKEY_PAUSE_ID);
+            _pauseRegistered = false;
         }
     }
 
@@ -70,6 +106,11 @@ public sealed class HotkeyService : IDisposable
         {
             _logger?.Info("ArrangeNowRequested event raised");
             _onArrangeNow();
+        }
+        else if (id == HOTKEY_PAUSE_ID)
+        {
+            _logger?.Info("PauseResumeRequested event raised");
+            _onPauseResume();
         }
     }
 

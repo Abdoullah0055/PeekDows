@@ -11,8 +11,14 @@ public interface IPeekDowsController
     AppSettings CurrentSettings { get; }
     bool IsAutoArrangeRunning { get; }
     bool IsStartWithWindowsEnabled { get; }
+    bool IsPaused { get; }
+    DateTimeOffset? PauseUntil { get; }
+    string? PauseDescription { get; }
     void ArrangeNow();
     void TogglePause();
+    void PauseFor(TimeSpan duration);
+    void PauseUntilResumed();
+    void Resume();
     void ToggleAutoArrange();
     void ToggleStartWithWindows();
     void OpenSettings();
