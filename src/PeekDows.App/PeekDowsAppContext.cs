@@ -74,7 +74,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             _logger.Warn("Failed to register Ctrl+Alt+Space hotkey. It may already be in use.");
         }
 
-        _trayController = new TrayIconController(this, _logger);
+        _trayController = new TrayIconController(this, _logger, _settingsService);
         _logger.Info("Tray initialized");
 
         _startupService = new StartupService(_logger);

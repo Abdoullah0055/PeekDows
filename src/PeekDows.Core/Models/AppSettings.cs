@@ -29,7 +29,8 @@ public sealed class AppSettings
         "ShellExperienceHost.exe",
         "TextInputHost.exe",
         "LockApp.exe",
-        "PeekDows.exe"
+        "PeekDows.exe",
+        "SystemSettings.exe"
     };
 
     public List<string> IgnoredClasses { get; set; } = new()
@@ -37,7 +38,10 @@ public sealed class AppSettings
         "Shell_TrayWnd",
         "WorkerW",
         "Progman",
-        "NotifyIconOverflowWindow"
+        "NotifyIconOverflowWindow",
+        "Windows.UI.Core.CoreWindow",
+        "DV2ControlHost",
+        "Windows.UI.Composition.DesktopWindowContentBridge"
     };
 
     public Dictionary<string, string> Hotkeys { get; set; } = new()

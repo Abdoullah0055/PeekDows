@@ -16,6 +16,7 @@ public class TrayIconController : IDisposable
     private readonly FileLogger? _logger;
     private readonly Icon _trayIcon;
     private readonly bool _ownsTrayIcon;
+    private readonly SettingsService? _settingsService;
     private SettingsWindow? _settingsWindow;
 
     private ToolStripMenuItem? _statusItem;
@@ -25,10 +26,13 @@ public class TrayIconController : IDisposable
 
     public TrayIconController(IPeekDowsController controller) : this(controller, null) { }
 
-    public TrayIconController(IPeekDowsController controller, FileLogger? logger)
+    public TrayIconController(IPeekDowsController controller, FileLogger? logger) : this(controller, logger, null) { }
+
+    public TrayIconController(IPeekDowsController controller, FileLogger? logger, SettingsService? settingsService)
     {
         _controller = controller;
         _logger = logger;
+        _settingsService = settingsService;
         _menuBuilder = new TrayMenuBuilder(controller, this);
 
         _trayIcon = LoadTrayIcon();
@@ -68,7 +72,11 @@ public class TrayIconController : IDisposable
     {
         if (_settingsWindow == null || _settingsWindow.IsDisposed)
         {
-            _settingsWindow = new SettingsWindow();
+            var settings = _controller.CurrentSettings;
+            var settingsWindow = _settingsService != null
+                ? new SettingsWindow(settings, _settingsService)
+                : new SettingsWindow(settings, new SettingsService());
+            _settingsWindow = settingsWindow;
             _settingsWindow.Show();
         }
         else

@@ -8,25 +8,6 @@ public class WindowClassifier
 {
     private readonly AppSettings _settings;
 
-    private static readonly string[] SystemClassNames =
-    {
-        "Shell_TrayWnd",
-        "WorkerW",
-        "Progman",
-        "Windows.UI.Core.CoreWindow",
-        "NotifyIconOverflowWindow",
-        "ApplicationFrameWindow"
-    };
-
-    private static readonly string[] SystemProcessNames =
-    {
-        "SearchHost.exe",
-        "StartMenuExperienceHost.exe",
-        "ShellExperienceHost.exe",
-        "TextInputHost.exe",
-        "LockApp.exe"
-    };
-
     public WindowClassifier(AppSettings settings)
     {
         _settings = settings;
@@ -39,34 +20,40 @@ public class WindowClassifier
         if (window.IsCloaked) return false;
         if (string.IsNullOrWhiteSpace(window.Title)) return false;
         if (window.CurrentRect.Width < 250 || window.CurrentRect.Height < 180) return false;
-        if (window.ProcessName.Equals("PeekDows.exe", StringComparison.OrdinalIgnoreCase)) return false;
-        if (IsIgnoredClass(window.ClassName)) return false;
+        if (window.ProcessId == Environment.ProcessId) return false;
         if (IsIgnoredProcess(window.ProcessName)) return false;
+        if (IsIgnoredClass(window.ClassName)) return false;
         if (IsSystemWindow(window)) return false;
         return true;
     }
 
-    public bool IsIgnoredProcess(string processName)
+    public bool IsIgnoredProcess(string? processName)
     {
-        return _settings.IgnoredProcesses.Contains(processName, StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(processName)) return false;
+        var trimmed = processName.Trim();
+        return _settings.IgnoredProcesses.Any(p =>
+            string.Equals(p?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
     }
 
-    public bool IsIgnoredClass(string className)
+    public bool IsIgnoredClass(string? className)
     {
-        return _settings.IgnoredClasses.Contains(className, StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(className)) return false;
+        var trimmed = className.Trim();
+        return _settings.IgnoredClasses.Any(c =>
+            string.Equals(c?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
     }
 
     public bool IsSystemWindow(RawWindowInfo window)
     {
-        if (window.Title == "Program Manager" && window.ClassName == "Progman") return true;
+        if (window.Title == "Program Manager" && string.Equals(window.ClassName, "Progman", StringComparison.OrdinalIgnoreCase)) return true;
 
-        if (window.ClassName == "Shell_TrayWnd") return true;
-        if (window.ClassName == "WorkerW") return true;
-        if (window.ClassName == "NotifyIconOverflowWindow") return true;
+        if (string.Equals(window.ClassName, "Shell_TrayWnd", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(window.ClassName, "WorkerW", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(window.ClassName, "NotifyIconOverflowWindow", StringComparison.OrdinalIgnoreCase)) return true;
 
-        if (window.ClassName == "Windows.UI.Core.CoreWindow") return true;
+        if (string.Equals(window.ClassName, "Windows.UI.Core.CoreWindow", StringComparison.OrdinalIgnoreCase)) return true;
 
-        if (window.ClassName == "ApplicationFrameWindow" && string.IsNullOrWhiteSpace(window.Title)) return true;
+        if (string.Equals(window.ClassName, "ApplicationFrameWindow", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(window.Title)) return true;
 
         return false;
     }

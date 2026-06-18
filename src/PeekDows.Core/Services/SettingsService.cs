@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using PeekDows.Core.Models;
 
@@ -10,6 +11,28 @@ public class SettingsService
     private readonly string _settingsFilePath;
     private readonly string _settingsDirectory;
 
+    private static readonly List<string> DefaultIgnoredProcesses = new()
+    {
+        "SearchHost.exe",
+        "StartMenuExperienceHost.exe",
+        "ShellExperienceHost.exe",
+        "TextInputHost.exe",
+        "LockApp.exe",
+        "PeekDows.exe",
+        "SystemSettings.exe"
+    };
+
+    private static readonly List<string> DefaultIgnoredClasses = new()
+    {
+        "Shell_TrayWnd",
+        "WorkerW",
+        "Progman",
+        "NotifyIconOverflowWindow",
+        "Windows.UI.Core.CoreWindow",
+        "DV2ControlHost",
+        "Windows.UI.Composition.DesktopWindowContentBridge"
+    };
+
     public SettingsService()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -17,7 +40,6 @@ public class SettingsService
         _settingsFilePath = Path.Combine(_settingsDirectory, "settings.json");
     }
 
-    // For testing purposes
     public SettingsService(string settingsFilePath)
     {
         _settingsFilePath = settingsFilePath;
@@ -39,7 +61,6 @@ public class SettingsService
         }
         catch
         {
-            // Corrupted config -> Backup and recreate default
             if (File.Exists(_settingsFilePath))
             {
                 var backupPath = Path.Combine(_settingsDirectory, $"settings.corrupted.{DateTime.Now:yyyyMMddHHmmss}.json");
@@ -70,7 +91,27 @@ public class SettingsService
 
     public AppSettings MigrateIfNeeded(AppSettings settings)
     {
-        // Add migration logic if Version increases in the future
+        settings.IgnoredProcesses ??= new List<string>();
+        settings.IgnoredClasses ??= new List<string>();
+        MergeMissingDefaults(settings.IgnoredProcesses, DefaultIgnoredProcesses);
+        MergeMissingDefaults(settings.IgnoredClasses, DefaultIgnoredClasses);
         return settings;
+    }
+
+    private static void MergeMissingDefaults(List<string> current, List<string> defaults)
+    {
+        if (current == null)
+        {
+            return;
+        }
+
+        var existing = new HashSet<string>(current, StringComparer.OrdinalIgnoreCase);
+        foreach (var item in defaults)
+        {
+            if (!existing.Contains(item))
+            {
+                current.Add(item);
+            }
+        }
     }
 }

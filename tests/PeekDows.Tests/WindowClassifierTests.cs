@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
 using Xunit;
@@ -27,14 +28,15 @@ public class WindowClassifierTests
         bool isForeground = false,
         bool isCloaked = false,
         int width = 800,
-        int height = 600)
+        int height = 600,
+        int processId = 1234)
     {
         return new RawWindowInfo
         {
             Hwnd = hwnd == default ? (IntPtr)1 : hwnd,
             Title = title,
             ClassName = className,
-            ProcessId = 1234,
+            ProcessId = processId,
             ProcessName = processName,
             CurrentRect = new Rect(0, 0, width, height),
             IsVisible = isVisible,
@@ -338,5 +340,128 @@ public class WindowClassifierTests
         Assert.False(_classifier.IsConsideredFullscreen(
             isMaximized: false, isVisible: true, isMinimized: false,
             windowRect: windowRect, monitorWorkArea: workArea));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresProcess_CaseInsensitive()
+    {
+        var window = MakeWindow(processName: "searchhost.exe");
+
+        Assert.False(_classifier.IsEligible(window));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresClass_CaseInsensitive()
+    {
+        var window = MakeWindow(className: "shell_traywnd");
+
+        Assert.False(_classifier.IsEligible(window));
+    }
+
+    [Fact]
+    public void Classifier_DoesNotIgnoreExplorerProcessByDefault()
+    {
+        Assert.False(_classifier.IsIgnoredProcess("explorer.exe"));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresShellTrayWnd()
+    {
+        Assert.True(_classifier.IsIgnoredClass("Shell_TrayWnd"));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresWorkerW()
+    {
+        Assert.True(_classifier.IsIgnoredClass("WorkerW"));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresProgman()
+    {
+        Assert.True(_classifier.IsIgnoredClass("Progman"));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresCurrentProcessWindow()
+    {
+        var window = MakeWindow(processId: Environment.ProcessId);
+
+        Assert.False(_classifier.IsEligible(window));
+    }
+
+    [Fact]
+    public void Classifier_DoesNotCrash_WhenProcessNameNullOrEmpty()
+    {
+        Assert.False(_classifier.IsIgnoredProcess(null));
+        Assert.False(_classifier.IsIgnoredProcess(""));
+        Assert.False(_classifier.IsIgnoredProcess("   "));
+    }
+
+    [Fact]
+    public void Classifier_DoesNotCrash_WhenClassNameNullOrEmpty()
+    {
+        Assert.False(_classifier.IsIgnoredClass(null));
+        Assert.False(_classifier.IsIgnoredClass(""));
+        Assert.False(_classifier.IsIgnoredClass("   "));
+    }
+
+    [Fact]
+    public void Classifier_AllowsNormalFileExplorerWindow()
+    {
+        var window = MakeWindow(
+            processName: "explorer.exe",
+            className: "CabinetWClass",
+            title: "Downloads",
+            isVisible: true,
+            isMinimized: false);
+
+        Assert.True(_classifier.IsEligible(window));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresProcessWithTrimmedValue()
+    {
+        var settings = new AppSettings();
+        settings.IgnoredProcesses = new List<string> { "  SearchHost.exe  " };
+        var classifier = new WindowClassifier(settings);
+
+        Assert.True(classifier.IsIgnoredProcess("SearchHost.exe"));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresClassWithTrimmedValue()
+    {
+        var settings = new AppSettings();
+        settings.IgnoredClasses = new List<string> { "  Shell_TrayWnd  " };
+        var classifier = new WindowClassifier(settings);
+
+        Assert.True(classifier.IsIgnoredClass("Shell_TrayWnd"));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresWindowsUICoreWindow()
+    {
+        Assert.True(_classifier.IsIgnoredClass("Windows.UI.Core.CoreWindow"));
+    }
+
+    [Fact]
+    public void IsSystemWindow_CaseInsensitive()
+    {
+        var window = MakeWindow(className: "shell_traywnd");
+
+        Assert.True(_classifier.IsSystemWindow(window));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresSystemSettingsProcess()
+    {
+        Assert.True(_classifier.IsIgnoredProcess("SystemSettings.exe"));
+    }
+
+    [Fact]
+    public void Classifier_IgnoresDV2ControlHost()
+    {
+        Assert.True(_classifier.IsIgnoredClass("DV2ControlHost"));
     }
 }
