@@ -214,4 +214,40 @@ public class PauseStateServiceTests
         Assert.NotNull(service.PauseUntil);
         Assert.NotEqual(firstUntil, service.PauseUntil);
     }
+
+    [Fact]
+    public void PauseUntilResumed_ClearsExistingPauseUntil()
+    {
+        var service = new PauseStateService();
+        service.PauseFor(TimeSpan.FromMinutes(15));
+        Assert.NotNull(service.PauseUntil);
+
+        service.PauseUntilResumed();
+        Assert.Equal(RuntimeState.Paused, service.State);
+        Assert.Null(service.PauseUntil);
+    }
+
+    [Fact]
+    public void PauseFor_OverwritesManualPauseWithTimedPause()
+    {
+        var service = new PauseStateService();
+        service.PauseUntilResumed();
+        Assert.Null(service.PauseUntil);
+
+        service.PauseFor(TimeSpan.FromMinutes(5));
+        Assert.Equal(RuntimeState.Paused, service.State);
+        Assert.NotNull(service.PauseUntil);
+    }
+
+    [Fact]
+    public void CheckExpired_ClearsPauseUntil()
+    {
+        var service = new PauseStateService();
+        service.PauseFor(TimeSpan.FromMinutes(5));
+        Assert.NotNull(service.PauseUntil);
+
+        var futureNow = DateTimeOffset.Now + TimeSpan.FromMinutes(10);
+        service.CheckExpired(futureNow);
+        Assert.Null(service.PauseUntil);
+    }
 }

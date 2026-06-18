@@ -134,14 +134,22 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
     public void TogglePause()
     {
-        _pauseState.TogglePause();
+        if (_pauseState.IsPaused)
+        {
+            _pauseState.TogglePause();
+            StopPauseCheckTimer();
+        }
+        else
+        {
+            _pauseState.TogglePause();
+        }
     }
 
     public void PauseUntilResumed()
     {
         _logger.Info("Pause enabled until resumed");
         _pauseState.PauseUntilResumed();
-        StartPauseCheckTimerIfNeeded();
+        StopPauseCheckTimer();
     }
 
     public void PauseFor(TimeSpan duration)
@@ -163,6 +171,16 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     {
         _logger.Info("Pause disabled, resumed");
         _pauseState.Resume();
+        StopPauseCheckTimer();
+    }
+
+    private void StopPauseCheckTimer()
+    {
+        if (_pauseCheckTimer.Enabled)
+        {
+            _pauseCheckTimer.Stop();
+            _logger.Info("Pause check timer stopped");
+        }
     }
 
     private void StartPauseCheckTimerIfNeeded()
@@ -178,13 +196,14 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     {
         if (_pauseState.CheckExpired(DateTimeOffset.Now))
         {
-            _pauseCheckTimer.Stop();
+            StopPauseCheckTimer();
             _logger.Info("Pause expired, resuming");
+            return;
         }
 
         if (!_pauseState.IsPaused)
         {
-            _pauseCheckTimer.Stop();
+            StopPauseCheckTimer();
         }
     }
 
