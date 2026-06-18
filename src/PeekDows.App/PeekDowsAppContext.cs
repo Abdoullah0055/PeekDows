@@ -158,6 +158,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         StartWithWindowsChanged?.Invoke(_settings.StartWithWindows);
     }
 
+    // When StartWithWindows is false, do not delete an existing shortcut here.
+    // The shortcut is removed only when the user explicitly disables the option from the tray.
     private void SyncStartWithWindows()
     {
         try
@@ -167,20 +169,13 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 if (!_startupService.IsEnabled())
                 {
                     _logger.Info("StartWithWindows setting is true but shortcut missing, recreating");
+
                     if (!_startupService.Enable())
                     {
                         _logger.Warn("Failed to recreate startup shortcut, updating setting to false");
                         _settings.StartWithWindows = false;
                         _settingsService.Save(_settings);
                     }
-                }
-            }
-            else
-            {
-                if (_startupService.IsEnabled())
-                {
-                    _logger.Info("StartWithWindows setting is false but shortcut exists, removing");
-                    _startupService.Disable();
                 }
             }
         }
