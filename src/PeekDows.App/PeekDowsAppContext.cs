@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows.Forms;
 using PeekDows.App.AutoArrange;
 using PeekDows.App.Hotkeys;
+using PeekDows.App.Startup;
 using PeekDows.App.Tray;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
@@ -24,6 +25,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private readonly FileLogger _logger;
     private readonly AutoArrangeService _autoArrangeService;
     private readonly MultiMonitorLayoutService _multiMonitorLayoutService;
+    private readonly IStartupService _startupService;
 
     private RuntimeState _state = RuntimeState.Running;
     private AppSettings _settings;
@@ -34,8 +36,11 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
     public bool IsAutoArrangeRunning => _autoArrangeService.IsRunning;
 
+    public bool IsStartWithWindowsEnabled => _settings.StartWithWindows;
+
     public event Action<RuntimeState>? StateChanged;
     public event Action<bool>? AutoArrangeChanged;
+    public event Action<bool>? StartWithWindowsChanged;
 
     public string LogFilePath => _logger.LogFilePath;
 
@@ -71,6 +76,9 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
         _trayController = new TrayIconController(this, _logger);
         _logger.Info("Tray initialized");
+
+        _startupService = new StartupService(_logger);
+        SyncStartWithWindows();
 
         _autoArrangeService = new AutoArrangeService(
             _discoveryService, _classifier, this, _logger);
@@ -131,6 +139,55 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         }
 
         AutoArrangeChanged?.Invoke(_settings.AutoArrange);
+    }
+
+    public void ToggleStartWithWindows()
+    {
+        _settings.StartWithWindows = !_settings.StartWithWindows;
+        _settingsService.Save(_settings);
+        _logger.Info($"StartWithWindows toggled to {_settings.StartWithWindows}");
+
+        var success = _startupService.SetEnabled(_settings.StartWithWindows);
+        if (_settings.StartWithWindows && !success)
+        {
+            _logger.Warn("StartWithWindows toggle: Enable failed, reverting setting");
+            _settings.StartWithWindows = false;
+            _settingsService.Save(_settings);
+        }
+
+        StartWithWindowsChanged?.Invoke(_settings.StartWithWindows);
+    }
+
+    private void SyncStartWithWindows()
+    {
+        try
+        {
+            if (_settings.StartWithWindows)
+            {
+                if (!_startupService.IsEnabled())
+                {
+                    _logger.Info("StartWithWindows setting is true but shortcut missing, recreating");
+                    if (!_startupService.Enable())
+                    {
+                        _logger.Warn("Failed to recreate startup shortcut, updating setting to false");
+                        _settings.StartWithWindows = false;
+                        _settingsService.Save(_settings);
+                    }
+                }
+            }
+            else
+            {
+                if (_startupService.IsEnabled())
+                {
+                    _logger.Info("StartWithWindows setting is false but shortcut exists, removing");
+                    _startupService.Disable();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Failed to sync StartWithWindows", ex);
+        }
     }
 
     public void OpenSettings()

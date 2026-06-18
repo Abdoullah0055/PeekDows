@@ -34,6 +34,15 @@ public class TrayMenuBuilder
         autoArrangeItem.Click += (s, e) => _controller.ToggleAutoArrange();
         menu.Items.Add(autoArrangeItem);
 
+        var startWithWindowsItem = new ToolStripMenuItem("Start with Windows");
+        startWithWindowsItem.Checked = _controller.CurrentSettings.StartWithWindows;
+        startWithWindowsItem.Click += (s, e) =>
+        {
+            _controller.ToggleStartWithWindows();
+            startWithWindowsItem.Checked = _controller.IsStartWithWindowsEnabled;
+        };
+        menu.Items.Add(startWithWindowsItem);
+
         menu.Items.Add(new ToolStripSeparator());
 
         var openLogItem = new ToolStripMenuItem("Open Log File");
@@ -56,7 +65,7 @@ public class TrayMenuBuilder
         exitItem.Click += (s, e) => _controller.Exit();
         menu.Items.Add(exitItem);
 
-        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem);
+        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, startWithWindowsItem);
 
         return menu;
     }

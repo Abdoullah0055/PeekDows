@@ -284,14 +284,17 @@ public class AutoArrangeServiceTests : IDisposable
         public AppSettings CurrentSettingsValue { get; set; } = new();
         public AppSettings CurrentSettings => CurrentSettingsValue;
         public bool IsAutoArrangeRunning => false;
+        public bool IsStartWithWindowsEnabled => false;
         public int ArrangeNowCallCount { get; private set; }
 
         public event Action<RuntimeState>? StateChanged;
         public event Action<bool>? AutoArrangeChanged;
+        public event Action<bool>? StartWithWindowsChanged;
 
         public void ArrangeNow() => ArrangeNowCallCount++;
         public void TogglePause() { }
         public void ToggleAutoArrange() { }
+        public void ToggleStartWithWindows() { }
         public void OpenSettings() { }
         public void OpenLogFile() { }
         public void OpenLogsFolder() { }

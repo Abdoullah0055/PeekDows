@@ -15,11 +15,13 @@ public class TrayIconController : IDisposable
     private readonly IPeekDowsController _controller;
     private readonly FileLogger? _logger;
     private readonly Icon _trayIcon;
+    private readonly bool _ownsTrayIcon;
     private SettingsWindow? _settingsWindow;
 
     private ToolStripMenuItem? _statusItem;
     private ToolStripMenuItem? _pauseResumeItem;
     private ToolStripMenuItem? _autoArrangeItem;
+    private ToolStripMenuItem? _startWithWindowsItem;
 
     public TrayIconController(IPeekDowsController controller) : this(controller, null) { }
 
@@ -30,6 +32,7 @@ public class TrayIconController : IDisposable
         _menuBuilder = new TrayMenuBuilder(controller, this);
 
         _trayIcon = LoadTrayIcon();
+        _ownsTrayIcon = _trayIcon != SystemIcons.Application;
 
         _notifyIcon = new NotifyIcon
         {
@@ -43,18 +46,22 @@ public class TrayIconController : IDisposable
 
         _controller.StateChanged += OnStateChanged;
         _controller.AutoArrangeChanged += OnAutoArrangeChanged;
+        _controller.StartWithWindowsChanged += OnStartWithWindowsChanged;
 
         UpdateMenuState(_controller.State);
         UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
+        UpdateStartWithWindowsMenu(_controller.CurrentSettings?.StartWithWindows ?? false);
     }
 
-    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem, ToolStripMenuItem autoArrangeItem)
+    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem, ToolStripMenuItem autoArrangeItem, ToolStripMenuItem startWithWindowsItem)
     {
         _statusItem = statusItem;
         _pauseResumeItem = pauseResumeItem;
         _autoArrangeItem = autoArrangeItem;
+        _startWithWindowsItem = startWithWindowsItem;
         UpdateMenuState(_controller.State);
         UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
+        UpdateStartWithWindowsMenu(_controller.CurrentSettings?.StartWithWindows ?? false);
     }
 
     public void OpenSettings()
@@ -98,6 +105,11 @@ public class TrayIconController : IDisposable
         UpdateAutoArrangeMenu(isAutoArrange);
     }
 
+    private void OnStartWithWindowsChanged(bool isEnabled)
+    {
+        UpdateStartWithWindowsMenu(isEnabled);
+    }
+
     private void UpdateMenuState(RuntimeState state)
     {
         if (_statusItem != null)
@@ -119,11 +131,22 @@ public class TrayIconController : IDisposable
         }
     }
 
+    private void UpdateStartWithWindowsMenu(bool isEnabled)
+    {
+        if (_startWithWindowsItem != null)
+        {
+            _startWithWindowsItem.Checked = isEnabled;
+        }
+    }
+
     public void Dispose()
     {
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
-        _trayIcon.Dispose();
+        if (_ownsTrayIcon)
+        {
+            _trayIcon.Dispose();
+        }
         _settingsWindow?.Dispose();
     }
 }
