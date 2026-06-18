@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 using PeekDows.Core.Models;
 
@@ -10,28 +9,6 @@ public class SettingsService
 {
     private readonly string _settingsFilePath;
     private readonly string _settingsDirectory;
-
-    private static readonly List<string> DefaultIgnoredProcesses = new()
-    {
-        "SearchHost.exe",
-        "StartMenuExperienceHost.exe",
-        "ShellExperienceHost.exe",
-        "TextInputHost.exe",
-        "LockApp.exe",
-        "PeekDows.exe",
-        "SystemSettings.exe"
-    };
-
-    private static readonly List<string> DefaultIgnoredClasses = new()
-    {
-        "Shell_TrayWnd",
-        "WorkerW",
-        "Progman",
-        "NotifyIconOverflowWindow",
-        "Windows.UI.Core.CoreWindow",
-        "DV2ControlHost",
-        "Windows.UI.Composition.DesktopWindowContentBridge"
-    };
 
     public SettingsService()
     {
@@ -93,25 +70,7 @@ public class SettingsService
     {
         settings.IgnoredProcesses ??= new List<string>();
         settings.IgnoredClasses ??= new List<string>();
-        MergeMissingDefaults(settings.IgnoredProcesses, DefaultIgnoredProcesses);
-        MergeMissingDefaults(settings.IgnoredClasses, DefaultIgnoredClasses);
+        settings.Hotkeys ??= new Dictionary<string, string>();
         return settings;
-    }
-
-    private static void MergeMissingDefaults(List<string> current, List<string> defaults)
-    {
-        if (current == null)
-        {
-            return;
-        }
-
-        var existing = new HashSet<string>(current, StringComparer.OrdinalIgnoreCase);
-        foreach (var item in defaults)
-        {
-            if (!existing.Contains(item))
-            {
-                current.Add(item);
-            }
-        }
     }
 }

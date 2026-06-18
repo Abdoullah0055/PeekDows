@@ -298,6 +298,7 @@ public class AutoArrangeServiceTests : IDisposable
         public void OpenSettings() { }
         public void OpenLogFile() { }
         public void OpenLogsFolder() { }
+        public void OnSettingsChanged() { }
         public void Exit() { }
     }
 }

@@ -13,6 +13,8 @@ public class SettingsWindow : Form
     private TextBox _ignoredProcessesBox;
     private TextBox _ignoredClassesBox;
 
+    public event Action? SettingsSaved;
+
     public SettingsWindow(AppSettings settings, SettingsService settingsService)
     {
         _settings = settings;
@@ -105,9 +107,14 @@ public class SettingsWindow : Form
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        _settings.IgnoredProcesses = processes;
-        _settings.IgnoredClasses = classes;
+        _settings.IgnoredProcesses.Clear();
+        _settings.IgnoredProcesses.AddRange(processes);
+
+        _settings.IgnoredClasses.Clear();
+        _settings.IgnoredClasses.AddRange(classes);
+
         _settingsService.Save(_settings);
+        SettingsSaved?.Invoke();
 
         MessageBox.Show("Settings saved.", "PeekDows", MessageBoxButtons.OK, MessageBoxIcon.Information);
         Close();

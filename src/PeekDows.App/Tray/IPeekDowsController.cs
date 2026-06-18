@@ -18,6 +18,7 @@ public interface IPeekDowsController
     void OpenSettings();
     void OpenLogFile();
     void OpenLogsFolder();
+    void OnSettingsChanged();
     void Exit();
     event Action<RuntimeState>? StateChanged;
     event Action<bool>? AutoArrangeChanged;

@@ -6,9 +6,34 @@ namespace PeekDows.Core.Services;
 
 public class WindowClassifier
 {
-    private readonly AppSettings _settings;
+    private AppSettings _settings;
+
+    private static readonly string[] AlwaysIgnoredProcessNames =
+    {
+        "SearchHost.exe",
+        "StartMenuExperienceHost.exe",
+        "ShellExperienceHost.exe",
+        "TextInputHost.exe",
+        "LockApp.exe"
+    };
+
+    private static readonly string[] AlwaysIgnoredClassNames =
+    {
+        "Shell_TrayWnd",
+        "WorkerW",
+        "Progman",
+        "NotifyIconOverflowWindow",
+        "Windows.UI.Core.CoreWindow",
+        "DV2ControlHost",
+        "Windows.UI.Composition.DesktopWindowContentBridge"
+    };
 
     public WindowClassifier(AppSettings settings)
+    {
+        _settings = settings;
+    }
+
+    public void UpdateSettings(AppSettings settings)
     {
         _settings = settings;
     }
@@ -31,16 +56,26 @@ public class WindowClassifier
     {
         if (string.IsNullOrWhiteSpace(processName)) return false;
         var trimmed = processName.Trim();
-        return _settings.IgnoredProcesses.Any(p =>
-            string.Equals(p?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+
+        if (AlwaysIgnoredProcessNames.Any(p =>
+            string.Equals(p, trimmed, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        return _settings.IgnoredProcesses?.Any(p =>
+            string.Equals(p?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase)) ?? false;
     }
 
     public bool IsIgnoredClass(string? className)
     {
         if (string.IsNullOrWhiteSpace(className)) return false;
         var trimmed = className.Trim();
-        return _settings.IgnoredClasses.Any(c =>
-            string.Equals(c?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+
+        if (AlwaysIgnoredClassNames.Any(c =>
+            string.Equals(c, trimmed, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        return _settings.IgnoredClasses?.Any(c =>
+            string.Equals(c?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase)) ?? false;
     }
 
     public bool IsSystemWindow(RawWindowInfo window)

@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using PeekDows.Core.Services;
 using Xunit;
 
@@ -58,38 +57,27 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public void MigrateIfNeeded_MergesMissingDefaultProcesses()
+    public void MigrateIfNeeded_DoesNotReAddRemovedDefaultProcess()
     {
         var settings = _settingsService.Load();
-        settings.IgnoredProcesses.Clear();
+        settings.IgnoredProcesses.RemoveAll(p => p.Equals("PeekDows.exe", StringComparison.OrdinalIgnoreCase));
+        _settingsService.Save(settings);
 
-        _settingsService.MigrateIfNeeded(settings);
+        var reloaded = _settingsService.Load();
 
-        Assert.Contains("PeekDows.exe", settings.IgnoredProcesses);
-        Assert.Contains("SearchHost.exe", settings.IgnoredProcesses);
+        Assert.DoesNotContain("PeekDows.exe", reloaded.IgnoredProcesses);
     }
 
     [Fact]
-    public void MigrateIfNeeded_MergesMissingDefaultClasses()
+    public void MigrateIfNeeded_DoesNotReAddRemovedDefaultClass()
     {
         var settings = _settingsService.Load();
         settings.IgnoredClasses.Clear();
+        _settingsService.Save(settings);
 
-        _settingsService.MigrateIfNeeded(settings);
+        var reloaded = _settingsService.Load();
 
-        Assert.Contains("Shell_TrayWnd", settings.IgnoredClasses);
-        Assert.Contains("Windows.UI.Core.CoreWindow", settings.IgnoredClasses);
-    }
-
-    [Fact]
-    public void MigrateIfNeeded_DoesNotDuplicateExistingEntries()
-    {
-        var settings = _settingsService.Load();
-        var countBefore = settings.IgnoredProcesses.Count;
-
-        _settingsService.MigrateIfNeeded(settings);
-
-        Assert.Equal(countBefore, settings.IgnoredProcesses.Count);
+        Assert.Empty(reloaded.IgnoredClasses);
     }
 
     [Fact]
@@ -101,7 +89,6 @@ public class SettingsServiceTests : IDisposable
         _settingsService.MigrateIfNeeded(settings);
 
         Assert.NotNull(settings.IgnoredProcesses);
-        Assert.Contains("PeekDows.exe", settings.IgnoredProcesses);
     }
 
     [Fact]
@@ -113,7 +100,6 @@ public class SettingsServiceTests : IDisposable
         _settingsService.MigrateIfNeeded(settings);
 
         Assert.NotNull(settings.IgnoredClasses);
-        Assert.Contains("Shell_TrayWnd", settings.IgnoredClasses);
     }
 
     [Fact]
@@ -121,11 +107,11 @@ public class SettingsServiceTests : IDisposable
     {
         var settings = _settingsService.Load();
         settings.IgnoredProcesses.Add("MyCustomApp.exe");
+        _settingsService.Save(settings);
 
-        _settingsService.MigrateIfNeeded(settings);
+        var reloaded = _settingsService.Load();
 
-        Assert.Contains("MyCustomApp.exe", settings.IgnoredProcesses);
-        Assert.Contains("PeekDows.exe", settings.IgnoredProcesses);
+        Assert.Contains("MyCustomApp.exe", reloaded.IgnoredProcesses);
     }
 
     public void Dispose()

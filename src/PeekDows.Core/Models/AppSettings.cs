@@ -24,25 +24,11 @@ public sealed class AppSettings
 
     public List<string> IgnoredProcesses { get; set; } = new()
     {
-        "SearchHost.exe",
-        "StartMenuExperienceHost.exe",
-        "ShellExperienceHost.exe",
-        "TextInputHost.exe",
-        "LockApp.exe",
         "PeekDows.exe",
         "SystemSettings.exe"
     };
 
-    public List<string> IgnoredClasses { get; set; } = new()
-    {
-        "Shell_TrayWnd",
-        "WorkerW",
-        "Progman",
-        "NotifyIconOverflowWindow",
-        "Windows.UI.Core.CoreWindow",
-        "DV2ControlHost",
-        "Windows.UI.Composition.DesktopWindowContentBridge"
-    };
+    public List<string> IgnoredClasses { get; set; } = new();
 
     public Dictionary<string, string> Hotkeys { get; set; } = new()
     {

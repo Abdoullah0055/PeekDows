@@ -241,6 +241,12 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         }
     }
 
+    public void OnSettingsChanged()
+    {
+        _classifier.UpdateSettings(_settings);
+        _logger.Info($"Settings changed at runtime: IgnoredProcesses.Count={_settings.IgnoredProcesses.Count}, IgnoredClasses.Count={_settings.IgnoredClasses.Count}");
+    }
+
     private void OnArrangeNowRequested()
     {
         ArrangeNow();

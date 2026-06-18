@@ -76,6 +76,7 @@ public class TrayIconController : IDisposable
             var settingsWindow = _settingsService != null
                 ? new SettingsWindow(settings, _settingsService)
                 : new SettingsWindow(settings, new SettingsService());
+            settingsWindow.SettingsSaved += () => _controller.OnSettingsChanged();
             _settingsWindow = settingsWindow;
             _settingsWindow.Show();
         }

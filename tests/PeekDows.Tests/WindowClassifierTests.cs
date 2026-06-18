@@ -423,20 +423,20 @@ public class WindowClassifierTests
     public void Classifier_IgnoresProcessWithTrimmedValue()
     {
         var settings = new AppSettings();
-        settings.IgnoredProcesses = new List<string> { "  SearchHost.exe  " };
+        settings.IgnoredProcesses = new List<string> { "  MyCustomApp.exe  " };
         var classifier = new WindowClassifier(settings);
 
-        Assert.True(classifier.IsIgnoredProcess("SearchHost.exe"));
+        Assert.True(classifier.IsIgnoredProcess("MyCustomApp.exe"));
     }
 
     [Fact]
     public void Classifier_IgnoresClassWithTrimmedValue()
     {
         var settings = new AppSettings();
-        settings.IgnoredClasses = new List<string> { "  Shell_TrayWnd  " };
+        settings.IgnoredClasses = new List<string> { "  MyCustomClass  " };
         var classifier = new WindowClassifier(settings);
 
-        Assert.True(classifier.IsIgnoredClass("Shell_TrayWnd"));
+        Assert.True(classifier.IsIgnoredClass("MyCustomClass"));
     }
 
     [Fact]
@@ -463,5 +463,72 @@ public class WindowClassifierTests
     public void Classifier_IgnoresDV2ControlHost()
     {
         Assert.True(_classifier.IsIgnoredClass("DV2ControlHost"));
+    }
+
+    [Fact]
+    public void Classifier_AlwaysIgnoresShellTrayWnd_EvenIfRemovedFromSettings()
+    {
+        var settings = new AppSettings();
+        settings.IgnoredClasses.Clear();
+        var classifier = new WindowClassifier(settings);
+
+        Assert.True(classifier.IsIgnoredClass("Shell_TrayWnd"));
+    }
+
+    [Fact]
+    public void Classifier_AlwaysIgnoresSearchHost_EvenIfRemovedFromSettings()
+    {
+        var settings = new AppSettings();
+        settings.IgnoredProcesses.Clear();
+        var classifier = new WindowClassifier(settings);
+
+        Assert.True(classifier.IsIgnoredProcess("SearchHost.exe"));
+    }
+
+    [Fact]
+    public void Classifier_AllowsUserToRemoveNonMandatoryIgnoredProcess()
+    {
+        var settings = new AppSettings();
+        settings.IgnoredProcesses.Clear();
+        settings.IgnoredProcesses.Add("MyApp.exe");
+        var classifier = new WindowClassifier(settings);
+
+        settings.IgnoredProcesses.Clear();
+
+        Assert.False(classifier.IsIgnoredProcess("MyApp.exe"));
+    }
+
+    [Fact]
+    public void Classifier_UpdateSettings_AppliesNewSettings()
+    {
+        var settings = new AppSettings();
+        var classifier = new WindowClassifier(settings);
+
+        Assert.False(classifier.IsIgnoredProcess("MyApp.exe"));
+
+        settings.IgnoredProcesses.Add("MyApp.exe");
+        classifier.UpdateSettings(settings);
+
+        Assert.True(classifier.IsIgnoredProcess("MyApp.exe"));
+    }
+
+    [Fact]
+    public void Classifier_UserIgnoredProcess_StillIgnoredWhenAddedToSettings()
+    {
+        var settings = new AppSettings();
+        settings.IgnoredProcesses.Add("Notepad.exe");
+        var classifier = new WindowClassifier(settings);
+
+        Assert.True(classifier.IsIgnoredProcess("Notepad.exe"));
+    }
+
+    [Fact]
+    public void Classifier_UserIgnoredClass_StillIgnoredWhenAddedToSettings()
+    {
+        var settings = new AppSettings();
+        settings.IgnoredClasses.Add("MyAppWindowClass");
+        var classifier = new WindowClassifier(settings);
+
+        Assert.True(classifier.IsIgnoredClass("MyAppWindowClass"));
     }
 }
