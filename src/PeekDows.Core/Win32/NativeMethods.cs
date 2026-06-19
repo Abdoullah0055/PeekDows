@@ -8,8 +8,14 @@ public static class NativeMethods
 {
     public const int SWP_NOACTIVATE = 0x0010;
     public const int SWP_NOZORDER = 0x0004;
+    public const int SWP_NOMOVE = 0x0002;
+    public const int SWP_NOSIZE = 0x0001;
     public const int SWP_SHOWWINDOW = 0x0040;
     public const int SWP_NOSENDCHANGING = 0x0400;
+
+    public static readonly IntPtr HWND_TOP = IntPtr.Zero;
+    public static readonly IntPtr HWND_TOPMOST = new(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new(-2);
 
     public const int WM_HOTKEY = 0x0312;
 
@@ -82,4 +88,21 @@ public static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetFocus(IntPtr hWnd);
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr lpdwProcessId);
 }

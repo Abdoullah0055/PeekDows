@@ -7,6 +7,7 @@ namespace PeekDows.Core.Services;
 public class WindowClassifier
 {
     private AppSettings _settings;
+    private readonly Func<IntPtr, bool> _isOnCurrentVirtualDesktop;
 
     private static readonly string[] AlwaysIgnoredProcessNames =
     {
@@ -28,9 +29,12 @@ public class WindowClassifier
         "Windows.UI.Composition.DesktopWindowContentBridge"
     };
 
-    public WindowClassifier(AppSettings settings)
+    public WindowClassifier(AppSettings settings) : this(settings, _ => true) { }
+
+    public WindowClassifier(AppSettings settings, Func<IntPtr, bool> isOnCurrentVirtualDesktop)
     {
         _settings = settings;
+        _isOnCurrentVirtualDesktop = isOnCurrentVirtualDesktop;
     }
 
     public void UpdateSettings(AppSettings settings)
@@ -49,6 +53,7 @@ public class WindowClassifier
         if (IsIgnoredProcess(window.ProcessName)) return false;
         if (IsIgnoredClass(window.ClassName)) return false;
         if (IsSystemWindow(window)) return false;
+        if (!_isOnCurrentVirtualDesktop(window.Hwnd)) return false;
         return true;
     }
 

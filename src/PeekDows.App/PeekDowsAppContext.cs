@@ -31,6 +31,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private readonly System.Windows.Forms.Timer _pauseCheckTimer;
     private readonly DirectionalFocusService _directionalFocusService;
     private readonly DirectionalFocusRegistry _directionalFocusRegistry;
+    private readonly IVirtualDesktopService _virtualDesktopService;
+    private readonly WindowActivationService _windowActivationService;
 
     private AppSettings _settings;
 
@@ -69,7 +71,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _logger.Info($"Settings: IgnoredClasses.Count={_settings.IgnoredClasses.Count}");
 
         _discoveryService = new WindowDiscoveryService();
-        _classifier = new WindowClassifier(_settings);
+        _virtualDesktopService = new VirtualDesktopService(_logger);
+        _classifier = new WindowClassifier(_settings, hwnd => _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd));
         _monitorService = new MonitorService(_logger);
         _layoutEngine = new LayoutEngine();
         _multiMonitorLayoutService = new MultiMonitorLayoutService(_monitorService, _layoutEngine, _logger);
@@ -110,9 +113,20 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             _autoArrangeService.Start(_settings);
         }
 
-        _directionalFocusRegistry = new DirectionalFocusRegistry(_logger);
+        _directionalFocusRegistry = new DirectionalFocusRegistry(
+            hwnd => NativeMethods.IsWindow(hwnd),
+            hwnd => _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd),
+            _logger);
         var gestureDetector = new DirectionalFocusGestureDetector();
-        _directionalFocusService = new DirectionalFocusService(gestureDetector, _directionalFocusRegistry, _monitorService, _logger);
+        _windowActivationService = new WindowActivationService(new Win32ActivationApi(), _logger);
+        _directionalFocusService = new DirectionalFocusService(
+            gestureDetector,
+            _directionalFocusRegistry,
+            _monitorService,
+            _windowActivationService,
+            _virtualDesktopService,
+            () => _settings.DirectionalFocusThresholdPx,
+            _logger);
 
         if (_settings.DirectionalFocusEnabled)
         {
@@ -478,8 +492,9 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
             var result = _placementService.ApplyPlacements(placements);
 
-            _directionalFocusRegistry.UpdateFromPlacements(placements, _monitorService);
-            _logger.Info("DirectionalFocusRegistry updated from arrange placements");
+            var succeededPlacements = placements.Where(p => result.SucceededHwnds.Contains(p.Hwnd)).ToList();
+            _directionalFocusRegistry.UpdateFromPlacements(succeededPlacements, _monitorService);
+            _logger.Info($"DirectionalFocusRegistry updated from arrange placements (succeeded={succeededPlacements.Count} of {placements.Count})");
 
             if (result.FailedCount > 0)
             {

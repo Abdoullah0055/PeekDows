@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
@@ -15,6 +16,9 @@ public sealed class DirectionalFocusService : IDisposable
     private readonly DirectionalFocusGestureDetector _gestureDetector;
     private readonly DirectionalFocusRegistry _registry;
     private readonly IMonitorResolver _monitorResolver;
+    private readonly WindowActivationService _activationService;
+    private readonly IVirtualDesktopService _virtualDesktopService;
+    private readonly Func<int> _getThresholdPx;
     private readonly FileLogger? _logger;
 
     private readonly System.Windows.Forms.Timer _timer;
@@ -29,11 +33,17 @@ public sealed class DirectionalFocusService : IDisposable
         DirectionalFocusGestureDetector gestureDetector,
         DirectionalFocusRegistry registry,
         IMonitorResolver monitorResolver,
+        WindowActivationService activationService,
+        IVirtualDesktopService virtualDesktopService,
+        Func<int> getThresholdPx,
         FileLogger? logger = null)
     {
         _gestureDetector = gestureDetector;
         _registry = registry;
         _monitorResolver = monitorResolver;
+        _activationService = activationService;
+        _virtualDesktopService = virtualDesktopService;
+        _getThresholdPx = getThresholdPx;
         _logger = logger;
 
         _timer = new System.Windows.Forms.Timer { Interval = TickIntervalMs };
@@ -94,7 +104,11 @@ public sealed class DirectionalFocusService : IDisposable
         }
 
         var current = Cursor.Position;
-        var slot = _gestureDetector.Detect(_anchor.X, _anchor.Y, current.X, current.Y, 80);
+        int dx = current.X - _anchor.X;
+        int dy = current.Y - _anchor.Y;
+
+        var threshold = _getThresholdPx();
+        var slot = _gestureDetector.Detect(_anchor.X, _anchor.Y, current.X, current.Y, threshold);
 
         if (slot == null) return;
 
@@ -102,26 +116,47 @@ public sealed class DirectionalFocusService : IDisposable
 
         if ((DateTime.Now - _lastFocusTime).TotalMilliseconds < CooldownMs) return;
 
-        var monitor = _monitorResolver.GetMonitorForWindow(GetForegroundWindowSafe());
-        var monitorWorkArea = MonitorFromPointNative(current.X, current.Y);
+        var mouseWorkArea = MonitorFromPointNative(current.X, current.Y);
 
-        if (!_registry.HasSlotsForMonitor(monitorWorkArea)) return;
+        _logger?.Info($"Directional focus trigger candidate: slot={slot.Value}, dx={dx}, dy={dy}, anchor=({_anchor.X},{_anchor.Y}), current=({current.X},{current.Y}), mouseMonitor={mouseWorkArea}, threshold={threshold}");
 
-        var hwnd = _registry.GetHwndForSlot(monitorWorkArea, slot.Value);
-        if (hwnd == null || hwnd == IntPtr.Zero) return;
-
-        if (NativeMethods.IsIconic(hwnd.Value))
+        if (!_registry.HasSlotsForMonitor(mouseWorkArea))
         {
-            NativeMethods.ShowWindow(hwnd.Value, NativeMethods.SW_RESTORE);
+            _logger?.Info($"Directional focus ignored: no slots for mouseMonitor={mouseWorkArea}");
+            return;
         }
 
-        if (NativeMethods.SetForegroundWindow(hwnd.Value))
+        var hwnd = _registry.GetHwndForSlot(mouseWorkArea, slot.Value);
+        if (hwnd == null || hwnd == IntPtr.Zero)
         {
-            _logger?.Info($"Directional focus triggered: monitor={monitorWorkArea}, slot={slot.Value}, hwnd={hwnd.Value}");
+            _logger?.Info($"Directional focus ignored: no window mapped for slot={slot.Value} on monitor={mouseWorkArea}");
+            return;
+        }
+
+        bool onCurrentDesktop = _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd.Value);
+        if (!onCurrentDesktop)
+        {
+            _logger?.Info($"Directional focus ignored: target is not on current virtual desktop, hwnd={hwnd.Value}");
+            return;
+        }
+
+        var targetTitle = GetWindowTitle(hwnd.Value);
+        var targetPid = GetWindowProcessId(hwnd.Value);
+        bool isIconic = NativeMethods.IsIconic(hwnd.Value);
+        var currentForeground = NativeMethods.GetForegroundWindow();
+
+        _logger?.Info($"Directional focus target: hwnd={hwnd.Value}, title={targetTitle}, pid={targetPid}, onCurrentDesktop={onCurrentDesktop}, isMinimized={isIconic}, currentForegroundHwnd={currentForeground}");
+
+        bool activated = _activationService.Activate(hwnd.Value);
+
+        if (activated)
+        {
+            _logger?.Info($"Directional focus success: slot={slot.Value}, hwnd={hwnd.Value}, title={targetTitle}");
         }
         else
         {
-            _logger?.Warn($"SetForegroundWindow failed: hwnd={hwnd.Value}");
+            var finalForeground = NativeMethods.GetForegroundWindow();
+            _logger?.Warn($"Directional focus activation failed: slot={slot.Value}, hwnd={hwnd.Value}, foregroundHwnd={finalForeground}");
         }
 
         _lastTriggeredSlot = slot;
@@ -139,10 +174,31 @@ public sealed class DirectionalFocusService : IDisposable
         return (NativeMethods.GetAsyncKeyState(vk) & 0x8000) != 0;
     }
 
-    private static IntPtr GetForegroundWindowSafe()
+    private static string GetWindowTitle(IntPtr hwnd)
     {
-        try { return NativeMethods.GetForegroundWindow(); }
-        catch { return IntPtr.Zero; }
+        try
+        {
+            var sb = new StringBuilder(256);
+            NativeMethods.GetWindowText(hwnd, sb, sb.Capacity);
+            return sb.ToString();
+        }
+        catch
+        {
+            return "<unknown>";
+        }
+    }
+
+    private static uint GetWindowProcessId(IntPtr hwnd)
+    {
+        try
+        {
+            NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+            return pid;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private Rect MonitorFromPointNative(int x, int y)

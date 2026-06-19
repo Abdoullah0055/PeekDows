@@ -50,18 +50,19 @@ public sealed class WindowPlacementService
         int succeeded = 0;
         int failed = 0;
         var errors = new List<string>();
+        var succeededHwnds = new List<IntPtr>();
 
         var peeks = placements.Where(p => !p.BringToFront).ToList();
         var focus = placements.FirstOrDefault(p => p.BringToFront);
 
         foreach (var placement in peeks)
         {
-            if (TryApplyPlacement(placement, ref succeeded, ref failed, errors)) { }
+            if (TryApplyPlacement(placement, ref succeeded, ref failed, errors, succeededHwnds)) { }
         }
 
         if (focus != null)
         {
-            TryApplyPlacement(focus, ref succeeded, ref failed, errors);
+            TryApplyPlacement(focus, ref succeeded, ref failed, errors, succeededHwnds);
         }
 
         _logger?.Info($"ApplyPlacements completed: attempted={placements.Count}, succeeded={succeeded}, failed={failed}");
@@ -71,11 +72,12 @@ public sealed class WindowPlacementService
             AttemptedCount = placements.Count,
             SucceededCount = succeeded,
             FailedCount = failed,
-            Errors = errors
+            Errors = errors,
+            SucceededHwnds = succeededHwnds
         };
     }
 
-    private bool TryApplyPlacement(WindowPlacement placement, ref int succeeded, ref int failed, List<string> errors)
+    private bool TryApplyPlacement(WindowPlacement placement, ref int succeeded, ref int failed, List<string> errors, List<IntPtr> succeededHwnds)
     {
         try
         {
@@ -121,6 +123,7 @@ public sealed class WindowPlacementService
             if (result)
             {
                 succeeded++;
+                succeededHwnds.Add(placement.Hwnd);
                 _logger?.Info($"SetWindowPos succeeded: hwnd={placement.Hwnd}, slot={placement.SlotId}");
             }
             else

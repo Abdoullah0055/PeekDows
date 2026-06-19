@@ -112,4 +112,18 @@ public class DirectionalFocusGestureDetectorTests
         var result = _detector.Detect(500, 500, 500, 500, 80);
         Assert.Null(result);
     }
+
+    [Fact]
+    public void UsesConfiguredThreshold_LowerThreshold()
+    {
+        var result = _detector.Detect(0, 0, 50, 50, 50);
+        Assert.Equal(DirectionalFocusSlot.BottomRight, result);
+    }
+
+    [Fact]
+    public void UsesConfiguredThreshold_HigherThreshold()
+    {
+        var result = _detector.Detect(0, 0, 50, 50, 100);
+        Assert.Null(result);
+    }
 }

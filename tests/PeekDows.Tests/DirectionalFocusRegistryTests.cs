@@ -7,7 +7,7 @@ namespace PeekDows.Tests;
 
 public class DirectionalFocusRegistryTests
 {
-    private readonly DirectionalFocusRegistry _registry = new(_ => true);
+    private readonly DirectionalFocusRegistry _registry = new(_ => true, _ => true);
 
     private class FakeMonitorResolver : IMonitorResolver
     {
@@ -138,7 +138,7 @@ public class DirectionalFocusRegistryTests
     [Fact]
     public void RemovesInvalidWindowHandle()
     {
-        var strictRegistry = new DirectionalFocusRegistry(hwnd => hwnd != (IntPtr)999);
+        var strictRegistry = new DirectionalFocusRegistry(hwnd => hwnd != (IntPtr)999, _ => true);
         var workArea = new Rect(0, 0, 1920, 1080);
         var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
         {
@@ -228,5 +228,93 @@ public class DirectionalFocusRegistryTests
 
         _registry.UpdateFromPlacements(placements, monitorResolver);
         Assert.False(_registry.HasSlotsForMonitor(workArea));
+    }
+
+    [Fact]
+    public void IgnoresPlacementNotOnCurrentVirtualDesktop()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, hwnd => hwnd != (IntPtr)300);
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)100] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)300] = new MonitorInfo { WorkArea = workArea, IsPrimary = true }
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)100, SlotId = "A", TargetRect = new Rect(0, 0, 1728, 972) },
+            new() { Hwnd = (IntPtr)300, SlotId = "B", TargetRect = new Rect(192, 108, 1728, 972) }
+        };
+
+        registry.UpdateFromPlacements(placements, monitorResolver);
+
+        Assert.Equal((IntPtr)100, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
+        Assert.Null(registry.GetHwndForSlot(workArea, DirectionalFocusSlot.BottomRight));
+    }
+
+    [Fact]
+    public void RemovesSlotWhenWindowNotOnCurrentVirtualDesktop()
+    {
+        bool hwnd200OnDesktop = true;
+        var registry = new DirectionalFocusRegistry(_ => true, hwnd => hwnd != (IntPtr)200 || hwnd200OnDesktop);
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)200] = new MonitorInfo { WorkArea = workArea, IsPrimary = true }
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)200, SlotId = "A", TargetRect = new Rect(0, 0, 1728, 972) }
+        };
+
+        registry.UpdateFromPlacements(placements, monitorResolver);
+        Assert.Equal((IntPtr)200, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
+
+        hwnd200OnDesktop = false;
+        Assert.Null(registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
+    }
+
+    [Fact]
+    public void ReturnsNullForWindowOnOtherVirtualDesktop()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => false);
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)100] = new MonitorInfo { WorkArea = workArea, IsPrimary = true }
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)100, SlotId = "A", TargetRect = new Rect(0, 0, 1728, 972) }
+        };
+
+        registry.UpdateFromPlacements(placements, monitorResolver);
+        Assert.Null(registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
+    }
+
+    [Fact]
+    public void ReturnsSlotWhenWindowIsOnCurrentVirtualDesktop()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)100] = new MonitorInfo { WorkArea = workArea, IsPrimary = true }
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)100, SlotId = "A", TargetRect = new Rect(0, 0, 1728, 972) }
+        };
+
+        registry.UpdateFromPlacements(placements, monitorResolver);
+        Assert.Equal((IntPtr)100, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
     }
 }

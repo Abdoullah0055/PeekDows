@@ -11,12 +11,23 @@ public sealed class DirectionalFocusRegistry
     private readonly Dictionary<Rect, Dictionary<DirectionalFocusSlot, IntPtr>> _slotsByMonitor = new();
     private readonly FileLogger? _logger;
     private readonly Func<IntPtr, bool> _isWindowValid;
+    private readonly Func<IntPtr, bool> _isOnCurrentVirtualDesktop;
 
-    public DirectionalFocusRegistry(FileLogger? logger = null) : this(hwnd => NativeMethods.IsWindow(hwnd), logger) { }
+    public DirectionalFocusRegistry(FileLogger? logger = null)
+        : this(hwnd => NativeMethods.IsWindow(hwnd), hwnd => true, logger) { }
 
-    internal DirectionalFocusRegistry(Func<IntPtr, bool> isWindowValid, FileLogger? logger = null)
+    public DirectionalFocusRegistry(
+        Func<IntPtr, bool> isWindowValid,
+        FileLogger? logger = null)
+        : this(isWindowValid, hwnd => true, logger) { }
+
+    public DirectionalFocusRegistry(
+        Func<IntPtr, bool> isWindowValid,
+        Func<IntPtr, bool> isOnCurrentVirtualDesktop,
+        FileLogger? logger = null)
     {
         _isWindowValid = isWindowValid;
+        _isOnCurrentVirtualDesktop = isOnCurrentVirtualDesktop;
         _logger = logger;
     }
 
@@ -28,6 +39,12 @@ public sealed class DirectionalFocusRegistry
         {
             var slot = MapSlotId(placement.SlotId);
             if (slot == null) continue;
+
+            if (!_isOnCurrentVirtualDesktop(placement.Hwnd))
+            {
+                _logger?.Info($"DirectionalFocusRegistry: ignored placement for slot={slot.Value}, hwnd={placement.Hwnd} – window not on current virtual desktop");
+                continue;
+            }
 
             var monitor = monitorResolver.GetMonitorForWindow(placement.Hwnd);
             var workArea = monitor.WorkArea;
@@ -60,6 +77,13 @@ public sealed class DirectionalFocusRegistry
         if (!_isWindowValid(hwnd))
         {
             _logger?.Warn($"DirectionalFocusRegistry: invalid window handle hwnd={hwnd} for slot={slot}, removing");
+            slotMap.Remove(slot);
+            return null;
+        }
+
+        if (!_isOnCurrentVirtualDesktop(hwnd))
+        {
+            _logger?.Info($"DirectionalFocusRegistry: window hwnd={hwnd} for slot={slot} is not on current virtual desktop, removing");
             slotMap.Remove(slot);
             return null;
         }
