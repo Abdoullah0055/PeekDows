@@ -137,7 +137,9 @@ public class DirectionalFocusServiceRebuildTests
             [DirectionalFocusSlot.TopLeft] = (IntPtr)40
         });
 
-        var snapshot = CreateSnapshot(_ => default);
+        // The window must still physically occupy slot A for the fast path to be trusted.
+        var rectA = SlotRect("A");
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)40 ? rectA : default);
         var sourceCallCount = 0;
 
         var service = CreateService(
@@ -177,5 +179,145 @@ public class DirectionalFocusServiceRebuildTests
         var second = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopRight);
         Assert.Null(second);
         Assert.Equal(1, sourceCallCount);
+    }
+
+    [Fact]
+    public void ResolveHwndForSlot_UsesRegistry_WhenWindowStillMatchesSlot()
+    {
+        // Registry maps TopLeft→60, and the window physically still occupies slot A.
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        registry.SetSlotsForMonitor(WorkArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)60
+        });
+
+        var rectA = SlotRect("A");
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)60 ? rectA : default);
+
+        var sourceCallCount = 0;
+        var service = CreateService(
+            registry,
+            snapshot,
+            () => { sourceCallCount++; return Array.Empty<IntPtr>(); });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft);
+
+        // Fast path trusted (window still in slot), no rebuild.
+        Assert.Equal((IntPtr)60, hwnd);
+        Assert.Equal(0, sourceCallCount);
+    }
+
+    [Fact]
+    public void ResolveHwndForSlot_Rebuilds_WhenRegistryWindowMovedAwayFromSlot()
+    {
+        // Registry maps TopLeft→70, but the user dragged window 70 away from slot A.
+        // A *different* window (71) is now physically sitting in slot A.
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        registry.SetSlotsForMonitor(WorkArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)70
+        });
+
+        var rectA = SlotRect("A");
+        var movedAway = new Rect(317, 244, rectA.Width - 500, rectA.Height - 500);
+        var snapshot = CreateSnapshot(hwnd => hwnd switch
+        {
+            IntPtr h when h == (IntPtr)70 => movedAway,
+            IntPtr h when h == (IntPtr)71 => rectA,
+            _ => default
+        });
+
+        var service = CreateService(registry, snapshot, () => new[] { (IntPtr)70, (IntPtr)71 });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft);
+
+        // Fast path rejected (70 moved away) → rebuild → snapshot maps A→71 → accepted.
+        Assert.Equal((IntPtr)71, hwnd);
+        Assert.Equal((IntPtr)71, registry.GetHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft));
+    }
+
+    [Fact]
+    public void ResolveHwndForSlot_ReturnsNull_WhenRegistryStaleAndLayoutNotRecognized()
+    {
+        // Registry maps TopLeft→80, but window 80 has been dragged far from slot A,
+        // and the snapshot finds no window in slot A at all.
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        registry.SetSlotsForMonitor(WorkArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)80
+        });
+
+        var rectA = SlotRect("A");
+        var movedAway = new Rect(317, 244, rectA.Width - 500, rectA.Height - 500);
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)80 ? movedAway : default);
+
+        var service = CreateService(registry, snapshot, () => new[] { (IntPtr)80 });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft);
+
+        Assert.Null(hwnd);
+    }
+
+    [Fact]
+    public void ResolveHwndForSlot_ReturnsRebuiltSlot_WhenSnapshotRecognizesLayout()
+    {
+        // Empty registry (e.g. after a desktop switch that purged nothing but the slot
+        // was never re-registered). Window 90 is physically in slot B.
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var rectB = SlotRect("B");
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)90 ? rectB : default);
+
+        var service = CreateService(registry, snapshot, () => new[] { (IntPtr)90 });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.BottomRight);
+
+        Assert.Equal((IntPtr)90, hwnd);
+    }
+
+    [Fact]
+    public void ResolveHwndForSlot_RejectsRebuiltHwnd_WhenItNoLongerMatchesSlotRect()
+    {
+        // Registry is empty. Rebuild maps TopLeft→100, but by the time we re-validate
+        // the rect (simulated via a rectFor that returns a non-matching rect for the
+        // rebuild candidate), the mapping must be rejected. This is modelled by having
+        // the snapshot source contain hwnd 100 but its rect not matching slot A.
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var rectA = SlotRect("A");
+        var movedAway = new Rect(317, 244, rectA.Width - 500, rectA.Height - 500);
+
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)100 ? movedAway : default);
+
+        var service = CreateService(registry, snapshot, () => new[] { (IntPtr)100 });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft);
+
+        Assert.Null(hwnd);
+        Assert.False(registry.HasSlotsForMonitor(WorkArea));
+    }
+
+    [Fact]
+    public void ResolveHwndForSlot_DoesNotRebuild_WhenRegistrySlotStillValid()
+    {
+        // Registry maps TopLeft→110, window 110 still in slot A → no rebuild, no
+        // candidate source call.
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        registry.SetSlotsForMonitor(WorkArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)110
+        });
+
+        var rectA = SlotRect("A");
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)110 ? rectA : default);
+
+        var sourceCallCount = 0;
+        var service = CreateService(
+            registry,
+            snapshot,
+            () => { sourceCallCount++; return Array.Empty<IntPtr>(); });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft);
+
+        Assert.Equal((IntPtr)110, hwnd);
+        Assert.Equal(0, sourceCallCount);
     }
 }

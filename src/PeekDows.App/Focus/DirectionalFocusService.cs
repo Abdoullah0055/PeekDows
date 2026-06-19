@@ -174,25 +174,60 @@ public sealed class DirectionalFocusService : IDisposable
     /// null when the layout is not recognised. Pure lookup logic — no Win32 calls,
     /// so it is directly unit-testable.
     /// </summary>
+    /// <remarks>
+    /// The registry fast path is never trusted blindly: even when a slot→hwnd mapping
+    /// exists, the window must still be physically sitting in its expected slot rect
+    /// (validated via <see cref="DirectionalFocusLayoutSnapshotService.IsWindowStillInSlot"/>).
+    /// This stops Directional Focus from activating a window the user dragged away.
+    /// </remarks>
     internal IntPtr? ResolveHwndForSlot(Rect mouseWorkArea, DirectionalFocusSlot slot)
     {
-        // 1. Fast path: registry already has the slot for this monitor.
+        // 1. Fast path: registry has a mapping — but only trust it if the window is
+        //    still physically in its slot rect. Otherwise the registry is stale.
         var hwnd = _registry.GetHwndForSlot(mouseWorkArea, slot);
 
-        // 2. On miss, try a one-shot rebuild from the current layout (rate-limited).
+        if (hwnd != null && hwnd != IntPtr.Zero)
+        {
+            if (_snapshotService.IsWindowStillInSlot(hwnd.Value, mouseWorkArea, slot))
+            {
+                _logger?.Info($"Directional focus registry hit: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}");
+            }
+            else
+            {
+                _logger?.Info($"Directional focus registry hit rejected: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}, window no longer matches slot rect");
+                hwnd = null;
+            }
+        }
+
+        // 2. On miss/stale, try a one-shot rebuild from the current layout (rate-limited).
         if (hwnd == null || hwnd == IntPtr.Zero)
         {
-            _logger?.Info($"Directional focus registry miss: slot={slot}, monitor={mouseWorkArea}");
+            _logger?.Info($"Directional focus registry miss/stale: slot={slot}, monitor={mouseWorkArea}");
 
             if (TryRebuildRegistryForCurrentDesktop(mouseWorkArea))
             {
                 hwnd = _registry.GetHwndForSlot(mouseWorkArea, slot);
+
+                // Validate the rebuilt mapping too — a snapshot may map a slot to a
+                // window that has since drifted again, so re-check the rect.
+                if (hwnd != null && hwnd != IntPtr.Zero)
+                {
+                    if (_snapshotService.IsWindowStillInSlot(hwnd.Value, mouseWorkArea, slot))
+                    {
+                        _logger?.Info($"Directional focus rebuild result accepted: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}");
+                    }
+                    else
+                    {
+                        _logger?.Info($"Directional focus rebuild result rejected: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}, window does not match slot rect");
+                        hwnd = null;
+                    }
+                }
             }
         }
 
         if (hwnd == null || hwnd == IntPtr.Zero)
         {
-            _logger?.Info($"Directional focus ignored: layout not recognized; run Arrange Now first. slot={slot}, monitor={mouseWorkArea}");
+            _logger?.Info($"Directional focus ignored: current layout not recognized; run Arrange Now first. slot={slot}, monitor={mouseWorkArea}");
         }
 
         return hwnd;

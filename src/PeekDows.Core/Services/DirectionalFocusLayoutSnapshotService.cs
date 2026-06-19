@@ -112,6 +112,51 @@ public sealed class DirectionalFocusLayoutSnapshotService
         return result;
     }
 
+    /// <summary>
+    /// Validates that a single window is still physically sitting in its expected
+    /// PeekDows slot, without moving it. Used by the registry fast path so Directional
+    /// Focus never trusts a stale slot→hwnd mapping after the user dragged a window away.
+    /// </summary>
+    /// <returns>
+    /// <c>true</c> only when: hwnd is non-zero, on the current virtual desktop, on the
+    /// requested monitor, and its current rect matches the slot's expected rect within
+    /// the configured tolerance.
+    /// </returns>
+    public bool IsWindowStillInSlot(IntPtr hwnd, Rect monitorWorkArea, DirectionalFocusSlot slot)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (!_isOnCurrentVirtualDesktop(hwnd))
+        {
+            Logger?.Info($"DirectionalFocusLayoutSnapshot.IsWindowStillInSlot: hwnd={hwnd} not on current virtual desktop");
+            return false;
+        }
+
+        var rect = _getWindowRect(hwnd);
+
+        // The window must still be physically on the requested monitor.
+        var windowMonitor = _monitorResolver.GetMonitorForWindow(hwnd);
+        if (windowMonitor.WorkArea != monitorWorkArea)
+        {
+            Logger?.Info($"DirectionalFocusLayoutSnapshot.IsWindowStillInSlot: hwnd={hwnd} rect={rect} on monitor={windowMonitor.WorkArea}, not target monitor={monitorWorkArea}");
+            return false;
+        }
+
+        var slotId = MapSlotIdFromSlot(slot);
+        if (slotId == null)
+        {
+            return false;
+        }
+
+        var slotRectsById = _layoutEngine.CalculateClassicPeekGridSlotRects(monitorWorkArea);
+        var expectedRect = slotRectsById[slotId];
+
+        return RectApproximatelyEquals(rect, expectedRect, _tolerancePx);
+    }
+
     internal static bool RectApproximatelyEquals(Rect actual, Rect expected, int tolerancePx)
     {
         return Math.Abs(actual.Left - expected.Left) <= tolerancePx
@@ -137,6 +182,18 @@ public sealed class DirectionalFocusLayoutSnapshotService
             "B" => DirectionalFocusSlot.BottomRight,
             "C" => DirectionalFocusSlot.TopRight,
             "D" => DirectionalFocusSlot.BottomLeft,
+            _ => null
+        };
+    }
+
+    private static string? MapSlotIdFromSlot(DirectionalFocusSlot slot)
+    {
+        return slot switch
+        {
+            DirectionalFocusSlot.TopLeft => "A",
+            DirectionalFocusSlot.BottomRight => "B",
+            DirectionalFocusSlot.TopRight => "C",
+            DirectionalFocusSlot.BottomLeft => "D",
             _ => null
         };
     }
