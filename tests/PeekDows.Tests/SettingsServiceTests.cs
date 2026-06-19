@@ -114,6 +114,30 @@ public class SettingsServiceTests : IDisposable
         Assert.Contains("MyCustomApp.exe", reloaded.IgnoredProcesses);
     }
 
+    [Fact]
+    public void Save_And_Load_PreservesStartWithWindows()
+    {
+        var settings = _settingsService.Load();
+        settings.StartWithWindows = true;
+        _settingsService.Save(settings);
+
+        var loadedSettings = _settingsService.Load();
+
+        Assert.True(loadedSettings.StartWithWindows);
+    }
+
+    [Fact]
+    public void Save_And_Load_PreservesAutoArrange()
+    {
+        var settings = _settingsService.Load();
+        settings.AutoArrange = true;
+        _settingsService.Save(settings);
+
+        var loadedSettings = _settingsService.Load();
+
+        Assert.True(loadedSettings.AutoArrange);
+    }
+
     public void Dispose()
     {
         var dir = Path.GetDirectoryName(_testSettingsPath);

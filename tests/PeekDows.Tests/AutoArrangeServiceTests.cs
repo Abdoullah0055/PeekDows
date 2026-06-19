@@ -272,6 +272,38 @@ public class AutoArrangeServiceTests : IDisposable
         Assert.Equal(0, _controller.ArrangeNowCallCount);
     }
 
+    [Fact]
+    public void AutoArrange_WhenControllerPaused_DoesNotArrange()
+    {
+        var snapshot1 = new List<RawWindowInfo>
+        {
+            MakeRaw((IntPtr)100, title: "Chrome")
+        };
+
+        var snapshot2 = new List<RawWindowInfo>
+        {
+            MakeRaw((IntPtr)100, title: "Chrome"),
+            MakeRaw((IntPtr)200, title: "VS Code")
+        };
+
+        var discovery = CreateDiscoveryService(snapshot1, snapshot2);
+        _service = CreateService(discovery);
+
+        var settings = new AppSettings
+        {
+            Enabled = true,
+            AutoArrange = true,
+            ArrangeOnStartup = false
+        };
+
+        _service.Start(settings);
+        _controller.State = RuntimeState.Paused;
+        _controller.CurrentSettingsValue = settings;
+        _service.Tick();
+
+        Assert.Equal(0, _controller.ArrangeNowCallCount);
+    }
+
     public void Dispose()
     {
         _service?.Dispose();

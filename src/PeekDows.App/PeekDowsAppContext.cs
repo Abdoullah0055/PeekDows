@@ -291,6 +291,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _pauseCheckTimer.Dispose();
         _autoArrangeService.Dispose();
         _hotkeyService.Dispose();
+        _trayController.Dispose();
         Application.Exit();
     }
 

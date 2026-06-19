@@ -250,4 +250,45 @@ public class PauseStateServiceTests
         service.CheckExpired(futureNow);
         Assert.Null(service.PauseUntil);
     }
+
+    [Fact]
+    public void Resume_DoesNotTriggerArrange()
+    {
+        var service = new PauseStateService();
+        service.PauseUntilResumed();
+
+        bool arrangeTriggered = false;
+        service.StateChanged += state =>
+        {
+            if (state == RuntimeState.Running)
+                arrangeTriggered = true;
+        };
+
+        service.Resume();
+
+        Assert.True(arrangeTriggered);
+        Assert.Equal(RuntimeState.Running, service.State);
+    }
+
+    [Fact]
+    public void PauseTimerExpiration_DoesNotTriggerArrange()
+    {
+        var service = new PauseStateService();
+        service.PauseFor(TimeSpan.FromMinutes(5));
+
+        bool arrangeTriggered = false;
+        service.StateChanged += state =>
+        {
+            if (state == RuntimeState.Running)
+                arrangeTriggered = true;
+        };
+
+        var futureNow = DateTimeOffset.Now + TimeSpan.FromMinutes(6);
+        var expired = service.CheckExpired(futureNow);
+
+        Assert.True(expired);
+        Assert.True(arrangeTriggered);
+        Assert.Equal(RuntimeState.Running, service.State);
+        Assert.Null(service.PauseUntil);
+    }
 }

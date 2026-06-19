@@ -51,20 +51,22 @@ public class TrayMenuBuilder
 
         menu.Items.Add(pauseForMenu);
 
+        menu.Items.Add(new ToolStripSeparator());
+
         var autoArrangeItem = new ToolStripMenuItem("Enable Auto Arrange");
         autoArrangeItem.Click += (s, e) => _controller.ToggleAutoArrange();
         menu.Items.Add(autoArrangeItem);
 
         var startWithWindowsItem = new ToolStripMenuItem("Start with Windows");
         startWithWindowsItem.Checked = _controller.CurrentSettings.StartWithWindows;
-        startWithWindowsItem.Click += (s, e) =>
-        {
-            _controller.ToggleStartWithWindows();
-            startWithWindowsItem.Checked = _controller.IsStartWithWindowsEnabled;
-        };
+        startWithWindowsItem.Click += (s, e) => _controller.ToggleStartWithWindows();
         menu.Items.Add(startWithWindowsItem);
 
         menu.Items.Add(new ToolStripSeparator());
+
+        var settingsItem = new ToolStripMenuItem("Settings");
+        settingsItem.Click += (s, e) => _trayIcon.OpenSettings();
+        menu.Items.Add(settingsItem);
 
         var openLogItem = new ToolStripMenuItem("Open Log File");
         openLogItem.Click += (s, e) => _controller.OpenLogFile();
@@ -73,12 +75,6 @@ public class TrayMenuBuilder
         var openLogsFolderItem = new ToolStripMenuItem("Open Logs Folder");
         openLogsFolderItem.Click += (s, e) => _controller.OpenLogsFolder();
         menu.Items.Add(openLogsFolderItem);
-
-        menu.Items.Add(new ToolStripSeparator());
-
-        var settingsItem = new ToolStripMenuItem("Settings");
-        settingsItem.Click += (s, e) => _trayIcon.OpenSettings();
-        menu.Items.Add(settingsItem);
 
         menu.Items.Add(new ToolStripSeparator());
 
