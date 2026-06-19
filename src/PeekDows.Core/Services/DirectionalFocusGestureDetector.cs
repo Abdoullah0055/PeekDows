@@ -27,35 +27,34 @@ public sealed class DirectionalFocusGestureDetector
         int absDx = Math.Abs(dx);
         int absDy = Math.Abs(dy);
 
-        // Diagonal gestures take priority and are unchanged: both axes must clear the axial
-        // minimum. This keeps A/B/C/D behaviour byte-for-byte identical to before the
-        // edge-centred slots were added.
-        bool dxIsDiagonal = absDx >= MinAxialPx;
-        bool dyIsDiagonal = absDy >= MinAxialPx;
+        // A straight (cardinal) gesture wins when one axis clearly dominates the other by
+        // at least CardinalDominanceRatio (2×) AND that dominant axis clears the axial
+        // minimum. This is tested BEFORE the diagonal branch so a move like (dx=50, dy=200)
+        // — where both axes happen to exceed MinAxialPx — is still read as a vertical
+        // gesture (BottomCenter), not a corner diagonal.
+        //
+        // Ordering: 1) vertical, 2) horizontal, 3) diagonal, 4) no-op.
+        bool dyDominates = absDy >= absDx * CardinalDominanceRatio;
+        bool dxDominates = absDx >= absDy * CardinalDominanceRatio;
 
-        if (dxIsDiagonal && dyIsDiagonal)
+        if (dyDominates && absDy >= MinAxialPx)
+        {
+            return dy < 0 ? DirectionalFocusSlot.TopCenter : DirectionalFocusSlot.BottomCenter;
+        }
+
+        if (dxDominates && absDx >= MinAxialPx)
+        {
+            return dx > 0 ? DirectionalFocusSlot.MiddleRight : DirectionalFocusSlot.MiddleLeft;
+        }
+
+        // Neither axis dominates 2×: if both axes are still significant this is a genuine
+        // diagonal corner gesture (A/B/C/D). Anything else is ambiguous and a no-op.
+        if (absDx >= MinAxialPx && absDy >= MinAxialPx)
         {
             if (dx < 0 && dy < 0) return DirectionalFocusSlot.TopLeft;
             if (dx > 0 && dy < 0) return DirectionalFocusSlot.TopRight;
             if (dx < 0 && dy > 0) return DirectionalFocusSlot.BottomLeft;
             if (dx > 0 && dy > 0) return DirectionalFocusSlot.BottomRight;
-        }
-
-        // Straight (cardinal) gestures target the edge-centred slots E/F/G/H. Only one axis
-        // is significant; the other must be small enough that the move reads as clearly
-        // vertical or horizontal rather than a shallow diagonal. Anything in between (both
-        // axes present but neither dominant enough) is ambiguous → no-op.
-        bool dxIsCardinal = absDx >= MinAxialPx;
-        bool dyIsCardinal = absDy >= MinAxialPx;
-
-        if (dyIsCardinal && !dxIsDiagonal && absDy >= absDx * CardinalDominanceRatio)
-        {
-            return dy < 0 ? DirectionalFocusSlot.TopCenter : DirectionalFocusSlot.BottomCenter;
-        }
-
-        if (dxIsCardinal && !dyIsDiagonal && absDx >= absDy * CardinalDominanceRatio)
-        {
-            return dx > 0 ? DirectionalFocusSlot.MiddleRight : DirectionalFocusSlot.MiddleLeft;
         }
 
         return null;

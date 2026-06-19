@@ -172,9 +172,8 @@ public class DirectionalFocusGestureDetectorTests
     [Fact]
     public void AmbiguousMove_BothAxesPresent_NoDominance_ReturnsNull()
     {
-        // Neither axis dominates 2×, and both are above the diagonal minimum on one side
-        // only — this is a genuinely ambiguous gesture, so it must be a no-op.
-        // dx=50 (≥40 so dxIsDiagonal=true) but dy=30 (<40), and 50 < 30*2=60 → no cardinal.
+        // Neither axis dominates 2×, and not both axes clear MinAxialPx (dy=30 < 40), so
+        // this is neither a cardinal nor a diagonal gesture — it is a genuine no-op.
         var result = _detector.Detect(0, 0, 50, 30, 80);
         Assert.Null(result);
     }
@@ -203,6 +202,72 @@ public class DirectionalFocusGestureDetectorTests
         // straight move is too small to be a cardinal gesture.
         var result = _detector.Detect(0, 0, 39, 0, 20);
         Assert.Null(result);
+    }
+
+    // --- Cardinal dominance priority: a clearly vertical/horizontal move must win even
+    // when both axes exceed MinAxialPx. This is the regression guard for the bug where
+    // (dx=50, dy=200) was wrongly classified as a diagonal. ---
+
+    [Fact]
+    public void DominantVertical_WithDxAboveMinAxial_FocusesBottomCenter()
+    {
+        // dy=200 clearly dominates dx=50 (200 ≥ 50*2=100), and dx=50 happens to be ≥40 —
+        // but dominance wins, so this is a vertical-down gesture → BottomCenter, NOT a
+        // diagonal.
+        var result = _detector.Detect(0, 0, 50, 200, 80);
+        Assert.Equal(DirectionalFocusSlot.BottomCenter, result);
+    }
+
+    [Fact]
+    public void DominantVerticalUp_WithDxAboveMinAxial_FocusesTopCenter()
+    {
+        // Mirror of the above, upward: dy=-200 dominates dx=50 → TopCenter.
+        var result = _detector.Detect(0, 0, 50, -200, 80);
+        Assert.Equal(DirectionalFocusSlot.TopCenter, result);
+    }
+
+    [Fact]
+    public void DominantHorizontal_WithDyAboveMinAxial_FocusesMiddleRight()
+    {
+        // dx=200 dominates dy=50 (200 ≥ 50*2=100), dy=50 ≥40 — dominance wins → MiddleRight.
+        var result = _detector.Detect(0, 0, 200, 50, 80);
+        Assert.Equal(DirectionalFocusSlot.MiddleRight, result);
+    }
+
+    [Fact]
+    public void DominantHorizontalLeft_WithDyAboveMinAxial_FocusesMiddleLeft()
+    {
+        // Mirror of the above, leftward: dx=-200 dominates dy=50 → MiddleLeft.
+        var result = _detector.Detect(0, 0, -200, 50, 80);
+        Assert.Equal(DirectionalFocusSlot.MiddleLeft, result);
+    }
+
+    [Fact]
+    public void BalancedDiagonal_StillFocusesCorner()
+    {
+        // Both axes equal (100,100): neither dominates 2×, both ≥40 → corner diagonal.
+        var result = _detector.Detect(0, 0, 100, 100, 80);
+        Assert.Equal(DirectionalFocusSlot.BottomRight, result);
+    }
+
+    [Fact]
+    public void Ambiguous_NotDominant_ReturnsNull()
+    {
+        // Neither axis dominates 2× AND not both clear MinAxialPx → genuinely ambiguous,
+        // no gesture. This documents the no-op boundary.
+        var result = _detector.Detect(0, 0, 60, 35, 80);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void SlightDominance_BelowRatio_FallsThroughToDiagonal()
+    {
+        // (dx=70, dy=50): dx does NOT dominate (70 < 50*2=100), dy does NOT dominate
+        // (50 < 70*2=140), and both are ≥40 → resolves as a diagonal corner slot, not a
+        // cardinal. Documents the chosen rule: a move must dominate 2× to be cardinal,
+        // otherwise it is treated as a (slightly skewed) diagonal.
+        var result = _detector.Detect(0, 0, 70, 50, 80);
+        Assert.Equal(DirectionalFocusSlot.BottomRight, result);
     }
 
     [Fact]
