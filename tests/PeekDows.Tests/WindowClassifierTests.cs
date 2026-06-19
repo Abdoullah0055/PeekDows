@@ -531,4 +531,55 @@ public class WindowClassifierTests
 
         Assert.True(classifier.IsIgnoredClass("MyAppWindowClass"));
     }
+
+    // --- Near-fullscreen non-maximized eligibility (regression tests for the bug where
+    //     PeekDows skipped windows that covered the work area even though they were not
+    //     truly maximized). Eligibility is governed by window STATE, not by rect size. ---
+
+    [Fact]
+    public void NonMaximizedNearFullscreenWindow_IsEligible()
+    {
+        // A window manually dragged/resized to nearly fill a 1920x1080 work area, but NOT
+        // maximized. PeekDows must treat it as a normal arrangeable window.
+        var window = MakeWindow(
+            isMaximized: false,
+            width: 1900,
+            height: 1060);
+
+        Assert.True(_classifier.IsEligible(window));
+    }
+
+    [Fact]
+    public void NonMaximizedWindowCoveringWorkArea_IsEligible()
+    {
+        // Covers the entire work area (oversized like a maximized window's rect) but the
+        // genuine maximized state is false. Must still be eligible.
+        var window = new RawWindowInfo
+        {
+            Hwnd = (IntPtr)42,
+            Title = "Big Window",
+            ClassName = "Chrome_WidgetWin_1",
+            ProcessName = "chrome.exe",
+            ProcessId = 1234,
+            CurrentRect = new Rect(-7, -7, 1934, 1094),
+            IsVisible = true,
+            IsMinimized = false,
+            IsMaximized = false,
+            IsForeground = false,
+            IsCloaked = false
+        };
+
+        Assert.True(_classifier.IsEligible(window));
+    }
+
+    [Fact]
+    public void MaximizedWindow_IsStillEligible_ForArrangeDecisionInController()
+    {
+        // IsEligible must not reject a genuinely maximized window; the controller decides
+        // skip-vs-arrange based on AllowRepositionMaximizedWindows. A maximized window is
+        // otherwise a normal top-level app window.
+        var window = MakeWindow(isMaximized: true, width: 1920, height: 1040);
+
+        Assert.True(_classifier.IsEligible(window));
+    }
 }

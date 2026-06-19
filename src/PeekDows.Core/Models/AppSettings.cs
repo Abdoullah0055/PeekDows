@@ -25,6 +25,14 @@ public sealed class AppSettings
     public bool DirectionalFocusEnabled { get; set; } = true;
     public int DirectionalFocusThresholdPx { get; set; } = 80;
 
+    /// <summary>
+    /// When false (default), windows that are truly maximized via Windows are skipped during
+    /// arrange. When true, maximized windows are restored and repositioned like normal windows.
+    /// This only affects genuinely maximized windows; near-fullscreen non-maximized windows are
+    /// always arrangeable.
+    /// </summary>
+    public bool AllowRepositionMaximizedWindows { get; set; } = false;
+
     public List<string> IgnoredProcesses { get; set; } = new()
     {
         "PeekDows.exe",

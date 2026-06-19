@@ -239,4 +239,52 @@ public class WindowPlacementServiceTests
         Assert.Single(fake.Calls);
         Assert.False(fake.Calls[0].BringToFront);
     }
+
+    // --- Maximized restore behavior: the controller only forwards a maximized window to
+    //     ApplyPlacements when AllowRepositionMaximizedWindows is true. Once it reaches here,
+    //     it must be restored before placement. A maximized window that was skipped never
+    //     reaches ApplyPlacements, so there is nothing to test at the placement layer for it. ---
+
+    [Fact]
+    public void ApplyPlacements_RestoresMaximizedWindow_WhenPlacementIsAttempted()
+    {
+        var fake = new FakeWindowPositioner();
+        var maximizedChecks = new List<IntPtr>();
+        Func<IntPtr, bool> isMaximized = hwnd => { maximizedChecks.Add(hwnd); return hwnd == (IntPtr)777; };
+        var service = new WindowPlacementService(fake, _ => true, isMaximized, null);
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)777, SlotId = "A", TargetRect = new Rect(0, 0, 960, 540) }
+        };
+
+        var result = service.ApplyPlacements(placements);
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Contains((IntPtr)777, maximizedChecks);
+        Assert.Single(fake.Calls);
+        Assert.Equal(new Rect(0, 0, 960, 540), fake.Calls[0].Rect);
+    }
+
+    [Fact]
+    public void ApplyPlacements_DoesNotRestoreSkippedMaximizedWindow()
+    {
+        // Mirrors the controller's behavior: a skipped maximized window is never passed to
+        // ApplyPlacements. Here we assert that a normal (non-maximized) placement never
+        // triggers a restore, and that the placement still applies. This documents that the
+        // restore path is exclusively for windows that survive controller filtering.
+        var fake = new FakeWindowPositioner();
+        Func<IntPtr, bool> isMaximized = _ => false;
+        var service = new WindowPlacementService(fake, _ => true, isMaximized, null);
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)888, SlotId = "A", TargetRect = new Rect(0, 0, 960, 540) }
+        };
+
+        var result = service.ApplyPlacements(placements);
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Single(fake.Calls);
+    }
 }

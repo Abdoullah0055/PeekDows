@@ -474,41 +474,48 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 primaryWorkArea = _monitorService.GetWorkArea(primaryMonitor);
             }
 
-            _logger.Info($"Primary WorkArea (for fullscreen check): left={primaryWorkArea.Left}, top={primaryWorkArea.Top}, width={primaryWorkArea.Width}, height={primaryWorkArea.Height}");
+            _logger.Info($"Primary WorkArea: left={primaryWorkArea.Left}, top={primaryWorkArea.Top}, width={primaryWorkArea.Width}, height={primaryWorkArea.Height}");
+            _logger.Info($"Arrange eligibility: allowRepositionMaximized={_settings.AllowRepositionMaximizedWindows}");
 
-            _logger.Info("Fullscreen check started");
-            var fullscreenHwnds = new HashSet<IntPtr>();
+            // Eligibility decision is based on the genuine Windows maximized state, NOT on the
+            // window rect size/position. A non-maximized window that happens to cover the whole
+            // work area (e.g. resized manually to near-fullscreen) is still arrangeable. Only
+            // truly maximized windows can be skipped, and only when the setting forbids it.
+            var skippedMaximized = new HashSet<IntPtr>();
+            var arrangeable = new List<ManagedWindow>();
 
             foreach (var w in eligibleWindows)
             {
-                var windowMonitor = _monitorService.GetMonitorForWindow(w.Hwnd);
-                var windowWorkArea = _monitorService.GetWorkArea(windowMonitor);
-
-                if (_classifier.IsConsideredFullscreen(w.IsMaximized, w.IsVisible, w.IsMinimized, w.CurrentRect, windowWorkArea))
+                if (w.IsMaximized && !_settings.AllowRepositionMaximizedWindows)
                 {
-                    fullscreenHwnds.Add(w.Hwnd);
-                    _logger.Info($"Skipped fullscreen non-maximized window: hwnd={w.Hwnd}, title={w.Title}, rect={w.CurrentRect}");
+                    skippedMaximized.Add(w.Hwnd);
+                    _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, title={w.Title}, isMaximized=true, allowRepositionMaximized=false, decision=skip maximized");
+                }
+                else
+                {
+                    if (w.IsMaximized)
+                    {
+                        _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, title={w.Title}, isMaximized=true, allowRepositionMaximized=true, decision=arrange");
+                        _logger.Info($"Maximized window will be restored and arranged: hwnd={w.Hwnd}, title={w.Title}");
+                    }
+                    else if (IsNearFullscreenWorkArea(w.CurrentRect, _monitorService.GetWorkArea(_monitorService.GetMonitorForWindow(w.Hwnd))))
+                    {
+                        _logger.Info($"Near-fullscreen non-maximized window will be arranged: hwnd={w.Hwnd}, title={w.Title}, rect={w.CurrentRect}");
+                    }
+                    else
+                    {
+                        _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, title={w.Title}, isMaximized=false, allowRepositionMaximized={_settings.AllowRepositionMaximizedWindows}, decision=arrange");
+                    }
+                    arrangeable.Add(w);
                 }
             }
 
-            foreach (var mw in eligibleWindows.Where(w => w.IsMaximized && !fullscreenHwnds.Contains(w.Hwnd)))
-            {
-                var windowMonitor = _monitorService.GetMonitorForWindow(mw.Hwnd);
-                var windowWorkArea = _monitorService.GetWorkArea(windowMonitor);
-                if (IsRectFullscreen(mw.CurrentRect, windowWorkArea))
-                {
-                    _logger.Info($"Maximized window will be restored and arranged: hwnd={mw.Hwnd}, title={mw.Title}");
-                }
-            }
-
-            _logger.Info($"Fullscreen windows skipped count={fullscreenHwnds.Count}");
-
-            var arrangeable = eligibleWindows.Where(w => !fullscreenHwnds.Contains(w.Hwnd)).ToList();
-            _logger.Info($"Arrangeable windows count after fullscreen filtering={arrangeable.Count}");
+            _logger.Info($"Maximized windows skipped count={skippedMaximized.Count}");
+            _logger.Info($"Arrangeable windows count after maximized filtering={arrangeable.Count}");
 
             if (arrangeable.Count == 0)
             {
-                _logger.Info("No arrangeable windows after fullscreen filtering");
+                _logger.Info("No arrangeable windows after maximized filtering");
                 return;
             }
 
@@ -553,7 +560,12 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         }
     }
 
-    private static bool IsRectFullscreen(Core.Models.Rect windowRect, Core.Models.Rect workArea)
+    /// <summary>
+    /// Returns true when a non-maximized window's rect covers the whole work area. Used only to
+    /// emit an informational log explaining that such a window is still being arranged (the
+    /// historic bug was to skip it). It never drives the skip decision.
+    /// </summary>
+    private static bool IsNearFullscreenWorkArea(Core.Models.Rect windowRect, Core.Models.Rect workArea)
     {
         return windowRect.Left <= workArea.Left
             && windowRect.Top <= workArea.Top

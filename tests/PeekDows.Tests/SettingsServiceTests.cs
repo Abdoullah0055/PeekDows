@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using PeekDows.Core.Models;
 using PeekDows.Core.Services;
 using Xunit;
 
@@ -136,6 +137,38 @@ public class SettingsServiceTests : IDisposable
         var loadedSettings = _settingsService.Load();
 
         Assert.True(loadedSettings.AutoArrange);
+    }
+
+    [Fact]
+    public void AppSettings_DefaultAllowRepositionMaximizedWindows_IsFalse()
+    {
+        var settings = new AppSettings();
+
+        Assert.False(settings.AllowRepositionMaximizedWindows);
+    }
+
+    [Fact]
+    public void Load_MissingAllowRepositionMaximizedWindows_DefaultsToFalse()
+    {
+        // Simulates an existing settings.json from before the setting existed: it must not
+        // suddenly start repositioning maximized windows.
+        File.WriteAllText(_testSettingsPath, "{\"AutoArrange\":true}");
+
+        var settings = _settingsService.Load();
+
+        Assert.False(settings.AllowRepositionMaximizedWindows);
+    }
+
+    [Fact]
+    public void Save_And_Load_PreservesAllowRepositionMaximizedWindows()
+    {
+        var settings = _settingsService.Load();
+        settings.AllowRepositionMaximizedWindows = true;
+        _settingsService.Save(settings);
+
+        var loadedSettings = _settingsService.Load();
+
+        Assert.True(loadedSettings.AllowRepositionMaximizedWindows);
     }
 
     public void Dispose()
