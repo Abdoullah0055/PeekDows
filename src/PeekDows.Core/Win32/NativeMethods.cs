@@ -107,4 +107,29 @@ public static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr lpdwProcessId);
+
+    /// <summary>
+    /// Sends the specified message to a window, but returns (or fails) after the given
+    /// timeout if the target thread is not pumping its message queue — i.e. the window is
+    /// hung. Used by Directional Focus to detect unresponsive windows before attempting any
+    /// blocking activation call (AttachThreadInput / SetForegroundWindow / SetFocus), so a
+    /// frozen target can never freeze PeekDows's own UI thread.
+    /// </summary>
+    public const uint WM_NULL = 0x0000;
+
+    /// <summary>Return without timing out even if the window is hung (treat as failure).</summary>
+    public const uint SMTO_ABORTIFHUNG = 0x0002;
+
+    /// <summary>Keep blocking for the full timeout even if the window responds later.</summary>
+    public const uint SMTO_BLOCK = 0x0001;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd,
+        uint Msg,
+        IntPtr wParam,
+        IntPtr lParam,
+        uint fuFlags,
+        uint uTimeout,
+        out IntPtr lpdwResult);
 }

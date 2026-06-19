@@ -20,6 +20,15 @@ public interface IWindowActivationApi
     IntPtr SetFocus(IntPtr hwnd);
     int GetWindowText(IntPtr hwnd, System.Text.StringBuilder sb, int maxCount);
     uint GetWindowProcessId(IntPtr hwnd);
+
+    /// <summary>
+    /// Probes whether the window's owning thread is currently pumping its message queue
+    /// (i.e. the window is responsive) within the given timeout. Returns <c>false</c> if the
+    /// window is hung/unresponsive. Implementations must use a bounded, non-blocking probe
+    /// such as <c>SendMessageTimeout(WM_NULL, SMTO_ABORTIFHUNG)</c> so a frozen target can
+    /// never block the caller.
+    /// </summary>
+    bool IsResponsive(IntPtr hwnd, uint timeoutMs);
 }
 
 public sealed class Win32ActivationApi : IWindowActivationApi
@@ -37,6 +46,25 @@ public sealed class Win32ActivationApi : IWindowActivationApi
     public IntPtr SetFocus(IntPtr hwnd) => NativeMethods.SetFocus(hwnd);
     public int GetWindowText(IntPtr hwnd, System.Text.StringBuilder sb, int maxCount) => NativeMethods.GetWindowText(hwnd, sb, maxCount);
     public uint GetWindowProcessId(IntPtr hwnd) { NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid); return pid; }
+
+    public bool IsResponsive(IntPtr hwnd, uint timeoutMs)
+    {
+        // SMTO_ABORTIFHUNG returns immediately (as failure) if the target thread is not
+        // pumping messages — the canonical Win32 way to detect a hung window without
+        // blocking. We must NOT use SMTO_BLOCK here: it would stop PeekDows's own UI thread
+        // from pumping its queue, recreating the freeze we are trying to prevent.
+        IntPtr result = NativeMethods.SendMessageTimeout(
+            hwnd,
+            NativeMethods.WM_NULL,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            NativeMethods.SMTO_ABORTIFHUNG,
+            timeoutMs,
+            out _);
+
+        // A non-zero return means the message was delivered within the timeout.
+        return result != IntPtr.Zero;
+    }
 }
 
 public sealed class WindowActivationService
@@ -44,10 +72,50 @@ public sealed class WindowActivationService
     private readonly IWindowActivationApi _api;
     private readonly FileLogger? _logger;
 
+    /// <summary>
+    /// How long a window that failed activation (or was detected as unresponsive) is kept on
+    /// a cooldown so Directional Focus does not hammer it again. Chosen so a transient stall
+    /// recovers quickly while a genuinely hung app is left alone for a few seconds.
+    /// </summary>
+    private const int FailedActivationCooldownMs = 3000;
+
+    /// <summary>
+    /// Upper bound on the responsiveness probe. A responsive window answers WM_NULL in well
+    /// under 1ms; 200ms is generous for a busy-but-healthy app while still bounding how long
+    /// PeekDows can wait on a frozen target.
+    /// </summary>
+    private const uint ResponsivenessProbeTimeoutMs = 200;
+
+    private readonly Dictionary<IntPtr, DateTime> _failedCooldownUntil = new();
+    private readonly Func<DateTime> _nowProvider;
+
     public WindowActivationService(IWindowActivationApi api, FileLogger? logger = null)
+        : this(api, () => DateTime.Now, logger)
+    {
+    }
+
+    /// <summary>
+    /// Internal ctor that accepts a clock for deterministic cooldown tests.
+    /// </summary>
+    internal WindowActivationService(IWindowActivationApi api, Func<DateTime> nowProvider, FileLogger? logger = null)
     {
         _api = api;
+        _nowProvider = nowProvider;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// True when <paramref name="hwnd"/> is currently on its post-failure cooldown and must
+    /// not be re-activated yet. Pure lookup — no Win32 calls — so it is unit-testable.
+    /// </summary>
+    internal bool IsInCooldown(IntPtr hwnd, DateTime now)
+    {
+        return _failedCooldownUntil.TryGetValue(hwnd, out var until) && now < until;
+    }
+
+    private void MarkCooldown(IntPtr hwnd, DateTime now)
+    {
+        _failedCooldownUntil[hwnd] = now.AddMilliseconds(FailedActivationCooldownMs);
     }
 
     public bool Activate(IntPtr hwnd)
@@ -61,6 +129,28 @@ public sealed class WindowActivationService
         if (!_api.IsWindow(hwnd))
         {
             _logger?.Warn($"Activation skipped: invalid window handle hwnd={hwnd}");
+            return false;
+        }
+
+        var now = _nowProvider();
+
+        // Per-hwnd cooldown: a window that just failed activation (or was detected as hung)
+        // is skipped entirely for a few seconds. This stops a stuck target from being
+        // spammed on every gesture tick and keeps PeekDows usable while that app recovers.
+        if (IsInCooldown(hwnd, now))
+        {
+            _logger?.Info($"Directional focus skipped: hwnd={hwnd} in failed activation cooldown");
+            return false;
+        }
+
+        // Responsiveness probe BEFORE any blocking call. AttachThreadInput synchronises
+        // message queues with the target thread; if that thread is hung, every subsequent
+        // call (SetForegroundWindow, SetFocus, ...) would block PeekDows's UI thread until
+        // the app unfreezes. The probe bounds that risk to ~ResponsivenessProbeTimeoutMs.
+        if (!_api.IsResponsive(hwnd, ResponsivenessProbeTimeoutMs))
+        {
+            _logger?.Warn($"Directional focus skipped: target window not responding, hwnd={hwnd}");
+            MarkCooldown(hwnd, now);
             return false;
         }
 
@@ -141,6 +231,16 @@ public sealed class WindowActivationService
                 finalForeground = _api.GetForegroundWindow();
                 success = finalForeground == hwnd;
                 _logger?.Info($"Activation fallback result: success={success}, foregroundHwnd={finalForeground}");
+            }
+
+            if (!success)
+            {
+                // Activation genuinely failed (not a hung window, but the window would not
+                // come to the foreground). Put the hwnd on cooldown so Directional Focus
+                // does not retry it on the next tick and pile up calls against a target that
+                // is not cooperating.
+                MarkCooldown(hwnd, _nowProvider());
+                _logger?.Info($"Directional focus activation failed, hwnd cooldown started: hwnd={hwnd}, backoffMs={FailedActivationCooldownMs}");
             }
 
             return success;

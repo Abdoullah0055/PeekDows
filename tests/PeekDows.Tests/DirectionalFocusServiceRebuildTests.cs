@@ -56,6 +56,7 @@ public class DirectionalFocusServiceRebuildTests
         public IntPtr SetFocus(IntPtr hwnd) => IntPtr.Zero;
         public int GetWindowText(IntPtr hwnd, System.Text.StringBuilder sb, int maxCount) => 0;
         public uint GetWindowProcessId(IntPtr hwnd) => 0;
+        public bool IsResponsive(IntPtr hwnd, uint timeoutMs) => true;
     }
 
     private sealed class AlwaysTrueVirtualDesktopService : IVirtualDesktopService

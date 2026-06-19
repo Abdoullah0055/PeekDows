@@ -12,7 +12,23 @@ namespace PeekDows.App.Focus;
 public sealed class DirectionalFocusService : IDisposable
 {
     private const int TickIntervalMs = 40;
-    private const int CooldownMs = 250;
+
+    /// <summary>
+    /// Minimum gap between two activations while a Ctrl+Shift gesture is held. Raising this
+    /// from the old 250ms (4 activations/s) throttles the rapid slot-hopping that could
+    /// spam several windows before any of them finished activating — a particular problem
+    /// when one target is slow or hung. ~2 activations/s keeps the feature snappy while
+    /// bounding the worst-case load.
+    /// </summary>
+    private const int CooldownMs = 450;
+
+    /// <summary>
+    /// Extra pause forced after an activation fails, on top of the normal cooldown. A failed
+    /// activation often signals a struggling target; backing off harder avoids hammering it
+    /// on every subsequent tick.
+    /// </summary>
+    private const int PostFailureBackoffMs = 1000;
+
     private const int RebuildCooldownMs = 500;
 
     private readonly DirectionalFocusGestureDetector _gestureDetector;
@@ -25,6 +41,7 @@ public sealed class DirectionalFocusService : IDisposable
     private readonly Func<int> _getThresholdPx;
     private readonly FileLogger? _logger;
     private readonly DirectionalFocusInputGate _inputGate;
+    private readonly Func<DateTime> _nowProvider;
 
     private readonly System.Windows.Forms.Timer _timer;
 
@@ -32,6 +49,7 @@ public sealed class DirectionalFocusService : IDisposable
     private Point _anchor;
     private DirectionalFocusSlot? _lastTriggeredSlot;
     private DateTime _lastFocusTime = DateTime.MinValue;
+    private DateTime _cooldownUntil = DateTime.MinValue;
     private DateTime _lastRegistryRebuildAttempt = DateTime.MinValue;
     private bool _disposed;
 
@@ -46,7 +64,7 @@ public sealed class DirectionalFocusService : IDisposable
         Func<int> getThresholdPx,
         FileLogger? logger = null)
         : this(gestureDetector, registry, monitorResolver, activationService, virtualDesktopService,
-               snapshotService, candidateWindowSource, getThresholdPx, new DirectionalFocusInputGate(), logger)
+               snapshotService, candidateWindowSource, getThresholdPx, new DirectionalFocusInputGate(), () => DateTime.Now, logger)
     {
     }
 
@@ -61,6 +79,26 @@ public sealed class DirectionalFocusService : IDisposable
         Func<int> getThresholdPx,
         DirectionalFocusInputGate inputGate,
         FileLogger? logger = null)
+        : this(gestureDetector, registry, monitorResolver, activationService, virtualDesktopService,
+               snapshotService, candidateWindowSource, getThresholdPx, inputGate, () => DateTime.Now, logger)
+    {
+    }
+
+    /// <summary>
+    /// Internal ctor that accepts a custom clock for deterministic throttle/cooldown tests.
+    /// </summary>
+    internal DirectionalFocusService(
+        DirectionalFocusGestureDetector gestureDetector,
+        DirectionalFocusRegistry registry,
+        IMonitorResolver monitorResolver,
+        WindowActivationService activationService,
+        IVirtualDesktopService virtualDesktopService,
+        DirectionalFocusLayoutSnapshotService snapshotService,
+        Func<IReadOnlyList<IntPtr>> candidateWindowSource,
+        Func<int> getThresholdPx,
+        DirectionalFocusInputGate inputGate,
+        Func<DateTime> nowProvider,
+        FileLogger? logger = null)
     {
         _gestureDetector = gestureDetector;
         _registry = registry;
@@ -71,6 +109,7 @@ public sealed class DirectionalFocusService : IDisposable
         _candidateWindowSource = candidateWindowSource;
         _getThresholdPx = getThresholdPx;
         _inputGate = inputGate;
+        _nowProvider = nowProvider;
         _logger = logger;
 
         _timer = new System.Windows.Forms.Timer { Interval = TickIntervalMs };
@@ -157,15 +196,46 @@ public sealed class DirectionalFocusService : IDisposable
 
         if (slot == null) return;
 
+        // Don't re-trigger the slot we're already on while the gesture is held — the window
+        // is already in front, re-activating it would just spam it.
         if (slot == _lastTriggeredSlot) return;
 
-        if ((DateTime.Now - _lastFocusTime).TotalMilliseconds < CooldownMs) return;
+        // Global throttle during a held gesture: bound how fast we can hop between slots.
+        // _cooldownUntil covers both the normal per-activation cooldown and an extended
+        // backoff applied after a failed activation, so a struggling or hung target cannot
+        // be re-attempted (or another target swapped in) on the very next 40ms tick.
+        var now = _nowProvider();
+        if (IsThrottled(now))
+        {
+            _logger?.Info($"Directional focus activation throttled, cooldown remaining={(_cooldownUntil - now).TotalMilliseconds}ms");
+            return;
+        }
 
         var mouseWorkArea = MonitorFromPointNative(current.X, current.Y);
 
         _logger?.Info($"Directional focus trigger candidate: slot={slot.Value}, dx={dx}, dy={dy}, anchor=({_anchor.X},{_anchor.Y}), current=({current.X},{current.Y}), mouseMonitor={mouseWorkArea}, threshold={threshold}");
 
-        ActivateSlot(mouseWorkArea, slot.Value);
+        ActivateSlot(mouseWorkArea, slot.Value, now);
+    }
+
+    /// <summary>
+    /// Pure throttle decision: true when we are still inside the cooldown that follows the
+    /// last activation (or last reset). Extracted so the throttle/backoff timing can be
+    /// unit-tested without the Win32 mouse path.
+    /// </summary>
+    internal bool IsThrottled(DateTime now) => now < _cooldownUntil;
+
+    /// <summary>
+    /// Sets the post-activation cooldown. A success applies the normal cooldown; a failure
+    /// applies the extended backoff so a struggling target is given time to settle before
+    /// the next slot-hop. Pure state mutation — directly unit-testable.
+    /// </summary>
+    internal void SetPostActivationCooldown(DateTime now, bool success)
+    {
+        _cooldownUntil = success
+            ? now.AddMilliseconds(CooldownMs)
+            : now.AddMilliseconds(CooldownMs + PostFailureBackoffMs);
+        _lastFocusTime = now;
     }
 
     /// <summary>
@@ -233,14 +303,16 @@ public sealed class DirectionalFocusService : IDisposable
         return hwnd;
     }
 
-    private void ActivateSlot(Rect mouseWorkArea, DirectionalFocusSlot slot)
+    private void ActivateSlot(Rect mouseWorkArea, DirectionalFocusSlot slot, DateTime now)
     {
         var hwnd = ResolveHwndForSlot(mouseWorkArea, slot);
 
         if (hwnd == null || hwnd == IntPtr.Zero)
         {
+            // Nothing to activate: mark the slot visited and apply the normal cooldown so we
+            // don't keep re-resolving an empty slot on every tick, but no backoff is needed.
             _lastTriggeredSlot = slot;
-            _lastFocusTime = DateTime.Now;
+            SetPostActivationCooldown(now, success: true);
             return;
         }
 
@@ -248,6 +320,9 @@ public sealed class DirectionalFocusService : IDisposable
         if (!onCurrentDesktop)
         {
             _logger?.Info($"Directional focus ignored: target is not on current virtual desktop, hwnd={hwnd.Value}");
+            // Still apply the normal cooldown — we made a resolve attempt.
+            _lastTriggeredSlot = slot;
+            SetPostActivationCooldown(now, success: true);
             return;
         }
 
@@ -268,10 +343,14 @@ public sealed class DirectionalFocusService : IDisposable
         {
             var finalForeground = NativeMethods.GetForegroundWindow();
             _logger?.Warn($"Directional focus activation failed: slot={slot}, hwnd={hwnd.Value}, foregroundHwnd={finalForeground}");
+            _logger?.Info($"Directional focus activation failed, hwnd cooldown started: hwnd={hwnd.Value}, backoffMs={CooldownMs + PostFailureBackoffMs}");
         }
 
+        // The per-hwnd cooldown inside WindowActivationService already shields this specific
+        // hwnd; here we apply the throttle so the user's next rapid slot-hop also lands
+        // softly rather than chaining into another target before the failed one settled.
         _lastTriggeredSlot = slot;
-        _lastFocusTime = DateTime.Now;
+        SetPostActivationCooldown(now, success: activated);
     }
 
     /// <summary>
@@ -321,6 +400,10 @@ public sealed class DirectionalFocusService : IDisposable
     {
         _anchor = Point.Empty;
         _lastTriggeredSlot = null;
+        // Releasing Ctrl+Shift (or stopping the service) clears the throttle so the next
+        // gesture begins fresh rather than inheriting the previous hold's cooldown.
+        _lastFocusTime = DateTime.MinValue;
+        _cooldownUntil = DateTime.MinValue;
     }
 
     private static bool IsKeyDown(int vk)
