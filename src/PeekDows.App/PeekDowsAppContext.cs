@@ -31,6 +31,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private readonly System.Windows.Forms.Timer _pauseCheckTimer;
     private readonly DirectionalFocusService _directionalFocusService;
     private readonly DirectionalFocusRegistry _directionalFocusRegistry;
+    private readonly DirectionalFocusLayoutSnapshotService _directionalFocusSnapshotService;
     private readonly IVirtualDesktopService _virtualDesktopService;
     private readonly WindowActivationService _windowActivationService;
 
@@ -119,12 +120,29 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             _logger);
         var gestureDetector = new DirectionalFocusGestureDetector();
         _windowActivationService = new WindowActivationService(new Win32ActivationApi(), _logger);
+
+        _directionalFocusSnapshotService = new DirectionalFocusLayoutSnapshotService(
+            _monitorService,
+            _layoutEngine,
+            hwnd =>
+            {
+                if (NativeMethods.GetWindowRect(hwnd, out var nativeRect))
+                {
+                    return new Rect(nativeRect.left, nativeRect.top, nativeRect.right - nativeRect.left, nativeRect.bottom - nativeRect.top);
+                }
+                return default;
+            },
+            hwnd => _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd),
+            logger: _logger);
+
         _directionalFocusService = new DirectionalFocusService(
             gestureDetector,
             _directionalFocusRegistry,
             _monitorService,
             _windowActivationService,
             _virtualDesktopService,
+            _directionalFocusSnapshotService,
+            GetDirectionalFocusCandidateWindows,
             () => _settings.DirectionalFocusThresholdPx,
             _logger);
 
@@ -395,6 +413,26 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private void OnArrangeNowRequested()
     {
         ArrangeNow();
+    }
+
+    /// <summary>
+    /// Returns the hwnds of currently eligible windows (visible, on the current
+    /// virtual desktop, not a system/shell window). Used by Directional Focus to
+    /// rebuild the slot map on demand without moving anything.
+    /// </summary>
+    private IReadOnlyList<IntPtr> GetDirectionalFocusCandidateWindows()
+    {
+        var rawWindows = _discoveryService.GetTopLevelWindows();
+        var result = new List<IntPtr>(rawWindows.Count);
+        foreach (var raw in rawWindows)
+        {
+            if (_classifier.IsEligible(raw))
+            {
+                result.Add(raw.Hwnd);
+            }
+        }
+        _logger?.Info($"Directional focus candidate windows: discovered={rawWindows.Count}, eligible={result.Count}");
+        return result;
     }
 
     private void ExecuteArrange()

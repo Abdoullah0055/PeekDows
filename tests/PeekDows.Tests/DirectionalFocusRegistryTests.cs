@@ -255,8 +255,10 @@ public class DirectionalFocusRegistryTests
     }
 
     [Fact]
-    public void RemovesSlotWhenWindowNotOnCurrentVirtualDesktop()
+    public void DoesNotRemoveSlotWhenWindowNotOnCurrentVirtualDesktop_KeepsSlotForReturn()
     {
+        // After a virtual-desktop switch, the slot must NOT be purged: returning to the
+        // original desktop must make the window focusable again without re-arranging.
         bool hwnd200OnDesktop = true;
         var registry = new DirectionalFocusRegistry(_ => true, hwnd => hwnd != (IntPtr)200 || hwnd200OnDesktop);
         var workArea = new Rect(0, 0, 1920, 1080);
@@ -274,8 +276,71 @@ public class DirectionalFocusRegistryTests
         registry.UpdateFromPlacements(placements, monitorResolver);
         Assert.Equal((IntPtr)200, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
 
+        // Switch away: lookup returns null but the slot is preserved.
         hwnd200OnDesktop = false;
         Assert.Null(registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
+
+        // Switch back: the slot resolves again without any re-arrange.
+        hwnd200OnDesktop = true;
+        Assert.Equal((IntPtr)200, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
+    }
+
+    [Fact]
+    public void SetSlotsForMonitor_ReplacesSlotsForMonitor()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var workArea = new Rect(0, 0, 1920, 1080);
+
+        registry.SetSlotsForMonitor(workArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)100,
+            [DirectionalFocusSlot.BottomRight] = (IntPtr)101
+        });
+
+        Assert.Equal((IntPtr)100, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
+        Assert.Equal((IntPtr)101, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.BottomRight));
+        Assert.Null(registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopRight));
+        Assert.True(registry.HasSlotsForMonitor(workArea));
+    }
+
+    [Fact]
+    public void SetSlotsForMonitor_OverwritesPreviousSlotsForSameMonitor()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var workArea = new Rect(0, 0, 1920, 1080);
+
+        registry.SetSlotsForMonitor(workArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)100
+        });
+
+        registry.SetSlotsForMonitor(workArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopRight] = (IntPtr)200
+        });
+
+        Assert.Null(registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
+        Assert.Equal((IntPtr)200, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopRight));
+    }
+
+    [Fact]
+    public void SetSlotsForMonitor_DoesNotAffectOtherMonitor()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var monitor1 = new Rect(0, 0, 1920, 1080);
+        var monitor2 = new Rect(1920, 0, 1920, 1080);
+
+        registry.SetSlotsForMonitor(monitor1, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)100
+        });
+        registry.SetSlotsForMonitor(monitor2, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)200
+        });
+
+        Assert.Equal((IntPtr)100, registry.GetHwndForSlot(monitor1, DirectionalFocusSlot.TopLeft));
+        Assert.Equal((IntPtr)200, registry.GetHwndForSlot(monitor2, DirectionalFocusSlot.TopLeft));
     }
 
     [Fact]

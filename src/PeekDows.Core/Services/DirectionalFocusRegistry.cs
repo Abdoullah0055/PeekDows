@@ -34,7 +34,31 @@ public sealed class DirectionalFocusRegistry
     public void UpdateFromPlacements(IReadOnlyList<WindowPlacement> placements, IMonitorResolver monitorResolver)
     {
         _slotsByMonitor.Clear();
+        ApplyPlacements(placements, monitorResolver);
+    }
 
+    /// <summary>
+    /// Replaces the slot→hwnd map for a single monitor without touching other
+    /// monitors. Used by the on-demand layout snapshot rebuild so it can refresh
+    /// only the monitor under the cursor (or every monitor) without clearing
+    /// the whole registry.
+    /// </summary>
+    public void SetSlotsForMonitor(Rect monitorWorkArea, IReadOnlyDictionary<DirectionalFocusSlot, IntPtr> slots)
+    {
+        if (slots == null || slots.Count == 0)
+        {
+            _slotsByMonitor.Remove(monitorWorkArea);
+            _logger?.Info($"DirectionalFocusRegistry: cleared slots for monitor={monitorWorkArea}");
+            return;
+        }
+
+        var slotMap = new Dictionary<DirectionalFocusSlot, IntPtr>(slots);
+        _slotsByMonitor[monitorWorkArea] = slotMap;
+        _logger?.Info($"DirectionalFocusRegistry: snapshot-set slots for monitor={monitorWorkArea}, count={slotMap.Count}");
+    }
+
+    private void ApplyPlacements(IReadOnlyList<WindowPlacement> placements, IMonitorResolver monitorResolver)
+    {
         foreach (var placement in placements)
         {
             var slot = MapSlotId(placement.SlotId);
@@ -83,8 +107,10 @@ public sealed class DirectionalFocusRegistry
 
         if (!_isOnCurrentVirtualDesktop(hwnd))
         {
-            _logger?.Info($"DirectionalFocusRegistry: window hwnd={hwnd} for slot={slot} is not on current virtual desktop, removing");
-            slotMap.Remove(slot);
+            // The window is on another virtual desktop right now (e.g. the user switched
+            // away with Ctrl+Win+Arrow). Do NOT remove the slot: when they come back to
+            // this desktop the window will be focusable again without re-arranging.
+            _logger?.Info($"DirectionalFocusRegistry: window hwnd={hwnd} for slot={slot} is not on current virtual desktop (kept for return)");
             return null;
         }
 

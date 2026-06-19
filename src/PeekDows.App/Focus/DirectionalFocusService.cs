@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
@@ -12,21 +13,26 @@ public sealed class DirectionalFocusService : IDisposable
 {
     private const int TickIntervalMs = 40;
     private const int CooldownMs = 250;
+    private const int RebuildCooldownMs = 500;
 
     private readonly DirectionalFocusGestureDetector _gestureDetector;
     private readonly DirectionalFocusRegistry _registry;
     private readonly IMonitorResolver _monitorResolver;
     private readonly WindowActivationService _activationService;
     private readonly IVirtualDesktopService _virtualDesktopService;
+    private readonly DirectionalFocusLayoutSnapshotService _snapshotService;
+    private readonly Func<IReadOnlyList<IntPtr>> _candidateWindowSource;
     private readonly Func<int> _getThresholdPx;
     private readonly FileLogger? _logger;
+    private readonly DirectionalFocusInputGate _inputGate;
 
     private readonly System.Windows.Forms.Timer _timer;
 
-    private bool _ctrlWasDown;
+    private bool _gestureWasActive;
     private Point _anchor;
     private DirectionalFocusSlot? _lastTriggeredSlot;
     private DateTime _lastFocusTime = DateTime.MinValue;
+    private DateTime _lastRegistryRebuildAttempt = DateTime.MinValue;
     private bool _disposed;
 
     public DirectionalFocusService(
@@ -35,7 +41,25 @@ public sealed class DirectionalFocusService : IDisposable
         IMonitorResolver monitorResolver,
         WindowActivationService activationService,
         IVirtualDesktopService virtualDesktopService,
+        DirectionalFocusLayoutSnapshotService snapshotService,
+        Func<IReadOnlyList<IntPtr>> candidateWindowSource,
         Func<int> getThresholdPx,
+        FileLogger? logger = null)
+        : this(gestureDetector, registry, monitorResolver, activationService, virtualDesktopService,
+               snapshotService, candidateWindowSource, getThresholdPx, new DirectionalFocusInputGate(), logger)
+    {
+    }
+
+    internal DirectionalFocusService(
+        DirectionalFocusGestureDetector gestureDetector,
+        DirectionalFocusRegistry registry,
+        IMonitorResolver monitorResolver,
+        WindowActivationService activationService,
+        IVirtualDesktopService virtualDesktopService,
+        DirectionalFocusLayoutSnapshotService snapshotService,
+        Func<IReadOnlyList<IntPtr>> candidateWindowSource,
+        Func<int> getThresholdPx,
+        DirectionalFocusInputGate inputGate,
         FileLogger? logger = null)
     {
         _gestureDetector = gestureDetector;
@@ -43,7 +67,10 @@ public sealed class DirectionalFocusService : IDisposable
         _monitorResolver = monitorResolver;
         _activationService = activationService;
         _virtualDesktopService = virtualDesktopService;
+        _snapshotService = snapshotService;
+        _candidateWindowSource = candidateWindowSource;
         _getThresholdPx = getThresholdPx;
+        _inputGate = inputGate;
         _logger = logger;
 
         _timer = new System.Windows.Forms.Timer { Interval = TickIntervalMs };
@@ -82,24 +109,42 @@ public sealed class DirectionalFocusService : IDisposable
     internal void Tick()
     {
         bool ctrlDown = IsKeyDown(NativeMethods.VK_CONTROL);
-        bool altDown = IsKeyDown(NativeMethods.VK_MENU);
         bool shiftDown = IsKeyDown(NativeMethods.VK_SHIFT);
+        bool altDown = IsKeyDown(NativeMethods.VK_MENU);
+        bool lWinDown = IsKeyDown(NativeMethods.VK_LWIN);
+        bool rWinDown = IsKeyDown(NativeMethods.VK_RWIN);
 
-        if (!ctrlDown || altDown || shiftDown)
+        // A Windows-key chord (e.g. Ctrl+Win+Arrow virtual-desktop switch) must never
+        // enter the gesture path. Reset everything and bail before reading the mouse,
+        // so changing desktops cannot pollute gesture state.
+        if (lWinDown || rWinDown)
         {
-            if (_ctrlWasDown)
+            if (_gestureWasActive)
             {
                 ResetState();
-                _ctrlWasDown = false;
+                _gestureWasActive = false;
             }
             return;
         }
 
-        if (!_ctrlWasDown)
+        bool gestureActive = _inputGate.IsGestureModifierActive(ctrlDown, shiftDown, altDown, lWinDown, rWinDown);
+
+        if (!gestureActive)
         {
-            _ctrlWasDown = true;
+            if (_gestureWasActive)
+            {
+                ResetState();
+                _gestureWasActive = false;
+            }
+            return;
+        }
+
+        if (!_gestureWasActive)
+        {
+            _gestureWasActive = true;
             _anchor = Cursor.Position;
             _lastTriggeredSlot = null;
+            _logger?.Info("Directional focus modifiers active: Ctrl+Shift");
             return;
         }
 
@@ -120,16 +165,47 @@ public sealed class DirectionalFocusService : IDisposable
 
         _logger?.Info($"Directional focus trigger candidate: slot={slot.Value}, dx={dx}, dy={dy}, anchor=({_anchor.X},{_anchor.Y}), current=({current.X},{current.Y}), mouseMonitor={mouseWorkArea}, threshold={threshold}");
 
-        if (!_registry.HasSlotsForMonitor(mouseWorkArea))
-        {
-            _logger?.Info($"Directional focus ignored: no slots for mouseMonitor={mouseWorkArea}");
-            return;
-        }
+        ActivateSlot(mouseWorkArea, slot.Value);
+    }
 
-        var hwnd = _registry.GetHwndForSlot(mouseWorkArea, slot.Value);
+    /// <summary>
+    /// Resolves the hwnd for a slot on a monitor: registry first, then a rate-limited
+    /// on-demand rebuild from the current layout if the slot is missing/stale. Returns
+    /// null when the layout is not recognised. Pure lookup logic — no Win32 calls,
+    /// so it is directly unit-testable.
+    /// </summary>
+    internal IntPtr? ResolveHwndForSlot(Rect mouseWorkArea, DirectionalFocusSlot slot)
+    {
+        // 1. Fast path: registry already has the slot for this monitor.
+        var hwnd = _registry.GetHwndForSlot(mouseWorkArea, slot);
+
+        // 2. On miss, try a one-shot rebuild from the current layout (rate-limited).
         if (hwnd == null || hwnd == IntPtr.Zero)
         {
-            _logger?.Info($"Directional focus ignored: no window mapped for slot={slot.Value} on monitor={mouseWorkArea}");
+            _logger?.Info($"Directional focus registry miss: slot={slot}, monitor={mouseWorkArea}");
+
+            if (TryRebuildRegistryForCurrentDesktop(mouseWorkArea))
+            {
+                hwnd = _registry.GetHwndForSlot(mouseWorkArea, slot);
+            }
+        }
+
+        if (hwnd == null || hwnd == IntPtr.Zero)
+        {
+            _logger?.Info($"Directional focus ignored: layout not recognized; run Arrange Now first. slot={slot}, monitor={mouseWorkArea}");
+        }
+
+        return hwnd;
+    }
+
+    private void ActivateSlot(Rect mouseWorkArea, DirectionalFocusSlot slot)
+    {
+        var hwnd = ResolveHwndForSlot(mouseWorkArea, slot);
+
+        if (hwnd == null || hwnd == IntPtr.Zero)
+        {
+            _lastTriggeredSlot = slot;
+            _lastFocusTime = DateTime.Now;
             return;
         }
 
@@ -151,16 +227,59 @@ public sealed class DirectionalFocusService : IDisposable
 
         if (activated)
         {
-            _logger?.Info($"Directional focus success: slot={slot.Value}, hwnd={hwnd.Value}, title={targetTitle}");
+            _logger?.Info($"Directional focus success: slot={slot}, hwnd={hwnd.Value}, title={targetTitle}");
         }
         else
         {
             var finalForeground = NativeMethods.GetForegroundWindow();
-            _logger?.Warn($"Directional focus activation failed: slot={slot.Value}, hwnd={hwnd.Value}, foregroundHwnd={finalForeground}");
+            _logger?.Warn($"Directional focus activation failed: slot={slot}, hwnd={hwnd.Value}, foregroundHwnd={finalForeground}");
         }
 
         _lastTriggeredSlot = slot;
         _lastFocusTime = DateTime.Now;
+    }
+
+    /// <summary>
+    /// Rebuilds the registry for the monitor under the cursor by reading the current
+    /// physical positions of the eligible windows on the current virtual desktop.
+    /// Rate-limited so the snapshot cannot run more than once per
+    /// <see cref="RebuildCooldownMs"/>. Never moves any window.
+    /// </summary>
+    private bool TryRebuildRegistryForCurrentDesktop(Rect mouseWorkArea)
+    {
+        var now = DateTime.Now;
+        if ((now - _lastRegistryRebuildAttempt).TotalMilliseconds < RebuildCooldownMs)
+        {
+            _logger?.Info($"Directional focus rebuild skipped: rate-limited (cooldown={RebuildCooldownMs}ms)");
+            return false;
+        }
+
+        _lastRegistryRebuildAttempt = now;
+
+        _logger?.Info("Directional focus attempting layout snapshot rebuild");
+
+        IReadOnlyList<IntPtr> candidates;
+        try
+        {
+            candidates = _candidateWindowSource();
+        }
+        catch (Exception ex)
+        {
+            _logger?.Warn($"Directional focus rebuild: candidate window source failed: {ex.Message}");
+            return false;
+        }
+
+        var slotMap = _snapshotService.BuildSlotMap(mouseWorkArea, candidates);
+
+        if (slotMap.Count == 0)
+        {
+            _logger?.Info($"Directional focus snapshot: no PeekDows slots recognized on monitor={mouseWorkArea}");
+            return false;
+        }
+
+        _registry.SetSlotsForMonitor(mouseWorkArea, slotMap);
+        _logger?.Info($"Directional focus snapshot rebuild complete: monitor={mouseWorkArea}, slots={slotMap.Count}");
+        return true;
     }
 
     private void ResetState()

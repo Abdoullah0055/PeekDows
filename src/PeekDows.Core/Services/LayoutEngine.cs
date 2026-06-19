@@ -20,24 +20,7 @@ public class LayoutEngine
 
         var priorityWindows = PrioritizeForClassicPeekGrid(windows);
 
-        int spanW = (int)Math.Round(workArea.Width * ClassicPeekGridWidthRatio);
-        int spanH = (int)Math.Round(workArea.Height * ClassicPeekGridHeightRatio);
-
-        spanW = Math.Clamp(spanW, 1, workArea.Width);
-        spanH = Math.Clamp(spanH, 1, workArea.Height);
-
-        int leftX = workArea.Left;
-        int rightX = workArea.Right - spanW;
-        int topY = workArea.Top;
-        int bottomY = workArea.Bottom - spanH;
-
-        var slotRects = new Dictionary<string, Rect>
-        {
-            ["A"] = new Rect(leftX, topY, spanW, spanH),
-            ["B"] = new Rect(rightX, bottomY, spanW, spanH),
-            ["C"] = new Rect(rightX, topY, spanW, spanH),
-            ["D"] = new Rect(leftX, bottomY, spanW, spanH)
-        };
+        var slotRects = CalculateClassicPeekGridSlotRects(workArea);
 
         if (priorityWindows.Count == 1)
         {
@@ -81,6 +64,37 @@ public class LayoutEngine
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Computes the four ClassicPeekGrid (90% overlap) slot rects for a monitor work area,
+    /// using exactly the same math as <see cref="CalculateClassicPeekGridPlacements"/> so a
+    /// window physically sitting in one of these rects can be recognised as belonging to
+    /// that slot without being re-arranged.
+    /// </summary>
+    /// <remarks>
+    /// Slot id mapping: A = TopLeft, B = BottomRight, C = TopRight, D = BottomLeft.
+    /// </remarks>
+    public IReadOnlyDictionary<string, Rect> CalculateClassicPeekGridSlotRects(Rect workArea)
+    {
+        int spanW = (int)Math.Round(workArea.Width * ClassicPeekGridWidthRatio);
+        int spanH = (int)Math.Round(workArea.Height * ClassicPeekGridHeightRatio);
+
+        spanW = Math.Clamp(spanW, 1, workArea.Width);
+        spanH = Math.Clamp(spanH, 1, workArea.Height);
+
+        int leftX = workArea.Left;
+        int rightX = workArea.Right - spanW;
+        int topY = workArea.Top;
+        int bottomY = workArea.Bottom - spanH;
+
+        return new Dictionary<string, Rect>
+        {
+            ["A"] = new Rect(leftX, topY, spanW, spanH),
+            ["B"] = new Rect(rightX, bottomY, spanW, spanH),
+            ["C"] = new Rect(rightX, topY, spanW, spanH),
+            ["D"] = new Rect(leftX, bottomY, spanW, spanH)
+        };
     }
 
     private IReadOnlyList<ManagedWindow> PrioritizeForClassicPeekGrid(IReadOnlyList<ManagedWindow> windows)
