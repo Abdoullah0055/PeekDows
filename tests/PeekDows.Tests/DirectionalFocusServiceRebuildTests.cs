@@ -320,4 +320,52 @@ public class DirectionalFocusServiceRebuildTests
         Assert.Equal((IntPtr)110, hwnd);
         Assert.Equal(0, sourceCallCount);
     }
+
+    // --- Edge-centred slot E/F/G/H rebuild flow: a Ctrl+Shift+up/down/left/right gesture
+    // must resolve via the same registry-miss → snapshot-rebuild path as the corner slots. ---
+
+    [Fact]
+    public void WhenRegistryMissesEdgeSlot_E_RebuildsAndResolves()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var rectE = SlotRect("E");
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)120 ? rectE : default);
+
+        var service = CreateService(registry, snapshot, () => new[] { (IntPtr)120 });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopCenter);
+
+        Assert.Equal((IntPtr)120, hwnd);
+        Assert.Equal((IntPtr)120, registry.GetHwndForSlot(WorkArea, DirectionalFocusSlot.TopCenter));
+    }
+
+    [Fact]
+    public void WhenRegistryMissesEdgeSlot_H_RebuildsAndResolves()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var rectH = SlotRect("H");
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)121 ? rectH : default);
+
+        var service = CreateService(registry, snapshot, () => new[] { (IntPtr)121 });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleLeft);
+
+        Assert.Equal((IntPtr)121, hwnd);
+    }
+
+    [Fact]
+    public void WhenEdgeSlot_E_AbsentFromLayout_ResolvesNull()
+    {
+        // No window is in slot E → Ctrl+Shift+up is a silent no-op.
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        // Only slot A is physically present; E/F/G/H are empty.
+        var rectA = SlotRect("A");
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)130 ? rectA : default);
+
+        var service = CreateService(registry, snapshot, () => new[] { (IntPtr)130 });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopCenter);
+
+        Assert.Null(hwnd);
+    }
 }

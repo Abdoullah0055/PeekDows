@@ -74,6 +74,53 @@ public class DirectionalFocusLayoutSnapshotServiceIsWindowStillInSlotTests
     }
 
     [Fact]
+    public void IsWindowStillInSlot_ReturnsTrue_WhenWindowMatchesTopCenter_E()
+    {
+        var rectE = ExpectedSlotRect("E", WorkArea);
+        var service = CreateService(hwnd => hwnd == (IntPtr)14 ? rectE : default);
+
+        Assert.True(service.IsWindowStillInSlot((IntPtr)14, WorkArea, DirectionalFocusSlot.TopCenter));
+    }
+
+    [Fact]
+    public void IsWindowStillInSlot_ReturnsTrue_WhenWindowMatchesBottomCenter_F()
+    {
+        var rectF = ExpectedSlotRect("F", WorkArea);
+        var service = CreateService(hwnd => hwnd == (IntPtr)15 ? rectF : default);
+
+        Assert.True(service.IsWindowStillInSlot((IntPtr)15, WorkArea, DirectionalFocusSlot.BottomCenter));
+    }
+
+    [Fact]
+    public void IsWindowStillInSlot_ReturnsTrue_WhenWindowMatchesMiddleRight_G()
+    {
+        var rectG = ExpectedSlotRect("G", WorkArea);
+        var service = CreateService(hwnd => hwnd == (IntPtr)16 ? rectG : default);
+
+        Assert.True(service.IsWindowStillInSlot((IntPtr)16, WorkArea, DirectionalFocusSlot.MiddleRight));
+    }
+
+    [Fact]
+    public void IsWindowStillInSlot_ReturnsTrue_WhenWindowMatchesMiddleLeft_H()
+    {
+        var rectH = ExpectedSlotRect("H", WorkArea);
+        var service = CreateService(hwnd => hwnd == (IntPtr)17 ? rectH : default);
+
+        Assert.True(service.IsWindowStillInSlot((IntPtr)17, WorkArea, DirectionalFocusSlot.MiddleLeft));
+    }
+
+    [Fact]
+    public void IsWindowStillInSlot_ReturnsFalse_WhenEdgeSlotWindowMovedAway()
+    {
+        // Window was in slot E but the user dragged it away → stale mapping must be rejected.
+        var rectE = ExpectedSlotRect("E", WorkArea);
+        var movedAway = new Rect(317, 244, rectE.Width - 500, rectE.Height - 500);
+        var service = CreateService(hwnd => hwnd == (IntPtr)18 ? movedAway : default);
+
+        Assert.False(service.IsWindowStillInSlot((IntPtr)18, WorkArea, DirectionalFocusSlot.TopCenter));
+    }
+
+    [Fact]
     public void IsWindowStillInSlot_ReturnsFalse_WhenWindowMovedAwayFromSlot()
     {
         var rectA = ExpectedSlotRect("A", WorkArea);

@@ -182,6 +182,10 @@ public sealed class DirectionalFocusLayoutSnapshotService
             "B" => DirectionalFocusSlot.BottomRight,
             "C" => DirectionalFocusSlot.TopRight,
             "D" => DirectionalFocusSlot.BottomLeft,
+            "E" => DirectionalFocusSlot.TopCenter,
+            "F" => DirectionalFocusSlot.BottomCenter,
+            "G" => DirectionalFocusSlot.MiddleRight,
+            "H" => DirectionalFocusSlot.MiddleLeft,
             _ => null
         };
     }
@@ -194,6 +198,10 @@ public sealed class DirectionalFocusLayoutSnapshotService
             DirectionalFocusSlot.BottomRight => "B",
             DirectionalFocusSlot.TopRight => "C",
             DirectionalFocusSlot.BottomLeft => "D",
+            DirectionalFocusSlot.TopCenter => "E",
+            DirectionalFocusSlot.BottomCenter => "F",
+            DirectionalFocusSlot.MiddleRight => "G",
+            DirectionalFocusSlot.MiddleLeft => "H",
             _ => null
         };
     }

@@ -54,6 +54,30 @@ public class DirectionalFocusRegistryTests
     }
 
     [Fact]
+    public void MapSlotId_E_MapsToTopCenter()
+    {
+        Assert.Equal(DirectionalFocusSlot.TopCenter, DirectionalFocusRegistry.MapSlotId("E"));
+    }
+
+    [Fact]
+    public void MapSlotId_F_MapsToBottomCenter()
+    {
+        Assert.Equal(DirectionalFocusSlot.BottomCenter, DirectionalFocusRegistry.MapSlotId("F"));
+    }
+
+    [Fact]
+    public void MapSlotId_G_MapsToMiddleRight()
+    {
+        Assert.Equal(DirectionalFocusSlot.MiddleRight, DirectionalFocusRegistry.MapSlotId("G"));
+    }
+
+    [Fact]
+    public void MapSlotId_H_MapsToMiddleLeft()
+    {
+        Assert.Equal(DirectionalFocusSlot.MiddleLeft, DirectionalFocusRegistry.MapSlotId("H"));
+    }
+
+    [Fact]
     public void MapSlotId_Unknown_ReturnsNull()
     {
         Assert.Null(DirectionalFocusRegistry.MapSlotId("FocusLarge"));
@@ -381,5 +405,134 @@ public class DirectionalFocusRegistryTests
 
         registry.UpdateFromPlacements(placements, monitorResolver);
         Assert.Equal((IntPtr)100, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopLeft));
+    }
+
+    // --- Edge-centred slots E/F/G/H: registry storage, multi-monitor isolation, and
+    // virtual-desktop filtering must work exactly like the corner slots A/B/C/D. ---
+
+    [Fact]
+    public void EdgeSlot_E_IsStoredAndResolved()
+    {
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)150] = new MonitorInfo { WorkArea = workArea, IsPrimary = true }
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)150, SlotId = "E", TargetRect = new Rect(96, 0, 1728, 972) }
+        };
+
+        _registry.UpdateFromPlacements(placements, monitorResolver);
+
+        Assert.Equal((IntPtr)150, _registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopCenter));
+    }
+
+    [Fact]
+    public void EdgeSlot_F_G_H_AreStoredAndResolved()
+    {
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)151] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)152] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)153] = new MonitorInfo { WorkArea = workArea, IsPrimary = true }
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)151, SlotId = "F", TargetRect = new Rect(96, 108, 1728, 972) },
+            new() { Hwnd = (IntPtr)152, SlotId = "G", TargetRect = new Rect(192, 54, 1728, 972) },
+            new() { Hwnd = (IntPtr)153, SlotId = "H", TargetRect = new Rect(0, 54, 1728, 972) }
+        };
+
+        _registry.UpdateFromPlacements(placements, monitorResolver);
+
+        Assert.Equal((IntPtr)151, _registry.GetHwndForSlot(workArea, DirectionalFocusSlot.BottomCenter));
+        Assert.Equal((IntPtr)152, _registry.GetHwndForSlot(workArea, DirectionalFocusSlot.MiddleRight));
+        Assert.Equal((IntPtr)153, _registry.GetHwndForSlot(workArea, DirectionalFocusSlot.MiddleLeft));
+    }
+
+    [Fact]
+    public void EdgeSlot_E_OnWrongMonitor_IsIgnored()
+    {
+        // A Ctrl+Shift+up gesture resolves slot E for the monitor under the cursor. A window
+        // sitting in slot E on a *different* monitor must never be returned.
+        var monitor1WorkArea = new Rect(0, 0, 1920, 1080);
+        var monitor2WorkArea = new Rect(1920, 0, 1920, 1080);
+
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = monitor1WorkArea, IsPrimary = true },
+            [(IntPtr)160] = new MonitorInfo { WorkArea = monitor2WorkArea, IsPrimary = false }
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)160, SlotId = "E", TargetRect = new Rect(2016, 0, 1728, 972) }
+        };
+
+        _registry.UpdateFromPlacements(placements, monitorResolver);
+
+        // Slot E is only populated on monitor 2; asking monitor 1 for it yields nothing.
+        Assert.Null(_registry.GetHwndForSlot(monitor1WorkArea, DirectionalFocusSlot.TopCenter));
+        Assert.Equal((IntPtr)160, _registry.GetHwndForSlot(monitor2WorkArea, DirectionalFocusSlot.TopCenter));
+    }
+
+    [Fact]
+    public void EdgeSlot_E_OnOtherVirtualDesktop_ReturnsNullButKeepsSlot()
+    {
+        // Same rule as A/B/C/D: a slot pointing at a window on another virtual desktop is
+        // not resolvable now, but is preserved so it works again when the user returns.
+        bool hwnd170OnDesktop = true;
+        var registry = new DirectionalFocusRegistry(_ => true, hwnd => hwnd != (IntPtr)170 || hwnd170OnDesktop);
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)170] = new MonitorInfo { WorkArea = workArea, IsPrimary = true }
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)170, SlotId = "E", TargetRect = new Rect(96, 0, 1728, 972) }
+        };
+
+        registry.UpdateFromPlacements(placements, monitorResolver);
+        Assert.Equal((IntPtr)170, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopCenter));
+
+        hwnd170OnDesktop = false;
+        Assert.Null(registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopCenter));
+
+        hwnd170OnDesktop = true;
+        Assert.Equal((IntPtr)170, registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopCenter));
+    }
+
+    [Fact]
+    public void EdgeSlot_Absent_ReturnsNull()
+    {
+        // Ctrl+Shift+up when no window is in slot E on this monitor must be a silent no-op.
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = workArea, IsPrimary = true },
+            [(IntPtr)100] = new MonitorInfo { WorkArea = workArea, IsPrimary = true }
+        });
+
+        // Only slot A is populated; E/F/G/H are all empty.
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)100, SlotId = "A", TargetRect = new Rect(0, 0, 1728, 972) }
+        };
+
+        _registry.UpdateFromPlacements(placements, monitorResolver);
+
+        Assert.Null(_registry.GetHwndForSlot(workArea, DirectionalFocusSlot.TopCenter));
+        Assert.Null(_registry.GetHwndForSlot(workArea, DirectionalFocusSlot.BottomCenter));
+        Assert.Null(_registry.GetHwndForSlot(workArea, DirectionalFocusSlot.MiddleRight));
+        Assert.Null(_registry.GetHwndForSlot(workArea, DirectionalFocusSlot.MiddleLeft));
     }
 }

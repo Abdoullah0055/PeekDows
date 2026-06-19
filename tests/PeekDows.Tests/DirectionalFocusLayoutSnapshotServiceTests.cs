@@ -87,6 +87,50 @@ public class DirectionalFocusLayoutSnapshotServiceTests
     }
 
     [Fact]
+    public void MatchesTopCenterSlot_E()
+    {
+        var rectE = ExpectedSlotRect("E");
+        var service = CreateService(hwnd => hwnd == (IntPtr)14 ? rectE : default);
+
+        var map = service.BuildSlotMap(WorkArea, new[] { (IntPtr)14 });
+
+        Assert.Equal((IntPtr)14, map[DirectionalFocusSlot.TopCenter]);
+    }
+
+    [Fact]
+    public void MatchesBottomCenterSlot_F()
+    {
+        var rectF = ExpectedSlotRect("F");
+        var service = CreateService(hwnd => hwnd == (IntPtr)15 ? rectF : default);
+
+        var map = service.BuildSlotMap(WorkArea, new[] { (IntPtr)15 });
+
+        Assert.Equal((IntPtr)15, map[DirectionalFocusSlot.BottomCenter]);
+    }
+
+    [Fact]
+    public void MatchesMiddleRightSlot_G()
+    {
+        var rectG = ExpectedSlotRect("G");
+        var service = CreateService(hwnd => hwnd == (IntPtr)16 ? rectG : default);
+
+        var map = service.BuildSlotMap(WorkArea, new[] { (IntPtr)16 });
+
+        Assert.Equal((IntPtr)16, map[DirectionalFocusSlot.MiddleRight]);
+    }
+
+    [Fact]
+    public void MatchesMiddleLeftSlot_H()
+    {
+        var rectH = ExpectedSlotRect("H");
+        var service = CreateService(hwnd => hwnd == (IntPtr)17 ? rectH : default);
+
+        var map = service.BuildSlotMap(WorkArea, new[] { (IntPtr)17 });
+
+        Assert.Equal((IntPtr)17, map[DirectionalFocusSlot.MiddleLeft]);
+    }
+
+    [Fact]
     public void ReturnsEmpty_WhenRectsDoNotMatchPeekDowsLayout()
     {
         // Window sitting at an arbitrary non-layout position.

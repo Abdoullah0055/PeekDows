@@ -130,6 +130,10 @@ public sealed class DirectionalFocusRegistry
             "B" => DirectionalFocusSlot.BottomRight,
             "C" => DirectionalFocusSlot.TopRight,
             "D" => DirectionalFocusSlot.BottomLeft,
+            "E" => DirectionalFocusSlot.TopCenter,
+            "F" => DirectionalFocusSlot.BottomCenter,
+            "G" => DirectionalFocusSlot.MiddleRight,
+            "H" => DirectionalFocusSlot.MiddleLeft,
             _ => null
         };
     }
