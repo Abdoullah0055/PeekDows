@@ -178,8 +178,11 @@ public class MultiMonitorLayoutServiceTests
     }
 
     [Fact]
-    public void MultiMonitorLayout_LimitsToFourPerMonitor_NotFourGlobally()
+    public void MultiMonitorLayout_LimitsPerMonitor_NotGlobally()
     {
+        // Documents that the per-monitor cap applies independently per screen, not as a
+        // global budget. With the eight-slot layout, monitor 1 (5 windows) keeps all five
+        // and monitor 2 (2 windows) keeps both — neither is capped by the other's count.
         var workArea1 = new Rect(0, 0, 1920, 1080);
         var workArea2 = new Rect(1920, 0, 1920, 1080);
 
@@ -205,15 +208,64 @@ public class MultiMonitorLayoutServiceTests
 
         var placements = service.CalculatePlacementsByMonitor(windows, settings);
 
-        Assert.Equal(6, placements.Count);
+        Assert.Equal(7, placements.Count);
 
         var monitor1Placements = placements.Where(p =>
             p.TargetRect.Left >= workArea1.Left && p.TargetRect.Right <= workArea1.Right).ToList();
         var monitor2Placements = placements.Where(p =>
             p.TargetRect.Left >= workArea2.Left && p.TargetRect.Right <= workArea2.Right).ToList();
 
-        Assert.Equal(4, monitor1Placements.Count);
+        Assert.Equal(5, monitor1Placements.Count);
         Assert.Equal(2, monitor2Placements.Count);
+    }
+
+    [Fact]
+    public void MultiMonitorLayout_EightPerMonitor_ArrangesIndependently()
+    {
+        // Each monitor must be able to fill all eight slots independently of the other.
+        var workArea1 = new Rect(0, 0, 1920, 1080);
+        var workArea2 = new Rect(1920, 0, 1920, 1080);
+
+        var monitor1 = new MonitorInfo { Handle = (IntPtr)1, WorkArea = workArea1, FullArea = workArea1, IsPrimary = true };
+        var monitor2 = new MonitorInfo { Handle = (IntPtr)2, WorkArea = workArea2, FullArea = workArea2, IsPrimary = false };
+
+        var map = new Dictionary<IntPtr, MonitorInfo>();
+        // Windows 1–8 on monitor 1, windows 9–16 on monitor 2.
+        for (int i = 1; i <= 8; i++) map[(IntPtr)i] = monitor1;
+        for (int i = 9; i <= 16; i++) map[(IntPtr)i] = monitor2;
+
+        var resolver = new FakeMonitorResolver(map, monitor1);
+        var engine = new LayoutEngine();
+        var service = new MultiMonitorLayoutService(resolver, engine);
+        var settings = new AppSettings();
+
+        var now = DateTime.Now;
+        var windows = new List<ManagedWindow>();
+        for (int i = 1; i <= 16; i++)
+            windows.Add(new ManagedWindow { Hwnd = (IntPtr)i, FirstSeenAt = now.AddMinutes(-i) });
+
+        var placements = service.CalculatePlacementsByMonitor(windows, settings);
+
+        // 8 per monitor, 16 in total — the cap is per-monitor, not global.
+        Assert.Equal(16, placements.Count);
+
+        var monitor1Placements = placements.Where(p =>
+            p.TargetRect.Left >= workArea1.Left && p.TargetRect.Right <= workArea1.Right).ToList();
+        var monitor2Placements = placements.Where(p =>
+            p.TargetRect.Left >= workArea2.Left && p.TargetRect.Right <= workArea2.Right).ToList();
+
+        Assert.Equal(8, monitor1Placements.Count);
+        Assert.Equal(8, monitor2Placements.Count);
+
+        // Both monitors fill the full A–H slot sequence.
+        var monitor1Slots = monitor1Placements.Select(p => p.SlotId).OrderBy(s => s).ToArray();
+        var monitor2Slots = monitor2Placements.Select(p => p.SlotId).OrderBy(s => s).ToArray();
+        Assert.Equal(new[] { "A", "B", "C", "D", "E", "F", "G", "H" }, monitor1Slots);
+        Assert.Equal(new[] { "A", "B", "C", "D", "E", "F", "G", "H" }, monitor2Slots);
+
+        // No window strays onto the other monitor.
+        Assert.All(monitor1Placements, p => Assert.True(p.TargetRect.Right <= workArea1.Right));
+        Assert.All(monitor2Placements, p => Assert.True(p.TargetRect.Left >= workArea2.Left));
     }
 
     [Fact]

@@ -648,7 +648,7 @@ public class LayoutEngineTests
     }
 
     [Fact]
-    public void ClassicPeekGrid_FiveWindows_OnlyManagesFour()
+    public void ClassicPeekGrid_FiveWindows_ManagesFiveSlots_AtoE()
     {
         var settings = new AppSettings();
         var workArea = new Rect(0, 0, 1280, 720);
@@ -664,12 +664,185 @@ public class LayoutEngineTests
 
         var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
 
-        Assert.Equal(4, placements.Count);
+        // The layout now supports up to 8 windows per monitor, so the oldest window
+        // (hwnd=5) is no longer dropped — it takes the fifth slot E.
+        Assert.Equal(5, placements.Count);
         var slotIds = placements.Select(p => p.SlotId).ToList();
-        Assert.Contains("A", slotIds);
-        Assert.Contains("B", slotIds);
-        Assert.Contains("C", slotIds);
-        Assert.Contains("D", slotIds);
+        Assert.Equal(new[] { "A", "B", "C", "D", "E" }, slotIds);
+        Assert.Contains(placements, p => p.Hwnd == (IntPtr)5 && p.SlotId == "E");
+    }
+
+    [Theory]
+    [MemberData(nameof(GetResolutions))]
+    public void ClassicPeekGrid_EightWindows_FillsSlotsAtoH_InOrder(Rect workArea)
+    {
+        var settings = new AppSettings();
+        var now = DateTime.Now;
+        var windows = new List<ManagedWindow>();
+        for (int i = 1; i <= 8; i++)
+            windows.Add(new ManagedWindow { Hwnd = (IntPtr)i, FirstSeenAt = now.AddMinutes(-i) });
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        Assert.Equal(8, placements.Count);
+        var slotIds = placements.Select(p => p.SlotId).ToList();
+        Assert.Equal(new[] { "A", "B", "C", "D", "E", "F", "G", "H" }, slotIds);
+        // Slot ids are unique — every window lands in its own slot.
+        Assert.Equal(slotIds.Distinct().Count(), slotIds.Count);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_MoreThanEightWindows_LimitsToEight()
+    {
+        var settings = new AppSettings();
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var now = DateTime.Now;
+        var windows = new List<ManagedWindow>();
+        for (int i = 1; i <= 10; i++)
+            windows.Add(new ManagedWindow { Hwnd = (IntPtr)i, FirstSeenAt = now.AddMinutes(-i) });
+
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+
+        // Overflow keeps the existing behaviour shape: only the top-priority windows are
+        // managed, the rest are ignored. The cap is now 8 instead of 4.
+        Assert.Equal(8, placements.Count);
+        Assert.DoesNotContain(placements, p => p.Hwnd == (IntPtr)9);
+        Assert.DoesNotContain(placements, p => p.Hwnd == (IntPtr)10);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetResolutions))]
+    public void ClassicPeekGrid_SlotE_IsTopCentered(Rect workArea)
+    {
+        // 5th window → slot E (top centre): ~5% margin left/right, flush with the top edge.
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(workArea);
+        var e = slotRects["E"];
+        int spanW = (int)Math.Round(workArea.Width * 0.90);
+        int spanH = (int)Math.Round(workArea.Height * 0.90);
+
+        Assert.Equal(workArea.Top, e.Top);
+        Assert.Equal(spanW, e.Width);
+        Assert.Equal(spanH, e.Height);
+        // Centred horizontally: equal ~5% margins on both sides. Integer rounding can split
+        // an odd leftover pixel unevenly, so allow a 1px asymmetry.
+        int leftMargin = e.Left - workArea.Left;
+        int rightMargin = workArea.Right - e.Right;
+        Assert.True(Math.Abs(leftMargin - rightMargin) <= 1, $"Slot E not centred: left={leftMargin}, right={rightMargin}");
+        Assert.True(e.Right <= workArea.Right, "Slot E right exceeds work area");
+    }
+
+    [Theory]
+    [MemberData(nameof(GetResolutions))]
+    public void ClassicPeekGrid_SlotF_IsBottomCentered(Rect workArea)
+    {
+        // 6th window → slot F (bottom centre): ~5% margin left/right, flush with the bottom edge.
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(workArea);
+        var f = slotRects["F"];
+        int spanW = (int)Math.Round(workArea.Width * 0.90);
+        int spanH = (int)Math.Round(workArea.Height * 0.90);
+
+        Assert.Equal(workArea.Bottom, f.Bottom);
+        Assert.Equal(spanW, f.Width);
+        Assert.Equal(spanH, f.Height);
+        int leftMargin = f.Left - workArea.Left;
+        int rightMargin = workArea.Right - f.Right;
+        Assert.True(Math.Abs(leftMargin - rightMargin) <= 1, $"Slot F not centred: left={leftMargin}, right={rightMargin}");
+        Assert.True(f.Top >= workArea.Top, "Slot F top above work area");
+    }
+
+    [Theory]
+    [MemberData(nameof(GetResolutions))]
+    public void ClassicPeekGrid_SlotG_IsRightCentered(Rect workArea)
+    {
+        // 7th window → slot G (right centre): flush with the right edge, ~5% margin top/bottom.
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(workArea);
+        var g = slotRects["G"];
+        int spanW = (int)Math.Round(workArea.Width * 0.90);
+        int spanH = (int)Math.Round(workArea.Height * 0.90);
+
+        Assert.Equal(workArea.Right, g.Right);
+        Assert.Equal(spanW, g.Width);
+        Assert.Equal(spanH, g.Height);
+        int topMargin = g.Top - workArea.Top;
+        int bottomMargin = workArea.Bottom - g.Bottom;
+        Assert.True(Math.Abs(topMargin - bottomMargin) <= 1, $"Slot G not centred: top={topMargin}, bottom={bottomMargin}");
+        Assert.True(g.Left >= workArea.Left, "Slot G left before work area");
+    }
+
+    [Theory]
+    [MemberData(nameof(GetResolutions))]
+    public void ClassicPeekGrid_SlotH_IsLeftCentered(Rect workArea)
+    {
+        // 8th window → slot H (left centre): flush with the left edge, ~5% margin top/bottom.
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(workArea);
+        var h = slotRects["H"];
+        int spanW = (int)Math.Round(workArea.Width * 0.90);
+        int spanH = (int)Math.Round(workArea.Height * 0.90);
+
+        Assert.Equal(workArea.Left, h.Left);
+        Assert.Equal(spanW, h.Width);
+        Assert.Equal(spanH, h.Height);
+        int topMargin = h.Top - workArea.Top;
+        int bottomMargin = workArea.Bottom - h.Bottom;
+        Assert.True(Math.Abs(topMargin - bottomMargin) <= 1, $"Slot H not centred: top={topMargin}, bottom={bottomMargin}");
+        Assert.True(h.Right <= workArea.Right, "Slot H right exceeds work area");
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_SlotsEtoH_KeepCornerMargins_Unchanged()
+    {
+        // The four corner slots (A–D) must keep their exact pre-existing anchors and the
+        // single 10% strip they leave exposed — the new slots must not alter them.
+        var workArea = new Rect(0, 0, 1280, 720);
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(workArea);
+
+        var a = slotRects["A"];
+        Assert.Equal(0, a.Left);
+        Assert.Equal(0, a.Top);
+        Assert.Equal(1152, a.Width);
+        Assert.Equal(648, a.Height);
+
+        var b = slotRects["B"];
+        Assert.Equal(128, b.Left);
+        Assert.Equal(72, b.Top);
+        Assert.Equal(1152, b.Width);
+        Assert.Equal(648, b.Height);
+
+        var c = slotRects["C"];
+        Assert.Equal(128, c.Left);
+        Assert.Equal(0, c.Top);
+        Assert.Equal(1152, c.Width);
+        Assert.Equal(648, c.Height);
+
+        var d = slotRects["D"];
+        Assert.Equal(0, d.Left);
+        Assert.Equal(72, d.Top);
+        Assert.Equal(1152, d.Width);
+        Assert.Equal(648, d.Height);
+    }
+
+    [Fact]
+    public void CalculateClassicPeekGridSlotRects_ReturnsEightSlots()
+    {
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(new Rect(0, 0, 1920, 1080));
+
+        Assert.Equal(8, slotRects.Count);
+        Assert.Equal(new[] { "A", "B", "C", "D", "E", "F", "G", "H" }, slotRects.Keys.OrderBy(k => k).ToArray());
+    }
+
+    [Theory]
+    [MemberData(nameof(GetResolutions))]
+    public void ClassicPeekGrid_AllEightSlotsStayInsideWorkArea(Rect workArea)
+    {
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(workArea);
+
+        foreach (var (slotId, rect) in slotRects)
+        {
+            Assert.True(rect.Left >= workArea.Left, $"Slot {slotId} left out of bounds");
+            Assert.True(rect.Top >= workArea.Top, $"Slot {slotId} top out of bounds");
+            Assert.True(rect.Right <= workArea.Right, $"Slot {slotId} right out of bounds");
+            Assert.True(rect.Bottom <= workArea.Bottom, $"Slot {slotId} bottom out of bounds");
+        }
     }
 
     [Fact]

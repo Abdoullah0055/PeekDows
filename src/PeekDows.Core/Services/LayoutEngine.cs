@@ -49,7 +49,7 @@ public class LayoutEngine
             return result;
         }
 
-        string[] slotOrder = { "A", "B", "C", "D" };
+        string[] slotOrder = { "A", "B", "C", "D", "E", "F", "G", "H" };
 
         for (int i = 0; i < priorityWindows.Count; i++)
         {
@@ -67,13 +67,27 @@ public class LayoutEngine
     }
 
     /// <summary>
-    /// Computes the four ClassicPeekGrid (90% overlap) slot rects for a monitor work area,
+    /// Number of slots the ClassicPeekGrid layout can fill per monitor. The first four (A–D)
+    /// are the original corner slots; E–H are the edge-centred slots added to support up to
+    /// eight managed windows per screen.
+    /// </summary>
+    public const int ClassicPeekGridMaxSlots = 8;
+
+    /// <summary>
+    /// Computes the ClassicPeekGrid (90% overlap) slot rects for a monitor work area,
     /// using exactly the same math as <see cref="CalculateClassicPeekGridPlacements"/> so a
     /// window physically sitting in one of these rects can be recognised as belonging to
     /// that slot without being re-arranged.
     /// </summary>
     /// <remarks>
-    /// Slot id mapping: A = TopLeft, B = BottomRight, C = TopRight, D = BottomLeft.
+    /// Every slot is the same size: ~90% of the work-area width and height. Only the anchor
+    /// point changes. Slot id mapping:
+    /// <list type="bullet">
+    /// <item>A = TopLeft,    B = BottomRight, C = TopRight,    D = BottomLeft (corner slots)</item>
+    /// <item>E = TopCenter,  F = BottomCenter, G = CenterRight, H = CenterLeft (edge-centred slots)</item>
+    /// </list>
+    /// Corner slots leave a single 10% strip exposed on the opposite edges; edge-centred
+    /// slots split that 10% into two 5% strips so the window stays centred along its edge.
     /// </remarks>
     public IReadOnlyDictionary<string, Rect> CalculateClassicPeekGridSlotRects(Rect workArea)
     {
@@ -87,13 +101,21 @@ public class LayoutEngine
         int rightX = workArea.Right - spanW;
         int topY = workArea.Top;
         int bottomY = workArea.Bottom - spanH;
+        // Edge-centred slots split the leftover 10% (work area − span) evenly into two 5%
+        // margins, so the window is flush with one edge but centred along it.
+        int centerX = workArea.Left + ((workArea.Width - spanW) / 2);
+        int centerY = workArea.Top + ((workArea.Height - spanH) / 2);
 
         return new Dictionary<string, Rect>
         {
             ["A"] = new Rect(leftX, topY, spanW, spanH),
             ["B"] = new Rect(rightX, bottomY, spanW, spanH),
             ["C"] = new Rect(rightX, topY, spanW, spanH),
-            ["D"] = new Rect(leftX, bottomY, spanW, spanH)
+            ["D"] = new Rect(leftX, bottomY, spanW, spanH),
+            ["E"] = new Rect(centerX, topY, spanW, spanH),
+            ["F"] = new Rect(centerX, bottomY, spanW, spanH),
+            ["G"] = new Rect(rightX, centerY, spanW, spanH),
+            ["H"] = new Rect(leftX, centerY, spanW, spanH)
         };
     }
 
@@ -103,7 +125,7 @@ public class LayoutEngine
             .OrderByDescending(w => w.IsPinned)
             .ThenByDescending(w => w.IsForeground)
             .ThenByDescending(w => w.LastFocusedAt ?? w.FirstSeenAt)
-            .Take(4)
+            .Take(ClassicPeekGridMaxSlots)
             .ToList();
     }
 
