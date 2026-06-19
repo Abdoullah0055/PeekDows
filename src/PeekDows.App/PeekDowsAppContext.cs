@@ -50,10 +50,13 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
     public bool IsDirectionalFocusEnabled => _settings.DirectionalFocusEnabled;
 
+    public bool AllowRepositionMaximizedWindows => _settings.AllowRepositionMaximizedWindows;
+
     public event Action<RuntimeState>? StateChanged;
     public event Action<bool>? AutoArrangeChanged;
     public event Action<bool>? StartWithWindowsChanged;
     public event Action<bool>? DirectionalFocusChanged;
+    public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
 
     public string LogFilePath => _logger.LogFilePath;
 
@@ -67,6 +70,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _logger.Info($"Settings loaded: path={_settingsService.GetType().GetProperty("SettingsFilePath")?.GetValue(_settingsService) ?? "N/A"}");
         _logger.Info($"Settings: Enabled={_settings.Enabled}");
         _logger.Info($"Settings: AutoArrange={_settings.AutoArrange}");
+        _logger.Info($"Settings: AllowRepositionMaximizedWindows={_settings.AllowRepositionMaximizedWindows}");
         _logger.Info($"Settings: SingleWindowMode={_settings.SingleWindowMode}");
         _logger.Info($"Settings: IgnoredProcesses.Count={_settings.IgnoredProcesses.Count}");
         _logger.Info($"Settings: IgnoredClasses.Count={_settings.IgnoredClasses.Count}");
@@ -317,6 +321,15 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         DirectionalFocusChanged?.Invoke(_settings.DirectionalFocusEnabled);
     }
 
+    public void ToggleAllowRepositionMaximizedWindows()
+    {
+        _settings.AllowRepositionMaximizedWindows = !_settings.AllowRepositionMaximizedWindows;
+        _settingsService.Save(_settings);
+        _logger.Info($"AllowRepositionMaximizedWindows changed: {_settings.AllowRepositionMaximizedWindows}");
+
+        AllowRepositionMaximizedWindowsChanged?.Invoke(_settings.AllowRepositionMaximizedWindows);
+    }
+
     // When StartWithWindows is false, do not delete an existing shortcut here.
     // The shortcut is removed only when the user explicitly disables the option from the tray.
     private void SyncStartWithWindows()
@@ -407,7 +420,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     public void OnSettingsChanged()
     {
         _classifier.UpdateSettings(_settings);
-        _logger.Info($"Settings changed at runtime: IgnoredProcesses.Count={_settings.IgnoredProcesses.Count}, IgnoredClasses.Count={_settings.IgnoredClasses.Count}");
+        _logger.Info($"Settings changed at runtime: IgnoredProcesses.Count={_settings.IgnoredProcesses.Count}, IgnoredClasses.Count={_settings.IgnoredClasses.Count}, AllowRepositionMaximizedWindows={_settings.AllowRepositionMaximizedWindows}");
     }
 
     private void OnArrangeNowRequested()

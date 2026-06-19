@@ -22,6 +22,7 @@ public class TrayIconController : IDisposable
     private ToolStripMenuItem? _statusItem;
     private ToolStripMenuItem? _pauseResumeItem;
     private ToolStripMenuItem? _autoArrangeItem;
+    private ToolStripMenuItem? _repositionMaximizedItem;
     private ToolStripMenuItem? _startWithWindowsItem;
     private ToolStripMenuItem? _directionalFocusItem;
 
@@ -53,24 +54,28 @@ public class TrayIconController : IDisposable
         _controller.AutoArrangeChanged += OnAutoArrangeChanged;
         _controller.StartWithWindowsChanged += OnStartWithWindowsChanged;
         _controller.DirectionalFocusChanged += OnDirectionalFocusChanged;
+        _controller.AllowRepositionMaximizedWindowsChanged += OnAllowRepositionMaximizedWindowsChanged;
 
         UpdateMenuState(_controller.State);
         UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
         UpdateStartWithWindowsMenu(_controller.CurrentSettings?.StartWithWindows ?? false);
         UpdateDirectionalFocusMenu(_controller.CurrentSettings?.DirectionalFocusEnabled ?? false);
+        UpdateRepositionMaximizedMenu(_controller.CurrentSettings?.AllowRepositionMaximizedWindows ?? false);
     }
 
-    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem, ToolStripMenuItem autoArrangeItem, ToolStripMenuItem startWithWindowsItem, ToolStripMenuItem directionalFocusItem)
+    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem, ToolStripMenuItem autoArrangeItem, ToolStripMenuItem repositionMaximizedItem, ToolStripMenuItem startWithWindowsItem, ToolStripMenuItem directionalFocusItem)
     {
         _statusItem = statusItem;
         _pauseResumeItem = pauseResumeItem;
         _autoArrangeItem = autoArrangeItem;
+        _repositionMaximizedItem = repositionMaximizedItem;
         _startWithWindowsItem = startWithWindowsItem;
         _directionalFocusItem = directionalFocusItem;
         UpdateMenuState(_controller.State);
         UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
         UpdateStartWithWindowsMenu(_controller.CurrentSettings?.StartWithWindows ?? false);
         UpdateDirectionalFocusMenu(_controller.CurrentSettings?.DirectionalFocusEnabled ?? false);
+        UpdateRepositionMaximizedMenu(_controller.CurrentSettings?.AllowRepositionMaximizedWindows ?? false);
     }
 
     internal void UpdatePauseState()
@@ -139,6 +144,11 @@ public class TrayIconController : IDisposable
         UpdateDirectionalFocusMenu(isEnabled);
     }
 
+    private void OnAllowRepositionMaximizedWindowsChanged(bool isEnabled)
+    {
+        UpdateRepositionMaximizedMenu(isEnabled);
+    }
+
     private void UpdateMenuState(RuntimeState state)
     {
         if (_statusItem != null)
@@ -181,6 +191,14 @@ public class TrayIconController : IDisposable
         if (_directionalFocusItem != null)
         {
             _directionalFocusItem.Checked = isEnabled;
+        }
+    }
+
+    private void UpdateRepositionMaximizedMenu(bool isEnabled)
+    {
+        if (_repositionMaximizedItem != null)
+        {
+            _repositionMaximizedItem.Checked = isEnabled;
         }
     }
 

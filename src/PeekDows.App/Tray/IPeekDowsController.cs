@@ -12,6 +12,7 @@ public interface IPeekDowsController
     bool IsAutoArrangeRunning { get; }
     bool IsStartWithWindowsEnabled { get; }
     bool IsDirectionalFocusEnabled { get; }
+    bool AllowRepositionMaximizedWindows { get; }
     bool IsPaused { get; }
     DateTimeOffset? PauseUntil { get; }
     string? PauseDescription { get; }
@@ -23,6 +24,7 @@ public interface IPeekDowsController
     void ToggleAutoArrange();
     void ToggleStartWithWindows();
     void ToggleDirectionalFocus();
+    void ToggleAllowRepositionMaximizedWindows();
     void OpenSettings();
     void OpenLogFile();
     void OpenLogsFolder();
@@ -32,4 +34,5 @@ public interface IPeekDowsController
     event Action<bool>? AutoArrangeChanged;
     event Action<bool>? StartWithWindowsChanged;
     event Action<bool>? DirectionalFocusChanged;
+    event Action<bool>? AllowRepositionMaximizedWindowsChanged;
 }

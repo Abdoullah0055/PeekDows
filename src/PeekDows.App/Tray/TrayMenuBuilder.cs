@@ -57,6 +57,11 @@ public class TrayMenuBuilder
         autoArrangeItem.Click += (s, e) => _controller.ToggleAutoArrange();
         menu.Items.Add(autoArrangeItem);
 
+        var repositionMaximizedItem = new ToolStripMenuItem("Reposition maximized windows");
+        repositionMaximizedItem.Checked = _controller.CurrentSettings.AllowRepositionMaximizedWindows;
+        repositionMaximizedItem.Click += (s, e) => _controller.ToggleAllowRepositionMaximizedWindows();
+        menu.Items.Add(repositionMaximizedItem);
+
         var startWithWindowsItem = new ToolStripMenuItem("Start with Windows");
         startWithWindowsItem.Checked = _controller.CurrentSettings.StartWithWindows;
         startWithWindowsItem.Click += (s, e) => _controller.ToggleStartWithWindows();
@@ -87,7 +92,7 @@ public class TrayMenuBuilder
         exitItem.Click += (s, e) => _controller.Exit();
         menu.Items.Add(exitItem);
 
-        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, startWithWindowsItem, directionalFocusItem);
+        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, repositionMaximizedItem, startWithWindowsItem, directionalFocusItem);
 
         return menu;
     }

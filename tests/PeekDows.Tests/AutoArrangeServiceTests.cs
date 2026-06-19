@@ -318,6 +318,7 @@ public class AutoArrangeServiceTests : IDisposable
         public bool IsAutoArrangeRunning => false;
         public bool IsStartWithWindowsEnabled => false;
         public bool IsDirectionalFocusEnabled => false;
+        public bool AllowRepositionMaximizedWindows => CurrentSettingsValue.AllowRepositionMaximizedWindows;
         public bool IsPaused => State == RuntimeState.Paused;
         public DateTimeOffset? PauseUntil => null;
         public string? PauseDescription => null;
@@ -327,6 +328,7 @@ public class AutoArrangeServiceTests : IDisposable
         public event Action<bool>? AutoArrangeChanged;
         public event Action<bool>? StartWithWindowsChanged;
         public event Action<bool>? DirectionalFocusChanged;
+        public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
 
         public void ArrangeNow() => ArrangeNowCallCount++;
         public void TogglePause() { }
@@ -336,6 +338,7 @@ public class AutoArrangeServiceTests : IDisposable
         public void ToggleAutoArrange() { }
         public void ToggleStartWithWindows() { }
         public void ToggleDirectionalFocus() { }
+        public void ToggleAllowRepositionMaximizedWindows() { }
         public void OpenSettings() { }
         public void OpenLogFile() { }
         public void OpenLogsFolder() { }
