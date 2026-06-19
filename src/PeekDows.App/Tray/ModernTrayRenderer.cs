@@ -5,35 +5,42 @@ using System.Windows.Forms;
 namespace PeekDows.App.Tray;
 
 /// <summary>
-/// Modern dark-theme renderer for the tray menu. Subclasses
-/// <see cref="ToolStripProfessionalRenderer"/> so we inherit the layout engine,
-/// image/check margins and recursive submenu rendering, while overriding every
-/// paint method that draws a visible surface. A single instance attached to the
-/// root <see cref="ContextMenuStrip"/> also styles its dropdowns automatically.
+/// Modern dark-theme renderer for the tray menu, DPI-aware and using Segoe Fluent
+/// Icons glyphs instead of pre-rendered bitmaps. Subclasses
+/// <see cref="ToolStripProfessionalRenderer"/> so we inherit layout, image/check
+/// margins and recursive submenu rendering, while overriding every visible paint
+/// method. A single instance attached to the root <see cref="ContextMenuStrip"/>
+/// also styles its dropdowns automatically.
 /// </summary>
 internal sealed class ModernTrayRenderer : ToolStripProfessionalRenderer
 {
-    // Rounded-corner radius for hover backgrounds and check boxes, in pixels.
-    private const float Radius = 6f;
+    // Base (96 DPI) metrics. Everything is multiplied by the live DPI scale at
+    // paint time so 100/125/150% all render crisp and proportionally correct.
+    private const float BaseHoverRadius = 6f;
+    private const float BaseHoverInsetX = 4f;
+    private const float BaseHoverInsetY = 2f;
+    private const float BaseCheckRadius = 4f;
+    private const float BaseTickStroke = 1.8f;
+    private const float BaseArrowStroke = 1.6f;
+    private const float BaseSeparatorInset = 16f;
 
     public ModernTrayRenderer() : base(new EmptyColorTable())
     {
-        // We draw rounded selection rectangles ourselves; disable the system
-        // focus rectangle which would otherwise draw a dotted border on top.
+        // We draw rounded selection rectangles ourselves; turn off the built-in
+        // rounded-edges path so the system focus rectangle doesn't double up.
         RoundedEdges = false;
     }
 
     protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
     {
-        var g = e.Graphics;
         using var bg = new SolidBrush(ModernTrayPalette.Background);
-        g.FillRectangle(bg, e.AffectedBounds);
+        e.Graphics.FillRectangle(bg, e.AffectedBounds);
     }
 
     protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
     {
-        // Draw a subtle 1px border around the menu surface (not the drop shadow,
-        // which Windows paints natively). Inset by 0.5px to avoid anti-alias bleed.
+        // Subtle 1px border inset by 0.5px to avoid anti-alias bleed. The OS paints
+        // the drop shadow separately.
         var r = e.AffectedBounds;
         var rect = new RectangleF(r.X + 0.5f, r.Y + 0.5f, r.Width - 1f, r.Height - 1f);
         using var pen = new Pen(ModernTrayPalette.Border);
@@ -43,81 +50,90 @@ internal sealed class ModernTrayRenderer : ToolStripProfessionalRenderer
     protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
     {
         var item = e.Item;
-        var g = e.Graphics;
-        var bounds = new RectangleF(Point.Empty, item.Size);
-
-        bool highlighted = item.Selected || item.Pressed;
-        if (!highlighted)
+        if (!(item.Selected || item.Pressed))
         {
             return;
         }
 
-        // Inset the hover rect so adjacent items have a visible gap, matching
-        // the Windows 11 flyout look.
-        var inset = new RectangleF(
-            bounds.X + 4f,
-            bounds.Y + 2f,
-            bounds.Width - 8f,
-            bounds.Height - 4f);
+        float scale = ScaleFor(e.ToolStrip);
+        var bounds = new RectangleF(Point.Empty, item.Size);
 
-        using var path = RoundedRect(inset, Radius);
+        var inset = new RectangleF(
+            bounds.X + BaseHoverInsetX * scale,
+            bounds.Y + BaseHoverInsetY * scale,
+            bounds.Width - BaseHoverInsetX * 2f * scale,
+            bounds.Height - BaseHoverInsetY * 2f * scale);
+
+        using var path = RoundedRect(inset, BaseHoverRadius * scale);
         using var brush = new SolidBrush(ModernTrayPalette.Hover);
-        g.FillPath(brush, path);
+        e.Graphics.FillPath(brush, path);
     }
 
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
     {
-        // Disabled items (e.g. the Status line) and the status muted look use
-        // the muted color; everything else uses the foreground text color.
+        // Force a crisp text rendering mode and a clean color. WinForms' default
+        // text path uses SingleBitPerPixel under some conditions which looks soft
+        // on dark backgrounds.
         var color = e.Item.Enabled ? ModernTrayPalette.Text : ModernTrayPalette.Muted;
         e.TextColor = color;
-        base.OnRenderItemText(e);
+
+        var prevHint = e.Graphics.TextRenderingHint;
+        e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        try
+        {
+            base.OnRenderItemText(e);
+        }
+        finally
+        {
+            e.Graphics.TextRenderingHint = prevHint;
+        }
     }
 
     protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
     {
+        float scale = ScaleFor(e.ToolStrip);
         var g = e.Graphics;
-        var vertical = e.Vertical;
         var bounds = e.Item.ContentRectangle;
-
         using var pen = new Pen(ModernTrayPalette.Separator, 1f);
 
-        if (vertical)
+        if (e.Vertical)
         {
             float x = bounds.Left + bounds.Width / 2f;
-            g.DrawLine(pen, x, bounds.Top + 2, x, bounds.Bottom - 2);
+            g.DrawLine(pen, x, bounds.Top + 2 * scale, x, bounds.Bottom - 2 * scale);
         }
         else
         {
-            // Horizontal separators get horizontal insets so the line doesn't
-            // touch the menu border.
             float y = bounds.Top + bounds.Height / 2f;
-            g.DrawLine(pen, bounds.Left + 12, y, bounds.Right - 12, y);
+            float inset = BaseSeparatorInset * scale;
+            g.DrawLine(pen, bounds.Left + inset, y, bounds.Right - inset, y);
         }
     }
 
     protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
     {
-        // Modern check: a rounded accent square with a white tick. Replaces the
-        // legacy WinForms checkmark glyph entirely.
+        // Modern check: rounded accent square with a white tick, replacing the
+        // legacy checkmark glyph entirely.
+        float scale = ScaleFor(e.ToolStrip);
         var g = e.Graphics;
-        var bounds = new RectangleF(e.ImageRectangle.Location, e.ImageRectangle.Size);
+        var cell = e.ImageRectangle;
+        if (cell.Width <= 0 || cell.Height <= 0)
+        {
+            return;
+        }
 
-        // Square, centered vertically in the image cell, ~14px logical.
-        float side = System.MathF.Min(bounds.Width, bounds.Height) - 2f;
-        if (side <= 0) side = 14f;
+        // Square sized to ~70% of the cell, centered.
+        float side = (System.MathF.Min(cell.Width, cell.Height)) * 0.72f;
         var square = new RectangleF(
-            bounds.X + (bounds.Width - side) / 2f,
-            bounds.Y + (bounds.Height - side) / 2f,
+            cell.X + (cell.Width - side) / 2f,
+            cell.Y + (cell.Height - side) / 2f,
             side,
             side);
 
-        using var path = RoundedRect(square, 4f);
+        using var path = RoundedRect(square, BaseCheckRadius * scale);
         using var accent = new SolidBrush(ModernTrayPalette.Accent);
         g.FillPath(accent, path);
 
-        // White tick centered in the square.
-        using var tick = new Pen(ModernTrayPalette.AccentForeground, 1.8f)
+        using var tick = new Pen(ModernTrayPalette.AccentForeground, BaseTickStroke * scale)
         {
             StartCap = LineCap.Round,
             EndCap = LineCap.Round,
@@ -133,18 +149,17 @@ internal sealed class ModernTrayRenderer : ToolStripProfessionalRenderer
 
     protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
     {
-        // Redraw the submenu chevron in the muted text color (the default arrow
-        // uses the system menu color which clashes with the dark theme). We draw
-        // directly rather than going through base.OnRenderArrow so the color and
-        // stroke style are fully under our control.
+        // Redraw the submenu chevron in the muted text color; the default arrow
+        // uses the system menu color which clashes with the dark theme.
         var r = e.ArrowRectangle;
         if (r.Width <= 0 || r.Height <= 0)
         {
             return;
         }
 
+        float scale = ScaleFor(e.Item?.Owner as ToolStrip);
         var g = e.Graphics;
-        using var pen = new Pen(ModernTrayPalette.Muted, 1.6f)
+        using var pen = new Pen(ModernTrayPalette.Muted, BaseArrowStroke * scale)
         {
             StartCap = LineCap.Round,
             EndCap = LineCap.Round,
@@ -160,39 +175,68 @@ internal sealed class ModernTrayRenderer : ToolStripProfessionalRenderer
 
     protected override void OnRenderItemImage(ToolStripItemImageRenderEventArgs e)
     {
-        // Draw the monochrome icons as-is. We rely on the image already being
-        // pre-rendered in the foreground color by ModernTrayIcons.
-        if (e.Image == null)
+        // Draw the glyph directly as vector text into the cell — this is the fix
+        // for the previous blurry look (no intermediate bitmap, no upscaling).
+        var cell = e.ImageRectangle;
+        if (cell.Width <= 0 || cell.Height <= 0)
         {
             return;
         }
 
-        var g = e.Graphics;
-        var r = e.ImageRectangle;
-        if (r.Width <= 0 || r.Height <= 0)
+        var item = e.Item;
+        float scale = ScaleFor(e.ToolStrip);
+        var color = item.Enabled ? ModernTrayPalette.Text : ModernTrayPalette.Muted;
+
+        // Status row carries a StatusTag (dot color) instead of an icon key.
+        if (item.Tag is ModernTrayIcons.StatusTag statusTag)
         {
+            ModernTrayIcons.DrawStatusDot(e.Graphics, cell, statusTag.Color, scale);
             return;
         }
 
-        // Disabled items (status row) get a dimmed icon.
-        if (!e.Item.Enabled)
+        if (item.Tag is string tag && ModernTrayIcons.IsIconKey(tag))
         {
-            var cm = new System.Drawing.Imaging.ColorMatrix { Matrix33 = 0.5f };
-            using var ia = new System.Drawing.Imaging.ImageAttributes();
-            ia.SetColorMatrix(cm);
-            var destPoints = new PointF[]
+            ModernTrayIcons.DrawIconGlyph(e.Graphics, tag, cell, color, scale);
+            return;
+        }
+
+        // Fallback: if a real Image was assigned (e.g. legacy code), draw it
+        // crisply without soft bicubic scaling.
+        if (e.Image != null)
+        {
+            e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            e.Graphics.DrawImage(e.Image, cell);
+        }
+    }
+
+    /// <summary>
+    /// DPI scale factor for the tool strip being painted. Clamped to a sane range
+    /// so an unexpected 0 or huge DPI can't blow up metrics.
+    /// </summary>
+    private static float ScaleFor(ToolStrip? toolStrip)
+    {
+        int dpi = 96;
+        try
+        {
+            if (toolStrip != null)
             {
-                new(r.Left, r.Top),
-                new(r.Right, r.Top),
-                new(r.Left, r.Bottom),
-            };
-            g.DrawImage(e.Image, destPoints, new RectangleF(0, 0, e.Image.Width, e.Image.Height), GraphicsUnit.Pixel, ia);
+                dpi = toolStrip.DeviceDpi;
+            }
         }
-        else
+        catch
         {
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.DrawImage(e.Image, r);
+            dpi = 96;
         }
+
+        if (dpi <= 0)
+        {
+            dpi = 96;
+        }
+
+        float scale = dpi / 96f;
+        if (scale < 1f) scale = 1f;
+        if (scale > 3f) scale = 3f;
+        return scale;
     }
 
     private static GraphicsPath RoundedRect(RectangleF rect, float radius)
@@ -208,11 +252,10 @@ internal sealed class ModernTrayRenderer : ToolStripProfessionalRenderer
     }
 
     /// <summary>
-    /// An essentially transparent color table. We override every visible render
-    /// method ourselves, but <c>ToolStripProfessionalRenderer</c> still consults
-    /// the color table for a few leftover details (e.g. the image margin strip and
-    /// margin gradient). Forcing everything to the menu background avoids stray
-    /// light strips next to the icons.
+    /// A near-empty color table. We override every visible render method, but
+    /// <c>ToolStripProfessionalRenderer</c> still consults the table for the image
+    /// margin strip and a few gradients. Forcing those to the menu background
+    /// avoids stray light strips next to the icons.
     /// </summary>
     private sealed class EmptyColorTable : ProfessionalColorTable
     {

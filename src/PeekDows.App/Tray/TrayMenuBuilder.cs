@@ -23,38 +23,43 @@ public class TrayMenuBuilder
             ShowImageMargin = true,
             BackColor = ModernTrayPalette.Background,
             ForeColor = ModernTrayPalette.Text,
-            Padding = new Padding(2, 6, 2, 6),
+            // Generous padding around the whole flyout, matching Win11's
+            // breathing room. The renderer paints the hover insets, this controls
+            // the outer gutter.
+            Padding = new Padding(8, 8, 8, 8),
         };
 
+        // The icon gutter: wide enough for a 16px glyph centered with padding,
+        // so text and icon line up cleanly like a native flyout.
+        menu.ImageScalingSize = new System.Drawing.Size(16, 16);
+
         // Apply native Win11 rounded corners once the native handle exists.
-        // The handle is lazily created; Opening fires right before display and
-        // guarantees the handle is alive.
+        // Opening fires right before display and guarantees the handle is alive.
         menu.Opening += (_, _) =>
         {
             try { ModernTrayWin32.TryApplyRoundedCorners(menu.Handle); }
             catch { /* visual only; rounded corners are best-effort */ }
         };
 
-        int iconSize = 16;
-
         var statusItem = new ToolStripMenuItem("Status: Running")
         {
             Enabled = false,
-            ImageScaling = ToolStripItemImageScaling.None,
-            Image = ModernTrayIcons.StatusDot(iconSize, ModernTrayPalette.StatusRunning),
+            // StatusTag lets the renderer draw the dot in the right color
+            // without any controller coupling. Initial color = running green.
+            Tag = new ModernTrayIcons.StatusTag(ModernTrayPalette.StatusRunning),
         };
         menu.Items.Add(statusItem);
         menu.Items.Add(new ToolStripSeparator());
 
-        var arrangeNowItem = NewItem("Arrange Now", "arrange", iconSize);
+        var arrangeNowItem = NewItem("Arrange Now", "arrange");
         arrangeNowItem.Click += (s, e) => _controller.ArrangeNow();
         menu.Items.Add(arrangeNowItem);
 
-        var pauseResumeItem = NewItem("Pause", "pause", iconSize);
+        var pauseResumeItem = NewItem("Pause", "pause");
         pauseResumeItem.Click += (s, e) => _controller.TogglePause();
         menu.Items.Add(pauseResumeItem);
 
-        var pauseForMenu = NewItem("Pause for", "pause-for", iconSize);
+        var pauseForMenu = NewItem("Pause for", "pause-for");
 
         var pause5Item = new ToolStripMenuItem("5 minutes");
         pause5Item.Click += (s, e) => _controller.PauseFor(TimeSpan.FromMinutes(5));
@@ -76,42 +81,42 @@ public class TrayMenuBuilder
 
         menu.Items.Add(new ToolStripSeparator());
 
-        var autoArrangeItem = NewItem("Enable Auto Arrange", "auto-arrange", iconSize);
+        var autoArrangeItem = NewItem("Enable Auto Arrange", "auto-arrange");
         autoArrangeItem.Click += (s, e) => _controller.ToggleAutoArrange();
         menu.Items.Add(autoArrangeItem);
 
-        var repositionMaximizedItem = NewItem("Reposition maximized windows", "reposition-maximized", iconSize);
+        var repositionMaximizedItem = NewItem("Reposition maximized windows", "reposition-maximized");
         repositionMaximizedItem.Checked = _controller.CurrentSettings.AllowRepositionMaximizedWindows;
         repositionMaximizedItem.Click += (s, e) => _controller.ToggleAllowRepositionMaximizedWindows();
         menu.Items.Add(repositionMaximizedItem);
 
-        var startWithWindowsItem = NewItem("Start with Windows", "start-windows", iconSize);
+        var startWithWindowsItem = NewItem("Start with Windows", "start-windows");
         startWithWindowsItem.Checked = _controller.CurrentSettings.StartWithWindows;
         startWithWindowsItem.Click += (s, e) => _controller.ToggleStartWithWindows();
         menu.Items.Add(startWithWindowsItem);
 
-        var directionalFocusItem = NewItem("Enable Directional Focus", "directional-focus", iconSize);
+        var directionalFocusItem = NewItem("Enable Directional Focus", "directional-focus");
         directionalFocusItem.Checked = _controller.CurrentSettings.DirectionalFocusEnabled;
         directionalFocusItem.Click += (s, e) => _controller.ToggleDirectionalFocus();
         menu.Items.Add(directionalFocusItem);
 
         menu.Items.Add(new ToolStripSeparator());
 
-        var settingsItem = NewItem("Settings", "settings", iconSize);
+        var settingsItem = NewItem("Settings", "settings");
         settingsItem.Click += (s, e) => _trayIcon.OpenSettings();
         menu.Items.Add(settingsItem);
 
-        var openLogItem = NewItem("Open Log File", "log-file", iconSize);
+        var openLogItem = NewItem("Open Log File", "log-file");
         openLogItem.Click += (s, e) => _controller.OpenLogFile();
         menu.Items.Add(openLogItem);
 
-        var openLogsFolderItem = NewItem("Open Logs Folder", "logs-folder", iconSize);
+        var openLogsFolderItem = NewItem("Open Logs Folder", "logs-folder");
         openLogsFolderItem.Click += (s, e) => _controller.OpenLogsFolder();
         menu.Items.Add(openLogsFolderItem);
 
         menu.Items.Add(new ToolStripSeparator());
 
-        var exitItem = NewItem("Exit", "exit", iconSize);
+        var exitItem = NewItem("Exit", "exit");
         exitItem.Click += (s, e) => _controller.Exit();
         menu.Items.Add(exitItem);
 
@@ -121,16 +126,19 @@ public class TrayMenuBuilder
     }
 
     /// <summary>
-    /// Builds a menu item with a monochrome icon and consistent scaling. Keeping
-    /// the icon assignment in one place means every item shares the same sizing
-    /// and the renderer's <c>OnRenderItemImage</c> applies uniformly.
+    /// Builds a menu item whose icon is rendered on demand by the custom renderer
+    /// via the Tag key (a Segoe Fluent Icons glyph). Keeping icon assignment in
+    /// one place means every item shares identical sizing, and there is no bitmap
+    /// to generate, cache or scale.
     /// </summary>
-    private static ToolStripMenuItem NewItem(string text, string iconKey, int iconSize)
+    private static ToolStripMenuItem NewItem(string text, string iconKey)
     {
         return new ToolStripMenuItem(text)
         {
-            Image = ModernTrayIcons.Get(iconKey, iconSize),
-            ImageScaling = ToolStripItemImageScaling.None,
+            Tag = iconKey,
+            // Reserve the image cell so the renderer has a target rect to paint
+            // the glyph into; Image itself stays null.
+            ImageScaling = ToolStripItemImageScaling.SizeToFit,
         };
     }
 }
