@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Windows.Forms;
 using PeekDows.App.AutoArrange;
+using PeekDows.App.Focus;
 using PeekDows.App.Hotkeys;
 using PeekDows.App.Startup;
 using PeekDows.App.Tray;
@@ -28,6 +29,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private readonly IStartupService _startupService;
     private readonly PauseStateService _pauseState;
     private readonly System.Windows.Forms.Timer _pauseCheckTimer;
+    private readonly DirectionalFocusService _directionalFocusService;
+    private readonly DirectionalFocusRegistry _directionalFocusRegistry;
 
     private AppSettings _settings;
 
@@ -42,9 +45,12 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
     public bool IsStartWithWindowsEnabled => _settings.StartWithWindows;
 
+    public bool IsDirectionalFocusEnabled => _settings.DirectionalFocusEnabled;
+
     public event Action<RuntimeState>? StateChanged;
     public event Action<bool>? AutoArrangeChanged;
     public event Action<bool>? StartWithWindowsChanged;
+    public event Action<bool>? DirectionalFocusChanged;
 
     public string LogFilePath => _logger.LogFilePath;
 
@@ -102,6 +108,15 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         if (_settings.AutoArrange)
         {
             _autoArrangeService.Start(_settings);
+        }
+
+        _directionalFocusRegistry = new DirectionalFocusRegistry(_logger);
+        var gestureDetector = new DirectionalFocusGestureDetector();
+        _directionalFocusService = new DirectionalFocusService(gestureDetector, _directionalFocusRegistry, _monitorService, _logger);
+
+        if (_settings.DirectionalFocusEnabled)
+        {
+            _directionalFocusService.Start();
         }
 
         if (_settings.ArrangeOnStartup)
@@ -252,6 +267,24 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         StartWithWindowsChanged?.Invoke(_settings.StartWithWindows);
     }
 
+    public void ToggleDirectionalFocus()
+    {
+        _settings.DirectionalFocusEnabled = !_settings.DirectionalFocusEnabled;
+        _settingsService.Save(_settings);
+        _logger.Info($"DirectionalFocus toggled to {_settings.DirectionalFocusEnabled}");
+
+        if (_settings.DirectionalFocusEnabled)
+        {
+            _directionalFocusService.Start();
+        }
+        else
+        {
+            _directionalFocusService.Stop();
+        }
+
+        DirectionalFocusChanged?.Invoke(_settings.DirectionalFocusEnabled);
+    }
+
     // When StartWithWindows is false, do not delete an existing shortcut here.
     // The shortcut is removed only when the user explicitly disables the option from the tray.
     private void SyncStartWithWindows()
@@ -290,6 +323,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _pauseCheckTimer.Stop();
         _pauseCheckTimer.Dispose();
         _autoArrangeService.Dispose();
+        _directionalFocusService.Dispose();
         _hotkeyService.Dispose();
         _trayController.Dispose();
         Application.Exit();
@@ -444,6 +478,9 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
             var result = _placementService.ApplyPlacements(placements);
 
+            _directionalFocusRegistry.UpdateFromPlacements(placements, _monitorService);
+            _logger.Info("DirectionalFocusRegistry updated from arrange placements");
+
             if (result.FailedCount > 0)
             {
                 _logger.Warn($"Arrange completed with failures: attempted={result.AttemptedCount}, succeeded={result.SucceededCount}, failed={result.FailedCount}");
@@ -478,6 +515,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             _pauseCheckTimer.Stop();
             _pauseCheckTimer.Dispose();
             _autoArrangeService.Dispose();
+            _directionalFocusService.Dispose();
             _hotkeyService.Dispose();
             _trayController.Dispose();
         }

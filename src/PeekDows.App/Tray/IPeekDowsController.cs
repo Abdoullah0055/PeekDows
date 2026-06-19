@@ -11,6 +11,7 @@ public interface IPeekDowsController
     AppSettings CurrentSettings { get; }
     bool IsAutoArrangeRunning { get; }
     bool IsStartWithWindowsEnabled { get; }
+    bool IsDirectionalFocusEnabled { get; }
     bool IsPaused { get; }
     DateTimeOffset? PauseUntil { get; }
     string? PauseDescription { get; }
@@ -21,6 +22,7 @@ public interface IPeekDowsController
     void Resume();
     void ToggleAutoArrange();
     void ToggleStartWithWindows();
+    void ToggleDirectionalFocus();
     void OpenSettings();
     void OpenLogFile();
     void OpenLogsFolder();
@@ -29,4 +31,5 @@ public interface IPeekDowsController
     event Action<RuntimeState>? StateChanged;
     event Action<bool>? AutoArrangeChanged;
     event Action<bool>? StartWithWindowsChanged;
+    event Action<bool>? DirectionalFocusChanged;
 }

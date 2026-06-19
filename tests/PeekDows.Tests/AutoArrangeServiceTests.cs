@@ -317,6 +317,7 @@ public class AutoArrangeServiceTests : IDisposable
         public AppSettings CurrentSettings => CurrentSettingsValue;
         public bool IsAutoArrangeRunning => false;
         public bool IsStartWithWindowsEnabled => false;
+        public bool IsDirectionalFocusEnabled => false;
         public bool IsPaused => State == RuntimeState.Paused;
         public DateTimeOffset? PauseUntil => null;
         public string? PauseDescription => null;
@@ -325,6 +326,7 @@ public class AutoArrangeServiceTests : IDisposable
         public event Action<RuntimeState>? StateChanged;
         public event Action<bool>? AutoArrangeChanged;
         public event Action<bool>? StartWithWindowsChanged;
+        public event Action<bool>? DirectionalFocusChanged;
 
         public void ArrangeNow() => ArrangeNowCallCount++;
         public void TogglePause() { }
@@ -333,6 +335,7 @@ public class AutoArrangeServiceTests : IDisposable
         public void Resume() { }
         public void ToggleAutoArrange() { }
         public void ToggleStartWithWindows() { }
+        public void ToggleDirectionalFocus() { }
         public void OpenSettings() { }
         public void OpenLogFile() { }
         public void OpenLogsFolder() { }

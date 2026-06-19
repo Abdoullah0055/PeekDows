@@ -22,6 +22,9 @@ public sealed class AppSettings
     public bool BringFocusedWindowToFront { get; set; } = true;
     public bool RearrangeOnFocus { get; set; } = false;
 
+    public bool DirectionalFocusEnabled { get; set; } = true;
+    public int DirectionalFocusThresholdPx { get; set; } = 80;
+
     public List<string> IgnoredProcesses { get; set; } = new()
     {
         "PeekDows.exe",

@@ -62,6 +62,11 @@ public class TrayMenuBuilder
         startWithWindowsItem.Click += (s, e) => _controller.ToggleStartWithWindows();
         menu.Items.Add(startWithWindowsItem);
 
+        var directionalFocusItem = new ToolStripMenuItem("Enable Directional Focus");
+        directionalFocusItem.Checked = _controller.CurrentSettings.DirectionalFocusEnabled;
+        directionalFocusItem.Click += (s, e) => _controller.ToggleDirectionalFocus();
+        menu.Items.Add(directionalFocusItem);
+
         menu.Items.Add(new ToolStripSeparator());
 
         var settingsItem = new ToolStripMenuItem("Settings");
@@ -82,7 +87,7 @@ public class TrayMenuBuilder
         exitItem.Click += (s, e) => _controller.Exit();
         menu.Items.Add(exitItem);
 
-        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, startWithWindowsItem);
+        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, startWithWindowsItem, directionalFocusItem);
 
         return menu;
     }

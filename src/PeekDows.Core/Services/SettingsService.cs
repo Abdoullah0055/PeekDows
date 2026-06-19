@@ -71,6 +71,10 @@ public class SettingsService
         settings.IgnoredProcesses ??= new List<string>();
         settings.IgnoredClasses ??= new List<string>();
         settings.Hotkeys ??= new Dictionary<string, string>();
+
+        if (settings.DirectionalFocusThresholdPx <= 0)
+            settings.DirectionalFocusThresholdPx = 80;
+
         return settings;
     }
 }
