@@ -90,7 +90,9 @@ public sealed class AutoArrangeService : IDisposable
             var settings = _controller.CurrentSettings;
             if (settings == null) return;
 
-            _logger.Info("AutoArrange tick");
+            // Note: we intentionally do not log a line per tick. Each meaningful outcome below
+            // (skipped for a reason, detected added/removed windows, triggering ArrangeNow) logs
+            // its own descriptive line, so an unconditional "tick" line would just be noise.
 
             if (!settings.Enabled)
             {

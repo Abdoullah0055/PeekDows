@@ -6,23 +6,41 @@ namespace PeekDows.Core.Services;
 
 public sealed class FileLogger
 {
+    private const long DefaultMaxLogFileSizeBytes = 5 * 1024 * 1024; // 5 MB
+    private const int DefaultMaxLogBackups = 5;
+
     private readonly string _logDirectory;
     private readonly string _logFilePath;
+    private readonly long _maxLogFileSizeBytes;
+    private readonly int _maxLogBackups;
     private readonly object _lock = new();
 
     public string LogFilePath => _logFilePath;
 
-    public FileLogger()
-    {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        _logDirectory = Path.Combine(appData, "PeekDows", "logs");
-        _logFilePath = Path.Combine(_logDirectory, "peekdows.log");
-    }
+    public FileLogger() : this(logDirectory: null) { }
 
-    public FileLogger(string logDirectory)
+    public FileLogger(string? logDirectory) : this(logDirectory, maxLogFileSizeBytes: null, maxLogBackups: null) { }
+
+    /// <summary>
+    /// Testable constructor. Production code uses the parameterless / directory-only overloads
+    /// and inherits the default rotation limits. Tests inject small limits to trigger rotation
+    /// without writing megabytes.
+    /// </summary>
+    internal FileLogger(string? logDirectory, long? maxLogFileSizeBytes, int? maxLogBackups)
     {
-        _logDirectory = logDirectory;
+        if (string.IsNullOrWhiteSpace(logDirectory))
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            _logDirectory = Path.Combine(appData, "PeekDows", "logs");
+        }
+        else
+        {
+            _logDirectory = logDirectory;
+        }
+
         _logFilePath = Path.Combine(_logDirectory, "peekdows.log");
+        _maxLogFileSizeBytes = maxLogFileSizeBytes ?? DefaultMaxLogFileSizeBytes;
+        _maxLogBackups = maxLogBackups ?? DefaultMaxLogBackups;
     }
 
     public void Info(string message) => Write("INFO", message);
@@ -48,6 +66,7 @@ public sealed class FileLogger
                     Directory.CreateDirectory(_logDirectory);
                 }
 
+                RotateIfNeeded();
                 var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
                 File.AppendAllText(_logFilePath, line);
             }
@@ -58,6 +77,64 @@ public sealed class FileLogger
         }
         catch
         {
+            // Logging must never crash the app. If writing or rotation fails, swallow it.
         }
     }
+
+    /// <summary>
+    /// Rotates the active log file when it meets or exceeds the configured size limit. Rotation
+    /// shifts backups forward (peekdows.4.log -> peekdows.5.log, ..., peekdows.log -> peekdows.1.log)
+    /// and drops the oldest backup once MaxLogBackups is reached. Missing backup files are skipped
+    /// silently so rotation stays safe on a fresh or partially-rotated directory.
+    /// </summary>
+    private void RotateIfNeeded()
+    {
+        try
+        {
+            if (_maxLogFileSizeBytes <= 0 || _maxLogBackups <= 0) return;
+
+            if (!File.Exists(_logFilePath)) return;
+
+            var length = new FileInfo(_logFilePath).Length;
+            if (length < _maxLogFileSizeBytes) return;
+
+            // Drop the oldest backup first (peekdows.{MaxLogBackups}.log) so there is room to shift
+            // every other backup forward by one. Missing files are ignored.
+            var oldestPath = BackupPath(_maxLogBackups);
+            if (File.Exists(oldestPath))
+            {
+                File.Delete(oldestPath);
+            }
+
+            // Shift existing backups forward, from newest-1 down to 1, so we never overwrite a
+            // backup we still need: peekdows.{n-1}.log -> peekdows.{n}.log for n in [Max, 2].
+            for (var n = _maxLogBackups; n >= 2; n--)
+            {
+                var from = BackupPath(n - 1);
+                var to = BackupPath(n);
+                if (File.Exists(from))
+                {
+                    File.Move(from, to);
+                }
+            }
+
+            // Promote the active file to the newest backup (peekdows.log -> peekdows.1.log). The
+            // active peekdows.log is then recreated by the next AppendAllText call. When
+            // MaxLogBackups == 1 the slot was already cleared by the oldest-drop above; this guard
+            // keeps the move safe in all cases.
+            var firstBackup = BackupPath(1);
+            if (File.Exists(firstBackup))
+            {
+                File.Delete(firstBackup);
+            }
+            File.Move(_logFilePath, firstBackup);
+        }
+        catch
+        {
+            // Rotation must never crash a log write. The active file may grow slightly beyond the
+            // limit on a transient failure; the next successful rotation will catch it up.
+        }
+    }
+
+    private string BackupPath(int index) => Path.Combine(_logDirectory, $"peekdows.{index}.log");
 }
