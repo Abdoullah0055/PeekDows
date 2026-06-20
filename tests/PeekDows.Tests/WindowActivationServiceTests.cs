@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using PeekDows.App.Focus;
+using PeekDows.Core.Services;
 using PeekDows.Core.Win32;
 
 namespace PeekDows.Tests;
@@ -25,6 +26,7 @@ public class FakeActivationApi : IWindowActivationApi
 
     public int IsWindowCallCount { get; private set; }
     public int ShowWindowCallCount { get; private set; }
+    public int ShowWindowAsyncCallCount { get; private set; }
     public int BringWindowToTopCallCount { get; private set; }
     public int SetWindowPosCallCount { get; private set; }
     public int SetForegroundWindowCallCount { get; private set; }
@@ -45,6 +47,7 @@ public class FakeActivationApi : IWindowActivationApi
     public bool IsWindow(IntPtr hwnd) { IsWindowCallCount++; _targetHwnd = hwnd; return IsWindowResult; }
     public bool IsIconic(IntPtr hwnd) => IsIconicResult;
     public bool ShowWindow(IntPtr hwnd, int cmdShow) { ShowWindowCallCount++; return ShowWindowResult; }
+    public bool ShowWindowAsync(IntPtr hwnd, int cmdShow) { ShowWindowAsyncCallCount++; return ShowWindowResult; }
     public IntPtr GetForegroundWindow()
     {
         if (_setForegroundCalled && _foregroundAfterActivation != IntPtr.Zero)
@@ -59,7 +62,15 @@ public class FakeActivationApi : IWindowActivationApi
         return AttachThreadInputResult;
     }
     public bool BringWindowToTop(IntPtr hwnd) { BringWindowToTopCallCount++; return BringWindowToTopResult; }
-    public bool SetWindowPos(IntPtr hwnd, IntPtr hwndInsertAfter, int x, int y, int cx, int cy, uint flags) { SetWindowPosCallCount++; return SetWindowPosResult; }
+    public bool SetWindowPos(IntPtr hwnd, IntPtr hwndInsertAfter, int x, int y, int cx, int cy, uint flags)
+    {
+        SetWindowPosCallCount++;
+        if (hwndInsertAfter == NativeMethods.HWND_TOPMOST) SetWindowPosUsedTopmost = true;
+        if (hwndInsertAfter == NativeMethods.HWND_NOTOPMOST) SetWindowPosUsedNoTopmost = true;
+        return SetWindowPosResult;
+    }
+    public bool SetWindowPosUsedTopmost { get; private set; }
+    public bool SetWindowPosUsedNoTopmost { get; private set; }
     public bool SetForegroundWindow(IntPtr hwnd) { SetForegroundWindowCallCount++; _setForegroundCalled = true; return SetForegroundWindowResult; }
     public IntPtr SetFocus(IntPtr hwnd) { SetFocusCallCount++; return SetFocusResult; }
     public int GetWindowText(IntPtr hwnd, StringBuilder sb, int maxCount) { sb.Append("TestWindow"); return 10; }
@@ -94,7 +105,10 @@ public class WindowActivationServiceTests
         api.SetForegroundWindowUpdatesForeground((IntPtr)100);
         var service = new WindowActivationService(api);
         service.Activate((IntPtr)100);
-        Assert.Equal(1, api.ShowWindowCallCount);
+        // Restore now uses the NON-BLOCKING ShowWindowAsync (hardening: a hung target must
+        // not block activation). The blocking ShowWindow must NOT be used on the normal path.
+        Assert.Equal(1, api.ShowWindowAsyncCallCount);
+        Assert.Equal(0, api.ShowWindowCallCount);
     }
 
     [Fact]
@@ -108,23 +122,55 @@ public class WindowActivationServiceTests
     }
 
     [Fact]
-    public void Activate_AttachesThreadInput_WhenDifferentThreads()
+    public void Activate_DoesNotAttachThreadInput_OnNormalPath()
     {
+        // Hardening: the normal activation path must never call AttachThreadInput. Attaching
+        // synchronises PeekDows's UI thread queue with the target's, so a hung target freezes
+        // PeekDows. This replaces the old AttachThreadInput-OnDifferentThreads behaviour.
         var api = new FakeActivationApi();
         api.SetForegroundWindowUpdatesForeground((IntPtr)100);
         var service = new WindowActivationService(api);
         service.Activate((IntPtr)100);
-        Assert.True(api.AttachThreadInputCallCount >= 1);
+        Assert.Equal(0, api.AttachThreadInputCallCount);
+        Assert.Equal(0, api.DetachThreadInputCallCount);
     }
 
     [Fact]
-    public void Activate_CallsBringWindowToTop()
+    public void Activate_DoesNotCallBringWindowToTop_OnNormalPath()
     {
+        // Hardening: BringWindowToTop was removed from the normal path. The single
+        // SetWindowPos(HWND_TOP, SWP_ASYNCWINDOWPOS) that follows supersedes it, and
+        // BringWindowToTop re-issues against the target thread (a potential freeze vector).
         var api = new FakeActivationApi();
         api.SetForegroundWindowUpdatesForeground((IntPtr)100);
         var service = new WindowActivationService(api);
         service.Activate((IntPtr)100);
-        Assert.Equal(1, api.BringWindowToTopCallCount);
+        Assert.Equal(0, api.BringWindowToTopCallCount);
+    }
+
+    [Fact]
+    public void Activate_HwndAlreadyUnstable_SkipsAllWin32Calls()
+    {
+        // If a window was marked unstable by WindowPlacementService (e.g. a slow SetWindowPos
+        // during the last arrange), Directional Focus must NOT activate it: no probe, no
+        // restore, no SetWindowPos, no SetForegroundWindow. This is the cross-path circuit
+        // breaker between arrange and activation.
+        var now = new DateTime(2026, 1, 1, 12, 0, 0);
+        var tracker = new UnstableWindowTracker(() => now, null);
+        tracker.MarkUnstable((IntPtr)100, now: now, reason: "slow-setwindowpos-700ms");
+
+        var api = new FakeActivationApi();
+        api.SetForegroundWindowUpdatesForeground((IntPtr)100);
+        var service = new WindowActivationService(api, () => now, null, tracker);
+
+        bool result = service.Activate((IntPtr)100);
+
+        Assert.False(result);
+        Assert.Equal(0, api.IsResponsiveCallCount);
+        Assert.Equal(0, api.ShowWindowAsyncCallCount);
+        Assert.Equal(0, api.SetWindowPosCallCount);
+        Assert.Equal(0, api.SetForegroundWindowCallCount);
+        Assert.Equal(0, api.BringWindowToTopCallCount);
     }
 
     [Fact]
@@ -135,6 +181,63 @@ public class WindowActivationServiceTests
         var service = new WindowActivationService(api);
         service.Activate((IntPtr)100);
         Assert.True(api.SetWindowPosCallCount >= 1);
+    }
+
+    // --- Hardening: normal path must not call SetFocus, must not run a topmost fallback,
+    // and must not issue a second SetForegroundWindow. These are the freeze vectors that
+    // were removed per the spec. ---
+
+    [Fact]
+    public void Activate_DoesNotCallSetFocus_OnNormalPath()
+    {
+        var api = new FakeActivationApi();
+        api.SetForegroundWindowUpdatesForeground((IntPtr)100);
+        var service = new WindowActivationService(api);
+        service.Activate((IntPtr)100);
+        Assert.Equal(0, api.SetFocusCallCount);
+    }
+
+    [Fact]
+    public void Activate_OnFailure_DoesNotCallTopmostFallback()
+    {
+        // A failed activation must NOT escalate into SetWindowPos(HWND_TOPMOST) or
+        // SetWindowPos(HWND_NOTOPMOST). The fake records hwndInsertAfter for every
+        // SetWindowPos call; both topmost sentinels must be absent.
+        var api = new FakeActivationApi { SetForegroundWindowResult = false };
+        api.ForegroundWindowResult = (IntPtr)999;
+        var service = new WindowActivationService(api);
+
+        service.Activate((IntPtr)100);
+
+        Assert.False(api.SetWindowPosUsedTopmost, "SetWindowPos(HWND_TOPMOST) must not be called on failure");
+        Assert.False(api.SetWindowPosUsedNoTopmost, "SetWindowPos(HWND_NOTOPMOST) must not be called on failure");
+    }
+
+    [Fact]
+    public void Activate_OnFailure_DoesNotIssueSecondSetForegroundWindow()
+    {
+        // The old topmost fallback called SetForegroundWindow a second time. The hardening
+        // path issues exactly one, then backs off into cooldown.
+        var api = new FakeActivationApi { SetForegroundWindowResult = false };
+        api.ForegroundWindowResult = (IntPtr)999;
+        var service = new WindowActivationService(api);
+
+        service.Activate((IntPtr)100);
+
+        Assert.Equal(1, api.SetForegroundWindowCallCount);
+    }
+
+    [Fact]
+    public void Activate_OnFailure_StartsHwndCooldownImmediately()
+    {
+        var now = new DateTime(2026, 1, 1, 12, 0, 0);
+        var api = new FakeActivationApi { SetForegroundWindowResult = false };
+        api.ForegroundWindowResult = (IntPtr)999;
+        var service = new WindowActivationService(api, () => now);
+
+        service.Activate((IntPtr)100);
+
+        Assert.True(service.IsInCooldown((IntPtr)100, now));
     }
 
     [Fact]
@@ -148,13 +251,18 @@ public class WindowActivationServiceTests
     }
 
     [Fact]
-    public void Activate_DetachesThreadInput_InFinally()
+    public void Activate_OnFailure_DoesNotAttachOrDetachThreadInput()
     {
+        // Hardening: even on activation failure, the normal path must not have attached (so
+        // nothing to detach) and must not run the old topmost fallback that called extra
+        // SetWindowPos/SetForegroundWindow. This replaces the old DetachesThreadInput-InFinally
+        // test, which documented the now-removed attach/detach pairing.
         var api = new FakeActivationApi { SetForegroundWindowResult = false };
         api.ForegroundWindowResult = (IntPtr)999;
         var service = new WindowActivationService(api);
         service.Activate((IntPtr)100);
-        Assert.True(api.DetachThreadInputCallCount >= api.AttachThreadInputCallCount);
+        Assert.Equal(0, api.AttachThreadInputCallCount);
+        Assert.Equal(0, api.DetachThreadInputCallCount);
     }
 
     [Fact]

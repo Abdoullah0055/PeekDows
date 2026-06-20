@@ -84,6 +84,16 @@ public sealed class MultiMonitorLayoutService
 
             _logger?.Info($"Window assigned to monitor: hwnd={window.Hwnd}, title={window.Title}, workArea={monitor.WorkArea}, isPrimary={monitor.IsPrimary}");
 
+            // Never compute placements against a synthetic fallback monitor. If the real
+            // monitor could not be resolved (GetMonitorInfo failed), the resolver returns a
+            // fallback 1920x1080 marked IsFallback; placing windows into it would produce
+            // bogus placements on an invented monitor, so skip the window entirely.
+            if (monitor.IsFallback)
+            {
+                _logger?.Warn($"Window on fallback monitor skipped (monitor resolve failed): hwnd={window.Hwnd}, title={window.Title}, no placement computed");
+                continue;
+            }
+
             if (!groups.TryGetValue(monitor, out var list))
             {
                 list = new List<ManagedWindow>();

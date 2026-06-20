@@ -535,4 +535,76 @@ public class DirectionalFocusRegistryTests
         Assert.Null(_registry.GetHwndForSlot(workArea, DirectionalFocusSlot.MiddleRight));
         Assert.Null(_registry.GetHwndForSlot(workArea, DirectionalFocusSlot.MiddleLeft));
     }
+
+    // --- Hardening: a window whose monitor cannot be resolved must not be mapped into a
+    // synthetic fallback monitor bucket used for focus decisions. ---
+
+    [Fact]
+    public void FallbackMonitor_PlacementIsNotMapped()
+    {
+        // The resolver returns a fallback MonitorInfo (as MonitorService does when
+        // GetMonitorInfo fails). The registry must skip the placement entirely rather than
+        // key it under the synthetic 1920x1080 work area.
+        var fallbackMonitor = new MonitorInfo
+        {
+            WorkArea = new Rect(0, 0, 1920, 1080),
+            FullArea = new Rect(0, 0, 1920, 1080),
+            IsPrimary = true,
+            IsFallback = true
+        };
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = fallbackMonitor,
+            [(IntPtr)200] = fallbackMonitor
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)200, SlotId = "A", TargetRect = new Rect(0, 0, 1728, 972) }
+        };
+
+        _registry.UpdateFromPlacements(placements, monitorResolver);
+
+        // Nothing mapped: querying the fallback work area returns nothing, so Directional
+        // Focus never targets a window via an invented monitor.
+        Assert.Null(_registry.GetHwndForSlot(new Rect(0, 0, 1920, 1080), DirectionalFocusSlot.TopLeft));
+    }
+
+    [Fact]
+    public void RealMonitor_PlacementIsMapped_AndFallbackDoesNotCollide()
+    {
+        // A window on a real monitor is mapped normally; a separate fallback window does
+        // not overwrite its slot (the old bug collapsed both into one fake bucket).
+        var realMonitor = new MonitorInfo
+        {
+            WorkArea = new Rect(0, 0, 1920, 1080),
+            FullArea = new Rect(0, 0, 1920, 1080),
+            IsPrimary = true,
+            IsFallback = false
+        };
+        var fallbackMonitor = new MonitorInfo
+        {
+            WorkArea = new Rect(0, 0, 1920, 1080),
+            IsPrimary = true,
+            IsFallback = true
+        };
+        var monitorResolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo>
+        {
+            [IntPtr.Zero] = realMonitor,
+            [(IntPtr)201] = realMonitor,
+            [(IntPtr)202] = fallbackMonitor
+        });
+
+        var placements = new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)201, SlotId = "A", TargetRect = new Rect(0, 0, 1728, 972) },
+            new() { Hwnd = (IntPtr)202, SlotId = "A", TargetRect = new Rect(0, 0, 1728, 972) }
+        };
+
+        _registry.UpdateFromPlacements(placements, monitorResolver);
+
+        // The real window keeps slot A; the fallback window was never mapped, so it cannot
+        // have overwritten it.
+        Assert.Equal((IntPtr)201, _registry.GetHwndForSlot(new Rect(0, 0, 1920, 1080), DirectionalFocusSlot.TopLeft));
+    }
 }

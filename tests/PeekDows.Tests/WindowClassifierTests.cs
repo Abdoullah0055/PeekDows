@@ -582,4 +582,53 @@ public class WindowClassifierTests
 
         Assert.True(_classifier.IsEligible(window));
     }
+
+    // --- Hardening: Windows shell overlays (Task View / Alt-Tab) must never be arranged. ---
+
+    [Fact]
+    public void XamlExplorerHostIslandWindow_IsNotEligible()
+    {
+        // The Windows 11 Task View / Alt-Tab overlay host class.
+        var window = MakeWindow(className: "XamlExplorerHostIslandWindow", processName: "explorer.exe", title: "Changement de tâche");
+        Assert.False(_classifier.IsEligible(window));
+    }
+
+    [Fact]
+    public void TaskSwitchingTitle_IsSystemWindow()
+    {
+        var window = MakeWindow(title: "Changement de tâche");
+        Assert.True(_classifier.IsSystemWindow(window));
+    }
+
+    [Fact]
+    public void TaskSwitchingEnglishTitle_IsSystemWindow()
+    {
+        var window = MakeWindow(title: "Task Switching");
+        Assert.True(_classifier.IsSystemWindow(window));
+    }
+
+    [Fact]
+    public void TaskViewTitle_IsSystemWindow()
+    {
+        var window = MakeWindow(title: "Task View");
+        Assert.True(_classifier.IsSystemWindow(window));
+    }
+
+    [Fact]
+    public void XamlExplorerHostIslandWindowClass_Alone_IsSystemWindow()
+    {
+        // Defensive: matched on class even without the localised title, so a future Windows
+        // build with a different overlay title is still caught.
+        var window = MakeWindow(className: "XamlExplorerHostIslandWindow", title: "Some Other Title");
+        Assert.True(_classifier.IsSystemWindow(window));
+    }
+
+    [Fact]
+    public void NormalApp_StillEligible_AfterOverlayExclusions()
+    {
+        // Regression guard: the new exclusions must not over-match normal app windows.
+        var window = MakeWindow(processName: "quicknote.exe", className: "Tauri Window", title: "Notes");
+        Assert.True(_classifier.IsEligible(window));
+        Assert.False(_classifier.IsSystemWindow(window));
+    }
 }

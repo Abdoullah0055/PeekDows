@@ -34,6 +34,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private readonly DirectionalFocusLayoutSnapshotService _directionalFocusSnapshotService;
     private readonly IVirtualDesktopService _virtualDesktopService;
     private readonly WindowActivationService _windowActivationService;
+    private readonly UnstableWindowTracker _unstableWindowTracker;
+    private int _arrangeInProgress;
 
     private AppSettings _settings;
 
@@ -81,7 +83,10 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _monitorService = new MonitorService(_logger);
         _layoutEngine = new LayoutEngine();
         _multiMonitorLayoutService = new MultiMonitorLayoutService(_monitorService, _layoutEngine, _logger);
-        _placementService = new WindowPlacementService(_logger);
+        // One shared tracker: placements, activation and the ArrangeNow circuit breaker all
+        // consult it so a window that hung/blocked once is skipped everywhere until it settles.
+        _unstableWindowTracker = new UnstableWindowTracker(_logger);
+        _placementService = new WindowPlacementService(_logger, _unstableWindowTracker);
 
         _pauseState = new PauseStateService();
         _pauseState.StateChanged += OnPauseStateChanged;
@@ -123,7 +128,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             hwnd => _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd),
             _logger);
         var gestureDetector = new DirectionalFocusGestureDetector();
-        _windowActivationService = new WindowActivationService(new Win32ActivationApi(), _logger);
+        _windowActivationService = new WindowActivationService(new Win32ActivationApi(), _logger, _unstableWindowTracker);
 
         _directionalFocusSnapshotService = new DirectionalFocusLayoutSnapshotService(
             _monitorService,
@@ -450,8 +455,40 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
     private void ExecuteArrange()
     {
+        // Reentrancy guard: ArrangeNow can be triggered by the hotkey, the tray menu and
+        // AutoArrange while an earlier arrange is still running (an arrange can block for
+        // seconds if a target window is slow). Reject nested entries instead of stacking
+        // them on the UI thread.
+        if (System.Threading.Interlocked.CompareExchange(ref _arrangeInProgress, 1, 0) != 0)
+        {
+            _logger.Info("ArrangeNow ignored: arrangement already in progress");
+            return;
+        }
+
         try
         {
+            ExecuteArrangeCore();
+        }
+        finally
+        {
+            _arrangeInProgress = 0;
+        }
+    }
+
+    private void ExecuteArrangeCore()
+    {
+        try
+        {
+            // Circuit breaker: if Directional Focus just failed against a window (or a window
+            // was marked unstable for any reason in the last second), back off rather than
+            // immediately re-arranging the same windows. The failure signal means a target is
+            // misbehaving; an arrange right now would likely block on the same window again.
+            if (_unstableWindowTracker.HasRecentUnstable(withinMs: 1000))
+            {
+                _logger.Info("ArrangeNow throttled: recent activation failure / unstable window, backing off");
+                return;
+            }
+
             _logger.Info("ExecuteArrange started");
 
             _logger.Info("Window discovery refresh started");

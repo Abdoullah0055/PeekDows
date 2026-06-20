@@ -393,6 +393,55 @@ public class MultiMonitorLayoutServiceTests
         });
     }
 
+    [Fact]
+    public void CalculatePlacementsByMonitor_FallbackMonitor_WindowsAreNotPlaced()
+    {
+        // If a window's monitor cannot be resolved, the resolver returns a synthetic fallback
+        // (IsFallback=true). No placement must ever be computed against it — placing windows
+        // onto an invented 1920x1080 monitor would corrupt the layout and the registry.
+        var primary = new MonitorInfo
+        {
+            Handle = (IntPtr)1,
+            WorkArea = new Rect(0, 0, 1920, 1080),
+            FullArea = new Rect(0, 0, 1920, 1080),
+            IsPrimary = true,
+            IsFallback = false
+        };
+        var fallback = new MonitorInfo
+        {
+            Handle = IntPtr.Zero,
+            WorkArea = new Rect(0, 0, 1920, 1080),
+            FullArea = new Rect(0, 0, 1920, 1080),
+            IsPrimary = true,
+            IsFallback = true
+        };
+
+        var map = new Dictionary<IntPtr, MonitorInfo>
+        {
+            [(IntPtr)1] = primary,   // window 1 → real monitor
+            [(IntPtr)2] = fallback   // window 2 → unresolved monitor
+        };
+        var resolver = new FakeMonitorResolver(map, primary);
+
+        var engine = new LayoutEngine();
+        var service = new MultiMonitorLayoutService(resolver, engine);
+        var settings = new AppSettings();
+        var now = DateTime.Now;
+
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = now }
+        };
+
+        var placements = service.CalculatePlacementsByMonitor(windows, settings);
+
+        // Only the real-monitor window is placed; the fallback-monitor window is skipped.
+        Assert.Single(placements);
+        Assert.Equal((IntPtr)1, placements[0].Hwnd);
+        Assert.DoesNotContain(placements, p => p.Hwnd == (IntPtr)2);
+    }
+
     private sealed class ThrowingFakeMonitorResolver : IMonitorResolver
     {
         private readonly Dictionary<IntPtr, MonitorInfo> _map;

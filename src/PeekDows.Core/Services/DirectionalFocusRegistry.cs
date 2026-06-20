@@ -71,6 +71,17 @@ public sealed class DirectionalFocusRegistry
             }
 
             var monitor = monitorResolver.GetMonitorForWindow(placement.Hwnd);
+
+            // Never key a window into a fake monitor bucket. When the real monitor could not
+            // be resolved (GetMonitorInfo failed), the resolver returns a synthetic
+            // 1920x1080 fallback marked IsFallback. Mapping into it would collapse unrelated
+            // windows onto one fake monitor and corrupt Directional Focus lookups, so we skip.
+            if (monitor.IsFallback)
+            {
+                _logger?.Warn($"DirectionalFocusRegistry: ignored placement for slot={slot.Value}, hwnd={placement.Hwnd} – monitor resolve failed (fallback monitor), not mapping");
+                continue;
+            }
+
             var workArea = monitor.WorkArea;
 
             if (!_slotsByMonitor.TryGetValue(workArea, out var slotMap))

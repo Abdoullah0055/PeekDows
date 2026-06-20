@@ -26,6 +26,7 @@ public class DirectionalFocusThrottleTests
         public bool IsWindow(IntPtr hwnd) => true;
         public bool IsIconic(IntPtr hwnd) => false;
         public bool ShowWindow(IntPtr hwnd, int cmdShow) => true;
+        public bool ShowWindowAsync(IntPtr hwnd, int cmdShow) => true;
         public IntPtr GetForegroundWindow() => IntPtr.Zero;
         public uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid) { pid = 0; return 1; }
         public uint GetCurrentThreadId() => 1;

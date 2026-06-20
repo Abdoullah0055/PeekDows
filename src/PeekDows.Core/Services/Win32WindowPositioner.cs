@@ -13,14 +13,18 @@ internal sealed class Win32WindowPositioner : IWindowPositioner
         uint flags;
         IntPtr hWndInsertAfter;
 
+        // SWP_ASYNCWINDOWPOS makes the call return without waiting for the target thread to
+        // process the move, so a slow/hung app cannot block PeekDows during arrange. It is
+        // combined with the existing z-order/activation flags so behaviour is unchanged for
+        // responsive windows.
         if (bringToFront)
         {
-            flags = (uint)(NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+            flags = (uint)(NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_ASYNCWINDOWPOS);
             hWndInsertAfter = HWND_TOP;
         }
         else
         {
-            flags = (uint)(NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+            flags = (uint)(NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_ASYNCWINDOWPOS);
             hWndInsertAfter = IntPtr.Zero;
         }
 
