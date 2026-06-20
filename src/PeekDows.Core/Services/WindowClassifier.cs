@@ -26,7 +26,11 @@ public class WindowClassifier
         "NotifyIconOverflowWindow",
         "Windows.UI.Core.CoreWindow",
         "DV2ControlHost",
-        "Windows.UI.Composition.DesktopWindowContentBridge"
+        "Windows.UI.Composition.DesktopWindowContentBridge",
+        // Windows 11 Task View / Alt-Tab overlay host. These are transient shell surfaces
+        // (e.g. "Changement de tâche" / "Task Switching") that must never be arranged or
+        // focused — arranging them corrupts the shell and can hang explorer.exe.
+        "XamlExplorerHostIslandWindow"
     };
 
     public WindowClassifier(AppSettings settings) : this(settings, _ => true) { }
@@ -94,6 +98,20 @@ public class WindowClassifier
         if (string.Equals(window.ClassName, "Windows.UI.Core.CoreWindow", StringComparison.OrdinalIgnoreCase)) return true;
 
         if (string.Equals(window.ClassName, "ApplicationFrameWindow", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(window.Title)) return true;
+
+        // Windows 11 Task View / Alt-Tab overlays. Match defensively on BOTH class name
+        // (XamlExplorerHostIslandWindow, also caught by AlwaysIgnoredClassNames) and the
+        // localised title, because the title is what shows in the logs and the class can vary
+        // across Windows builds. These are never real arrange/focus targets.
+        if (string.Equals(window.ClassName, "XamlExplorerHostIslandWindow", StringComparison.OrdinalIgnoreCase)) return true;
+
+        if (!string.IsNullOrWhiteSpace(window.Title))
+        {
+            var title = window.Title.Trim();
+            if (string.Equals(title, "Changement de tâche", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(title, "Task Switching", StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(title, "Task View", StringComparison.OrdinalIgnoreCase)) return true;
+        }
 
         return false;
     }

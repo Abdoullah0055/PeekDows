@@ -62,14 +62,18 @@ public class MonitorService : IMonitorResolver
         }
 
         int win32Error = Marshal.GetLastWin32Error();
-        _logger?.Warn($"GetMonitorInfo failed: hMonitor={hMonitor}, win32Error={win32Error}, using fallback 1920x1080");
+        _logger?.Warn($"GetMonitorInfo failed: hMonitor={hMonitor}, win32Error={win32Error}, using fallback 1920x1080 (marked IsFallback; not usable for layout/focus decisions)");
 
+        // The fallback is kept for display/debug only. IsFallback=true lets the layout and
+        // Directional Focus paths reject it instead of collapsing unrelated windows into one
+        // synthetic 1920x1080 monitor bucket used for focus decisions.
         return new MonitorInfo
         {
             Handle = hMonitor,
             WorkArea = new Rect(0, 0, 1920, 1080),
             FullArea = new Rect(0, 0, 1920, 1080),
-            IsPrimary = true
+            IsPrimary = true,
+            IsFallback = true
         };
     }
 }

@@ -10,6 +10,12 @@ public interface IWindowActivationApi
     bool IsWindow(IntPtr hwnd);
     bool IsIconic(IntPtr hwnd);
     bool ShowWindow(IntPtr hwnd, int cmdShow);
+    /// <summary>
+    /// Non-blocking variant of <see cref="ShowWindow"/>: posts the command without waiting
+    /// for the target thread. Used to restore minimised windows so a hung target cannot
+    /// block activation.
+    /// </summary>
+    bool ShowWindowAsync(IntPtr hwnd, int cmdShow);
     IntPtr GetForegroundWindow();
     uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     uint GetCurrentThreadId();
@@ -36,6 +42,7 @@ public sealed class Win32ActivationApi : IWindowActivationApi
     public bool IsWindow(IntPtr hwnd) => NativeMethods.IsWindow(hwnd);
     public bool IsIconic(IntPtr hwnd) => NativeMethods.IsIconic(hwnd);
     public bool ShowWindow(IntPtr hwnd, int cmdShow) => NativeMethods.ShowWindow(hwnd, cmdShow);
+    public bool ShowWindowAsync(IntPtr hwnd, int cmdShow) => NativeMethods.ShowWindowAsync(hwnd, cmdShow);
     public IntPtr GetForegroundWindow() => NativeMethods.GetForegroundWindow();
     public uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid) => NativeMethods.GetWindowThreadProcessId(hwnd, out pid);
     public uint GetCurrentThreadId() => NativeMethods.GetCurrentThreadId();
@@ -71,13 +78,7 @@ public sealed class WindowActivationService
 {
     private readonly IWindowActivationApi _api;
     private readonly FileLogger? _logger;
-
-    /// <summary>
-    /// How long a window that failed activation (or was detected as unresponsive) is kept on
-    /// a cooldown so Directional Focus does not hammer it again. Chosen so a transient stall
-    /// recovers quickly while a genuinely hung app is left alone for a few seconds.
-    /// </summary>
-    private const int FailedActivationCooldownMs = 3000;
+    private readonly UnstableWindowTracker? _tracker;
 
     /// <summary>
     /// Upper bound on the responsiveness probe. A responsive window answers WM_NULL in well
@@ -90,18 +91,24 @@ public sealed class WindowActivationService
     private readonly Func<DateTime> _nowProvider;
 
     public WindowActivationService(IWindowActivationApi api, FileLogger? logger = null)
-        : this(api, () => DateTime.Now, logger)
+        : this(api, () => DateTime.Now, logger, null)
+    {
+    }
+
+    public WindowActivationService(IWindowActivationApi api, FileLogger? logger, UnstableWindowTracker? tracker)
+        : this(api, () => DateTime.Now, logger, tracker)
     {
     }
 
     /// <summary>
     /// Internal ctor that accepts a clock for deterministic cooldown tests.
     /// </summary>
-    internal WindowActivationService(IWindowActivationApi api, Func<DateTime> nowProvider, FileLogger? logger = null)
+    internal WindowActivationService(IWindowActivationApi api, Func<DateTime> nowProvider, FileLogger? logger = null, UnstableWindowTracker? tracker = null)
     {
         _api = api;
         _nowProvider = nowProvider;
         _logger = logger;
+        _tracker = tracker;
     }
 
     /// <summary>
@@ -113,11 +120,19 @@ public sealed class WindowActivationService
         return _failedCooldownUntil.TryGetValue(hwnd, out var until) && now < until;
     }
 
-    private void MarkCooldown(IntPtr hwnd, DateTime now)
+    private void MarkCooldown(IntPtr hwnd, DateTime now, string? reason = null)
     {
-        _failedCooldownUntil[hwnd] = now.AddMilliseconds(FailedActivationCooldownMs);
+        _failedCooldownUntil[hwnd] = now.AddMilliseconds(3000);
+        _tracker?.MarkUnstable(hwnd, now, reason ?? "activation-failed");
     }
 
+    /// <summary>
+    /// Minimal, defensive activation path. Per the hardening spec, the normal path MUST NOT
+    /// call <c>AttachThreadInput</c>, <c>SetFocus</c>, or any topmost fallback — all of those
+    /// synchronise with / re-issue calls against the target thread and can freeze PeekDows's
+    /// UI thread if the target is hung. On failure we back off (cooldown) rather than
+    /// escalate.
+    /// </summary>
     public bool Activate(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero)
@@ -134,23 +149,20 @@ public sealed class WindowActivationService
 
         var now = _nowProvider();
 
-        // Per-hwnd cooldown: a window that just failed activation (or was detected as hung)
-        // is skipped entirely for a few seconds. This stops a stuck target from being
-        // spammed on every gesture tick and keeps PeekDows usable while that app recovers.
+        // Per-hwnd cooldown: a window that just failed activation (or was detected as hung
+        // by the placement path) is skipped entirely for a few seconds.
         if (IsInCooldown(hwnd, now))
         {
             _logger?.Info($"Directional focus skipped: hwnd={hwnd} in failed activation cooldown");
             return false;
         }
 
-        // Responsiveness probe BEFORE any blocking call. AttachThreadInput synchronises
-        // message queues with the target thread; if that thread is hung, every subsequent
-        // call (SetForegroundWindow, SetFocus, ...) would block PeekDows's UI thread until
-        // the app unfreezes. The probe bounds that risk to ~ResponsivenessProbeTimeoutMs.
+        // Responsiveness probe BEFORE any blocking call. This is the only line that can wait
+        // on the target thread, and it is bounded by ResponsivenessProbeTimeoutMs.
         if (!_api.IsResponsive(hwnd, ResponsivenessProbeTimeoutMs))
         {
             _logger?.Warn($"Directional focus skipped: target window not responding, hwnd={hwnd}");
-            MarkCooldown(hwnd, now);
+            MarkCooldown(hwnd, now, "not-responding-activation");
             return false;
         }
 
@@ -158,106 +170,43 @@ public sealed class WindowActivationService
         var pid = _api.GetWindowProcessId(hwnd);
         _logger?.Info($"Activation step: target hwnd={hwnd}, title={title}, pid={pid}");
 
-        bool wasMinimized = _api.IsIconic(hwnd);
-        if (wasMinimized)
+        // Restore minimised windows using the NON-BLOCKING variant. ShowWindow would wait for
+        // the target thread to process the restore; ShowWindowAsync just posts it.
+        if (_api.IsIconic(hwnd))
         {
-            bool restoreResult = _api.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
-            _logger?.Info($"Activation step: ShowWindow(SW_RESTORE)={restoreResult}");
+            bool restoreResult = _api.ShowWindowAsync(hwnd, NativeMethods.SW_RESTORE);
+            _logger?.Info($"Activation step: ShowWindowAsync(SW_RESTORE)={restoreResult}");
         }
         else
         {
-            _logger?.Info("Activation step: ShowWindow restore skipped/not needed");
+            _logger?.Info("Activation step: restore skipped/not needed");
         }
 
-        var foregroundHwnd = _api.GetForegroundWindow();
-        _logger?.Info($"Activation step: current foregroundHwnd={foregroundHwnd}");
+        // One BringWindowToTop + one async SetWindowPos(HWND_TOP) to raise it without
+        // changing focus semantics, then a single SetForegroundWindow attempt.
+        bool bringToTop = _api.BringWindowToTop(hwnd);
+        _logger?.Info($"Activation step: BringWindowToTop={bringToTop}");
 
-        uint foregroundThreadId = foregroundHwnd != IntPtr.Zero
-            ? _api.GetWindowThreadProcessId(foregroundHwnd, out _)
-            : 0;
-        uint targetThreadId = _api.GetWindowThreadProcessId(hwnd, out _);
-        uint currentThreadId = _api.GetCurrentThreadId();
+        uint setPosFlags = NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_ASYNCWINDOWPOS;
+        bool setPos = _api.SetWindowPos(hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0, setPosFlags);
+        _logger?.Info($"Activation step: SetWindowPos(HWND_TOP)={setPos}");
 
-        _logger?.Info($"Activation step: foregroundThread={foregroundThreadId}, targetThread={targetThreadId}, currentThread={currentThreadId}");
+        bool setFg = _api.SetForegroundWindow(hwnd);
+        _logger?.Info($"Activation step: SetForegroundWindow={setFg}");
 
-        bool attachedForeground = false;
-        bool attachedTarget = false;
+        // Single foreground check. If it did not stick, we do NOT escalate (no topmost dance,
+        // no second SetForegroundWindow) — the target is treated as unsafe and backed off.
+        var finalForeground = _api.GetForegroundWindow();
+        bool success = finalForeground == hwnd;
+        _logger?.Info($"Activation result: success={success}, foregroundHwnd={finalForeground}, expected={hwnd}");
 
-        try
+        if (!success)
         {
-            if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId)
-            {
-                attachedForeground = _api.AttachThreadInput(currentThreadId, foregroundThreadId, true);
-                _logger?.Info($"Activation step: AttachThreadInput(current→foreground)={attachedForeground}");
-            }
-
-            if (targetThreadId != 0 && targetThreadId != currentThreadId && targetThreadId != foregroundThreadId)
-            {
-                attachedTarget = _api.AttachThreadInput(currentThreadId, targetThreadId, true);
-                _logger?.Info($"Activation step: AttachThreadInput(current→target)={attachedTarget}");
-            }
-
-            bool bringToTop = _api.BringWindowToTop(hwnd);
-            _logger?.Info($"Activation step: BringWindowToTop={bringToTop}");
-
-            uint setPosFlags = NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW;
-            bool setPos = _api.SetWindowPos(hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0, setPosFlags);
-            _logger?.Info($"Activation step: SetWindowPos(HWND_TOP)={setPos}");
-
-            bool setFg = _api.SetForegroundWindow(hwnd);
-            _logger?.Info($"Activation step: SetForegroundWindow={setFg}");
-
-            if (attachedForeground || attachedTarget)
-            {
-                var focusResult = _api.SetFocus(hwnd);
-                _logger?.Info($"Activation step: SetFocus result={focusResult}");
-            }
-
-            var finalForeground = _api.GetForegroundWindow();
-            bool success = finalForeground == hwnd;
-            _logger?.Info($"Activation result: success={success}, foregroundHwnd={finalForeground}, expected={hwnd}");
-
-            if (!success)
-            {
-                _logger?.Warn("Activation normal sequence failed, trying topmost fallback");
-                bool setTopmost = _api.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0, setPosFlags);
-                _logger?.Info($"Activation step: SetWindowPos(HWND_TOPMOST)={setTopmost}");
-
-                _api.SetForegroundWindow(hwnd);
-
-                bool setNoTopmost = _api.SetWindowPos(hwnd, NativeMethods.HWND_NOTOPMOST, 0, 0, 0, 0, setPosFlags);
-                _logger?.Info($"Activation step: SetWindowPos(HWND_NOTOPMOST)={setNoTopmost}");
-
-                finalForeground = _api.GetForegroundWindow();
-                success = finalForeground == hwnd;
-                _logger?.Info($"Activation fallback result: success={success}, foregroundHwnd={finalForeground}");
-            }
-
-            if (!success)
-            {
-                // Activation genuinely failed (not a hung window, but the window would not
-                // come to the foreground). Put the hwnd on cooldown so Directional Focus
-                // does not retry it on the next tick and pile up calls against a target that
-                // is not cooperating.
-                MarkCooldown(hwnd, _nowProvider());
-                _logger?.Info($"Directional focus activation failed, hwnd cooldown started: hwnd={hwnd}, backoffMs={FailedActivationCooldownMs}");
-            }
-
-            return success;
+            MarkCooldown(hwnd, _nowProvider(), "foreground-mismatch");
+            _logger?.Info($"Directional focus activation failed, hwnd cooldown started: hwnd={hwnd}");
         }
-        finally
-        {
-            if (attachedForeground)
-            {
-                _api.AttachThreadInput(currentThreadId, foregroundThreadId, false);
-                _logger?.Info("Activation step: DetachThreadInput(current→foreground)");
-            }
-            if (attachedTarget)
-            {
-                _api.AttachThreadInput(currentThreadId, targetThreadId, false);
-                _logger?.Info("Activation step: DetachThreadInput(current→target)");
-            }
-        }
+
+        return success;
     }
 
     private string GetWindowTitle(IntPtr hwnd)

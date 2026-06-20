@@ -12,6 +12,12 @@ public static class NativeMethods
     public const int SWP_NOSIZE = 0x0001;
     public const int SWP_SHOWWINDOW = 0x0040;
     public const int SWP_NOSENDCHANGING = 0x0400;
+    /// <summary>
+    /// SetWindowPos returns without waiting for the target window's thread to process the
+    /// move — i.e. a hung target cannot block the caller. Used for all placements so a slow
+    /// or frozen app can never freeze PeekDows's UI thread during arrange.
+    /// </summary>
+    public const int SWP_ASYNCWINDOWPOS = 0x4000;
 
     public static readonly IntPtr HWND_TOP = IntPtr.Zero;
     public static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -74,6 +80,15 @@ public static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    /// <summary>
+    /// Non-blocking variant of <see cref="ShowWindow"/>: posts the command to the target
+    /// thread's queue without waiting for it to be processed. Used for restoring minimised
+    /// windows before placement/activation so a hung target cannot block the caller.
+    /// </summary>
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
     public static extern bool IsWindow(IntPtr hWnd);

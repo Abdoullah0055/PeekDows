@@ -287,4 +287,93 @@ public class WindowPlacementServiceTests
         Assert.Equal(1, result.SucceededCount);
         Assert.Single(fake.Calls);
     }
+
+    // --- Hardening: placements must never block on a hung/unstable window. ---
+
+    private static WindowPlacementService CreateHardenedService(
+        IWindowPositioner positioner,
+        UnstableWindowTracker tracker,
+        Func<IntPtr, bool> isResponsive,
+        Func<IntPtr, bool>? isMaximized = null)
+    {
+        return new WindowPlacementService(
+            positioner,
+            _ => true,
+            isMaximized ?? (_ => false),
+            null,
+            tracker,
+            isResponsive,
+            (hwnd, cmd) => true); // ShowWindowAsync stub
+    }
+
+    [Fact]
+    public void ApplyPlacements_NonResponsiveWindow_SkipsSetWindowPos()
+    {
+        var fake = new FakeWindowPositioner();
+        var tracker = new UnstableWindowTracker();
+        var svc = CreateHardenedService(fake, tracker, isResponsive: _ => false);
+
+        var result = svc.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "A", TargetRect = new Rect(0, 0, 800, 600) }
+        });
+
+        Assert.Equal(0, result.SucceededCount);
+        Assert.Equal(1, result.FailedCount);
+        Assert.Empty(fake.Calls); // SetWindowPos never invoked
+        Assert.True(tracker.IsUnstable((IntPtr)1)); // marked unstable for the cooldown
+    }
+
+    [Fact]
+    public void ApplyPlacements_UnstableHwnd_IsSkipped()
+    {
+        var fake = new FakeWindowPositioner();
+        var tracker = new UnstableWindowTracker();
+        tracker.MarkUnstable((IntPtr)1); // already on the unstable list
+        var svc = CreateHardenedService(fake, tracker, isResponsive: _ => true);
+
+        var result = svc.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "A", TargetRect = new Rect(0, 0, 800, 600) }
+        });
+
+        Assert.Equal(0, result.SucceededCount);
+        Assert.Equal(1, result.FailedCount);
+        Assert.Empty(fake.Calls); // skipped before any SetWindowPos
+    }
+
+    [Fact]
+    public void ApplyPlacements_ResponsiveWindow_ProceedsAndSucceeds()
+    {
+        var fake = new FakeWindowPositioner();
+        var tracker = new UnstableWindowTracker();
+        var svc = CreateHardenedService(fake, tracker, isResponsive: _ => true);
+
+        var result = svc.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "A", TargetRect = new Rect(0, 0, 800, 600) }
+        });
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Single(fake.Calls);
+        Assert.False(tracker.IsUnstable((IntPtr)1));
+    }
+
+    [Fact]
+    public void ApplyPlacements_ResponsiveButFalseProbe_DoesNotCallPositioner()
+    {
+        // Belt-and-suspenders: even the responsiveness probe returning false for a window
+        // that would otherwise succeed must short-circuit before SetWindowPos.
+        var fake = new FakeWindowPositioner(new[] { (IntPtr)1 }); // would "fail" if reached
+        var tracker = new UnstableWindowTracker();
+        var svc = CreateHardenedService(fake, tracker, isResponsive: _ => false);
+
+        var result = svc.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "A", TargetRect = new Rect(0, 0, 800, 600) }
+        });
+
+        Assert.Equal(0, result.SucceededCount);
+        Assert.Empty(fake.Calls);
+    }
 }
