@@ -147,4 +147,33 @@ public static class NativeMethods
         uint fuFlags,
         uint uTimeout,
         out IntPtr lpdwResult);
+
+    // --- SendInput: used to send a benign ALT key pulse that "unlocks" the Windows
+    // foreground lock without AttachThreadInput. Windows grants SetForegroundWindow to a
+    // thread that has just synthesised input; pressing and releasing ALT is the canonical,
+    // safe way to satisfy that condition. ---
+
+    public const uint INPUT_KEYBOARD = 1;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+    // VK_MENU (ALT) is already declared above as int 0x12.
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    public struct INPUT
+    {
+        [FieldOffset(0)] public uint type;
+        [FieldOffset(8)]  public KEYBDINPUT ki;
+    }
 }

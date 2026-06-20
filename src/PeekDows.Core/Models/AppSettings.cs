@@ -4,7 +4,12 @@ namespace PeekDows.Core.Models;
 
 public sealed class AppSettings
 {
-    public int Version { get; set; } = 1;
+    /// <summary>
+    /// Schema version used by <see cref="PeekDows.Core.Services.SettingsService.MigrateIfNeeded"/>
+    /// to apply one-time migrations. Bump when a breaking default change needs to be pushed
+    /// to existing settings.json files.
+    /// </summary>
+    public int Version { get; set; } = 2;
     public bool Enabled { get; set; } = true;
     public bool AutoArrange { get; set; } = false;
     public bool ArrangeOnStartup { get; set; } = false;
@@ -23,7 +28,7 @@ public sealed class AppSettings
     public bool RearrangeOnFocus { get; set; } = false;
 
     public bool DirectionalFocusEnabled { get; set; } = true;
-    public int DirectionalFocusThresholdPx { get; set; } = 60;
+    public int DirectionalFocusThresholdPx { get; set; } = 50;
 
     /// <summary>
     /// When false (default), windows that are truly maximized via Windows are skipped during

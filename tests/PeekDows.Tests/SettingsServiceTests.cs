@@ -116,6 +116,36 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void MigrateIfNeeded_LowersLegacyThreshold80_To50()
+    {
+        // Existing installs persisted DirectionalFocusThresholdPx = 80 (the original default),
+        // which made the shortcut feel heavy. Migration to schema v2 must lower it to the new
+        // lighter default (50) so the change actually applies to existing settings.json files.
+        var settings = new AppSettings { Version = 1, DirectionalFocusThresholdPx = 80 };
+        var migrated = _settingsService.MigrateIfNeeded(settings);
+        Assert.Equal(50, migrated.DirectionalFocusThresholdPx);
+        Assert.Equal(2, migrated.Version);
+    }
+
+    [Fact]
+    public void MigrateIfNeeded_PreservesExplicitUserThreshold()
+    {
+        // A user who customised the threshold (not 80) keeps their explicit choice.
+        var settings = new AppSettings { Version = 1, DirectionalFocusThresholdPx = 70 };
+        var migrated = _settingsService.MigrateIfNeeded(settings);
+        Assert.Equal(70, migrated.DirectionalFocusThresholdPx);
+        Assert.Equal(2, migrated.Version);
+    }
+
+    [Fact]
+    public void MigrateIfNeeded_ClampsInvalidThreshold_To50()
+    {
+        var settings = new AppSettings { Version = 2, DirectionalFocusThresholdPx = 0 };
+        var migrated = _settingsService.MigrateIfNeeded(settings);
+        Assert.Equal(50, migrated.DirectionalFocusThresholdPx);
+    }
+
+    [Fact]
     public void Save_And_Load_PreservesStartWithWindows()
     {
         var settings = _settingsService.Load();

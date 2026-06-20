@@ -336,24 +336,40 @@ public sealed class DirectionalFocusService : IDisposable
 
         _logger?.Info($"Directional focus target: hwnd={hwnd.Value}, title={targetTitle}, pid={targetPid}, onCurrentDesktop={onCurrentDesktop}, isMinimized={isIconic}, currentForegroundHwnd={currentForeground}");
 
-        bool activated = _activationService.Activate(hwnd.Value);
+        var status = _activationService.Activate(hwnd.Value);
 
-        if (activated)
+        // Pending is NOT a failure: the activation was issued and a delayed recheck is in
+        // flight, so we neither log a hard failure nor apply a negative cooldown. Only
+        // genuine denials / skips / hung windows go down the failure branch.
+        bool successLike = status == ActivationStatus.Success || status == ActivationStatus.Pending;
+
+        if (status == ActivationStatus.Success)
         {
             _logger?.Info($"Directional focus success: slot={slot}, hwnd={hwnd.Value}, title={targetTitle}");
         }
-        else
+        else if (status == ActivationStatus.Pending)
+        {
+            _logger?.Info($"Directional focus pending: slot={slot}, hwnd={hwnd.Value}, title={targetTitle}, delayed recheck scheduled");
+        }
+        else if (status == ActivationStatus.NotResponding)
+        {
+            _logger?.Warn($"Directional focus target not responding: slot={slot}, hwnd={hwnd.Value}, title={targetTitle}");
+        }
+        else if (status == ActivationStatus.UnstableSkipped)
+        {
+            _logger?.Info($"Directional focus skipped unstable target: slot={slot}, hwnd={hwnd.Value}, title={targetTitle}");
+        }
+        else // ForegroundDenied
         {
             var finalForeground = NativeMethods.GetForegroundWindow();
-            _logger?.Warn($"Directional focus activation failed: slot={slot}, hwnd={hwnd.Value}, foregroundHwnd={finalForeground}");
-            _logger?.Info($"Directional focus activation failed (foreground-mismatch), short pacing applied: hwnd={hwnd.Value}");
+            _logger?.Warn($"Directional focus foreground denied: slot={slot}, hwnd={hwnd.Value}, foregroundHwnd={finalForeground}");
         }
 
         // The per-hwnd cooldown inside WindowActivationService already shields this specific
-        // hwnd; here we apply the throttle so the user's next rapid slot-hop also lands
-        // softly rather than chaining into another target before the failed one settled.
+        // hwnd; here we apply the throttle so the user's next rapid slot-hop is paced. Pending
+        // uses the normal pacing, not a failure backoff.
         _lastTriggeredSlot = slot;
-        SetPostActivationCooldown(now, success: activated);
+        SetPostActivationCooldown(now, success: successLike);
     }
 
     /// <summary>

@@ -72,8 +72,23 @@ public class SettingsService
         settings.IgnoredClasses ??= new List<string>();
         settings.Hotkeys ??= new Dictionary<string, string>();
 
+        // --- Migration to schema v2: lower the gesture threshold default. ---
+        // Older installs persisted DirectionalFocusThresholdPx = 80 (the original default),
+        // which made the Ctrl+Shift shortcut feel heavy. Users who never customised it get
+        // migrated to the new, lighter default (50). Users who set a non-80 value are left
+        // alone (their explicit choice is preserved).
+        if (settings.Version < 2)
+        {
+            if (settings.DirectionalFocusThresholdPx == 80)
+            {
+                settings.DirectionalFocusThresholdPx = 50;
+            }
+            settings.Version = 2;
+        }
+
+        // Clamp invalid values to the current default, not the legacy 80.
         if (settings.DirectionalFocusThresholdPx <= 0)
-            settings.DirectionalFocusThresholdPx = 80;
+            settings.DirectionalFocusThresholdPx = 50;
 
         return settings;
     }

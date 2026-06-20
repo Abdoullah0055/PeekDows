@@ -5,6 +5,26 @@ using PeekDows.Core.Win32;
 
 namespace PeekDows.App.Focus;
 
+/// <summary>
+/// Outcome of an activation attempt. More expressive than a plain bool so the caller
+/// (<see cref="DirectionalFocusService"/>) can treat "foreground not yet confirmed" (Pending)
+/// differently from a hard denial — Pending must not log a failure or apply a negative
+/// cooldown, because a delayed recheck often confirms success shortly after.
+/// </summary>
+public enum ActivationStatus
+{
+    /// <summary>Foreground became the target window synchronously.</summary>
+    Success,
+    /// <summary>Activation was issued but foreground is not confirmed yet; a delayed recheck is scheduled.</summary>
+    Pending,
+    /// <summary>The foreground lock denied activation (taskbar flash likely). Short cooldown only.</summary>
+    ForegroundDenied,
+    /// <summary>Skipped because the window is on the unstable tracker (hung/slow/recent failure).</summary>
+    UnstableSkipped,
+    /// <summary>The target window did not answer the responsiveness probe (true hung → tracker).</summary>
+    NotResponding
+}
+
 public interface IWindowActivationApi
 {
     bool IsWindow(IntPtr hwnd);
@@ -35,6 +55,16 @@ public interface IWindowActivationApi
     /// never block the caller.
     /// </summary>
     bool IsResponsive(IntPtr hwnd, uint timeoutMs);
+
+    /// <summary>
+    /// Sends a benign ALT key-down/key-up pulse via <c>SendInput</c>. Windows grants
+    /// <c>SetForegroundWindow</c> to a thread that has recently synthesised input, so this
+    /// "unlocks" the foreground lock that otherwise makes the target window only flash orange
+    /// in the taskbar instead of coming to the front. Safe and non-blocking: no
+    /// <c>AttachThreadInput</c>, no <c>SetFocus</c>, no topmost fallback. Returns true if the
+    /// pulse was delivered.
+    /// </summary>
+    bool TryUnlockForegroundWithAltPulse();
 }
 
 public sealed class Win32ActivationApi : IWindowActivationApi
@@ -71,6 +101,31 @@ public sealed class Win32ActivationApi : IWindowActivationApi
 
         // A non-zero return means the message was delivered within the timeout.
         return result != IntPtr.Zero;
+    }
+
+    public bool TryUnlockForegroundWithAltPulse()
+    {
+        // A single ALT key-down/key-up via SendInput. Windows' foreground-lock heuristic
+        // considers a thread eligible to call SetForegroundWindow if it has just processed
+        // synthetic input, so this benign pulse (no key reaches the active app's input — it
+        // is consumed as a system event) re-arms the right. SendInput is non-blocking and
+        // never touches the target window's thread, so it cannot freeze PeekDows.
+        var inputs = new NativeMethods.INPUT[2];
+        inputs[0].type = NativeMethods.INPUT_KEYBOARD;
+        inputs[0].ki = new NativeMethods.KEYBDINPUT
+        {
+            wVk = NativeMethods.VK_MENU,
+            dwFlags = 0 // keydown
+        };
+        inputs[1].type = NativeMethods.INPUT_KEYBOARD;
+        inputs[1].ki = new NativeMethods.KEYBDINPUT
+        {
+            wVk = NativeMethods.VK_MENU,
+            dwFlags = NativeMethods.KEYEVENTF_KEYUP
+        };
+
+        uint sent = NativeMethods.SendInput((uint)inputs.Length, inputs, System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.INPUT>());
+        return sent == inputs.Length;
     }
 }
 
@@ -155,64 +210,61 @@ public sealed class WindowActivationService
     }
 
     /// <summary>
-    /// Minimal, defensive activation path. Per the hardening spec, the normal path MUST NOT
-    /// call <c>AttachThreadInput</c>, <c>SetFocus</c>, or any topmost fallback — all of those
-    /// synchronise with / re-issue calls against the target thread and can freeze PeekDows's
-    /// UI thread if the target is hung. On failure we back off (cooldown) rather than
-    /// escalate.
+    /// Minimal, defensive activation path returning an expressive <see cref="ActivationStatus"/>.
+    /// Per the hardening spec, the normal path MUST NOT call <c>AttachThreadInput</c>,
+    /// <c>SetFocus</c>, or any topmost fallback — all of those synchronise with / re-issue
+    /// calls against the target thread and can freeze PeekDows's UI thread if the target is
+    /// hung. Foreground lock is defeated instead with a benign ALT pulse via SendInput.
     /// </summary>
-    public bool Activate(IntPtr hwnd)
+    public ActivationStatus Activate(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero)
         {
             _logger?.Warn("Activation skipped: hwnd is zero");
-            return false;
+            return ActivationStatus.ForegroundDenied;
         }
 
         if (!_api.IsWindow(hwnd))
         {
             _logger?.Warn($"Activation skipped: invalid window handle hwnd={hwnd}");
-            return false;
+            return ActivationStatus.ForegroundDenied;
         }
 
         var now = _nowProvider();
 
         // Shared unstable tracker FIRST: a window marked unstable by WindowPlacementService
         // (not-responding, slow SetWindowPos, setwindowpos-failed) is off-limits for the full
-        // 15s cooldown. Checked before the local dict so the long cooldown always wins.
-        // Note: a foreground-mismatch never reaches the tracker, so healthy windows are never
-        // blocked here for 15s.
+        // 15s cooldown. A foreground-mismatch never reaches the tracker, so healthy windows
+        // are never blocked here for 15s.
         if (_tracker is not null && _tracker.IsUnstable(hwnd, now))
         {
             _tracker.TryGetReason(hwnd, out var reason);
             _logger?.Info($"Directional focus skipped: hwnd in unstable cooldown, hwnd={hwnd}, reason={reason ?? "unknown"}");
-            return false;
+            return ActivationStatus.UnstableSkipped;
         }
 
         // Short per-hwnd cooldown for recent activation failures (including foreground
-        // mismatch). This bounds rapid retries without the 15s penalty of the tracker.
+        // mismatch). Bounds rapid retries without the 15s penalty of the tracker.
         if (IsInCooldown(hwnd, now))
         {
             _logger?.Info($"Directional focus skipped: hwnd={hwnd} in failed activation cooldown");
-            return false;
+            return ActivationStatus.UnstableSkipped;
         }
 
-        // Responsiveness probe BEFORE any blocking call. This is the only line that can wait
-        // on the target thread, and it is bounded by ResponsivenessProbeTimeoutMs. A window
-        // that fails here is a TRUE dangerous signal → tracker (15s).
+        // Responsiveness probe BEFORE any blocking call. Bounded by ResponsivenessProbeTimeoutMs.
+        // A window that fails here is a TRUE dangerous signal → tracker (15s).
         if (!_api.IsResponsive(hwnd, ResponsivenessProbeTimeoutMs))
         {
             _logger?.Warn($"Directional focus skipped: target window not responding, hwnd={hwnd}");
             MarkCooldown(hwnd, now, "not-responding-activation", markUnstable: true);
-            return false;
+            return ActivationStatus.NotResponding;
         }
 
         var title = GetWindowTitle(hwnd);
         var pid = _api.GetWindowProcessId(hwnd);
         _logger?.Info($"Activation step: target hwnd={hwnd}, title={title}, pid={pid}");
 
-        // Restore minimised windows using the NON-BLOCKING variant. ShowWindow would wait for
-        // the target thread to process the restore; ShowWindowAsync just posts it.
+        // Restore minimised windows using the NON-BLOCKING variant.
         if (_api.IsIconic(hwnd))
         {
             bool restoreResult = _api.ShowWindowAsync(hwnd, NativeMethods.SW_RESTORE);
@@ -223,50 +275,55 @@ public sealed class WindowActivationService
             _logger?.Info("Activation step: restore skipped/not needed");
         }
 
-        // Bring the window to the top and request foreground. Order chosen so the window is
-        // already raised before we ask for foreground — Windows is more likely to grant
-        // SetForegroundWindow to a window that is already on top. SWP_ASYNCWINDOWPOS keeps
-        // this non-blocking (no dangerous fallback: no AttachThreadInput, no SetFocus, no
-        // HWND_TOPMOST/NOTOPMOST dance).
+        // Foreground unlock: send a benign ALT pulse so Windows' foreground-lock heuristic
+        // considers PeekDows eligible to grant SetForegroundWindow. This is the safe
+        // alternative to the old AttachThreadInput trick — it cannot block PeekDows's UI
+        // thread or synchronise queues with a hung target.
+        _logger?.Info("Activation foreground unlock: sending ALT pulse");
+        bool altPulse = _api.TryUnlockForegroundWithAltPulse();
+        _logger?.Info($"Activation foreground unlock: ALT pulse delivered={altPulse}");
+
+        // Request foreground, then raise the window to the top. Requesting foreground BEFORE
+        // the HWND_TOP move empirically yields the best result: once foreground is granted,
+        // the subsequent SetWindowPos(HWND_TOP) visually raises the window above its peers.
+        // SWP_ASYNCWINDOWPOS keeps the move non-blocking.
+        bool setFg = _api.SetForegroundWindow(hwnd);
+        _logger?.Info($"Activation foreground unlock: SetForegroundWindow result={setFg}");
+
         uint setPosFlags = NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_ASYNCWINDOWPOS;
         bool setPos = _api.SetWindowPos(hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0, setPosFlags);
         _logger?.Info($"Activation step: SetWindowPos(HWND_TOP)={setPos}");
 
-        bool setFg = _api.SetForegroundWindow(hwnd);
-        _logger?.Info($"Activation step: SetForegroundWindow={setFg}");
-
-        // Immediate foreground check. Windows often needs a moment to settle the foreground
-        // change, so a false here is treated as a SHORT (foreground-mismatch) cooldown, NOT a
-        // dangerous signal: we do not touch the tracker, so arrange and the A-H registry are
-        // untouched and the window stays focusable. A deferred non-blocking recheck (see
-        // <see cref="ScheduleForegroundRecheck"/>) tries once more shortly after.
+        // Immediate foreground check. If it already stuck → Success. Otherwise the activation
+        // is Pending: Windows often settles the foreground a few ms later (the "orange flash
+        // but window not on top" symptom). We schedule a delayed recheck; Pending is NOT a
+        // failure from the caller's perspective.
         var finalForeground = _api.GetForegroundWindow();
-        bool success = finalForeground == hwnd;
-        _logger?.Info($"Activation result: success={success}, foregroundHwnd={finalForeground}, expected={hwnd}");
+        bool immediateSuccess = finalForeground == hwnd;
+        _logger?.Info($"Activation result: immediateSuccess={immediateSuccess}, foregroundHwnd={finalForeground}, expected={hwnd}");
 
-        if (success)
+        if (immediateSuccess)
         {
-            // Healthy activation: just a short throttle so the next slot-hop is paced.
+            // Healthy activation: short throttle so the next slot-hop is paced.
             _failedCooldownUntil[hwnd] = now.AddMilliseconds(NormalActivationCooldownMs);
-        }
-        else
-        {
-            // foreground-mismatch: short local cooldown only, NEVER the 15s tracker.
-            MarkCooldown(hwnd, now, "foreground-mismatch", markUnstable: false);
-            _logger?.Info($"Directional focus activation foreground-mismatch, short cooldown started: hwnd={hwnd}");
-            ScheduleForegroundRecheck(hwnd);
+            return ActivationStatus.Success;
         }
 
-        return success;
+        // Not yet confirmed → Pending. Apply the short pacing cooldown and schedule a
+        // deferred, non-blocking recheck. No tracker, no hard failure.
+        _failedCooldownUntil[hwnd] = now.AddMilliseconds(ForegroundMismatchCooldownMs);
+        _logger?.Info($"Activation pending: delayed recheck scheduled, hwnd={hwnd}");
+        ScheduleForegroundRecheck(hwnd);
+        return ActivationStatus.Pending;
     }
 
     /// <summary>
     /// Deferred, non-blocking re-attempt: Windows sometimes grants foreground only a few
     /// milliseconds after SetForegroundWindow (the "taskbar flashes orange but window stays
-    /// behind" symptom). We retry once after a short delay WITHOUT blocking the UI thread.
-    /// No AttachThreadInput / SetFocus / topmost — just a second safe SetWindowPos + foreground
-    /// request. Failure here is silent (the short foreground-mismatch cooldown already
-    /// applies from the synchronous path).
+    /// behind" symptom). We retry once after a short delay WITHOUT blocking the UI thread:
+    /// ALT pulse + SetForegroundWindow + SetWindowPos(HWND_TOP). No AttachThreadInput /
+    /// SetFocus / topmost. On success we clear the short cooldown; on failure we log that the
+    /// foreground was denied (the short cooldown already applies from the synchronous path).
     /// </summary>
     private void ScheduleForegroundRecheck(IntPtr hwnd)
     {
@@ -280,16 +337,24 @@ public sealed class WindowActivationService
             try
             {
                 if (!_api.IsWindow(hwnd)) return;
+
+                _api.TryUnlockForegroundWithAltPulse();
+                _api.SetForegroundWindow(hwnd);
                 uint flags = NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_ASYNCWINDOWPOS;
                 _api.SetWindowPos(hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0, flags);
-                _api.SetForegroundWindow(hwnd);
+
                 bool ok = _api.GetForegroundWindow() == hwnd;
-                _logger?.Info($"Activation deferred recheck: hwnd={hwnd}, success={ok}");
+                _logger?.Info($"Activation delayed recheck: success={ok}, foregroundHwnd={_api.GetForegroundWindow()}, expected={hwnd}");
                 if (ok)
                 {
-                    // It finally stuck — clear any short cooldown so the window is immediately
+                    // It finally stuck — clear the short cooldown so the window is immediately
                     // available again.
                     _failedCooldownUntil.TryRemove(hwnd, out _);
+                }
+                else
+                {
+                    // Foreground genuinely denied — not a dangerous signal, so still no tracker.
+                    _logger?.Info($"Activation foreground denied: taskbar flash likely, hwnd={hwnd}");
                 }
             }
             catch (Exception ex)

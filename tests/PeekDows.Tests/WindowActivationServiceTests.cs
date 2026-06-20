@@ -24,6 +24,9 @@ public class FakeActivationApi : IWindowActivationApi
     /// <summary>Default: windows respond. Set to false to simulate a hung/unresponsive window.</summary>
     public bool IsResponsiveResult { get; set; } = true;
 
+    /// <summary>Result returned by the ALT-pulse helper; defaults to delivered.</summary>
+    public bool AltPulseResult { get; set; } = true;
+
     public int IsWindowCallCount { get; private set; }
     public int ShowWindowCallCount { get; private set; }
     public int ShowWindowAsyncCallCount { get; private set; }
@@ -34,6 +37,7 @@ public class FakeActivationApi : IWindowActivationApi
     public int AttachThreadInputCallCount { get; private set; }
     public int DetachThreadInputCallCount { get; private set; }
     public int IsResponsiveCallCount { get; private set; }
+    public int AltPulseCallCount { get; private set; }
 
     private IntPtr _targetHwnd;
     private bool _setForegroundCalled;
@@ -76,25 +80,26 @@ public class FakeActivationApi : IWindowActivationApi
     public int GetWindowText(IntPtr hwnd, StringBuilder sb, int maxCount) { sb.Append("TestWindow"); return 10; }
     public uint GetWindowProcessId(IntPtr hwnd) => 1234;
     public bool IsResponsive(IntPtr hwnd, uint timeoutMs) { IsResponsiveCallCount++; return IsResponsiveResult; }
+    public bool TryUnlockForegroundWithAltPulse() { AltPulseCallCount++; return AltPulseResult; }
 }
 
 public class WindowActivationServiceTests
 {
     [Fact]
-    public void Activate_InvalidHandle_ReturnsFalse()
+    public void Activate_InvalidHandle_ReturnsForegroundDenied()
     {
         var api = new FakeActivationApi();
         var service = new WindowActivationService(api);
-        Assert.False(service.Activate(IntPtr.Zero));
+        Assert.Equal(ActivationStatus.ForegroundDenied, service.Activate(IntPtr.Zero));
         Assert.Equal(0, api.IsWindowCallCount);
     }
 
     [Fact]
-    public void Activate_IsWindowFalse_ReturnsFalse()
+    public void Activate_IsWindowFalse_ReturnsForegroundDenied()
     {
         var api = new FakeActivationApi { IsWindowResult = false };
         var service = new WindowActivationService(api);
-        Assert.False(service.Activate((IntPtr)100));
+        Assert.Equal(ActivationStatus.ForegroundDenied, service.Activate((IntPtr)100));
         Assert.Equal(1, api.IsWindowCallCount);
     }
 
@@ -163,9 +168,9 @@ public class WindowActivationServiceTests
         api.SetForegroundWindowUpdatesForeground((IntPtr)100);
         var service = new WindowActivationService(api, () => now, null, tracker);
 
-        bool result = service.Activate((IntPtr)100);
+        var status = service.Activate((IntPtr)100);
 
-        Assert.False(result);
+        Assert.Equal(ActivationStatus.UnstableSkipped, status);
         Assert.Equal(0, api.IsResponsiveCallCount);
         Assert.Equal(0, api.ShowWindowAsyncCallCount);
         Assert.Equal(0, api.SetWindowPosCallCount);
@@ -266,13 +271,14 @@ public class WindowActivationServiceTests
     }
 
     [Fact]
-    public void Activate_ReturnsFalse_WhenForegroundMismatch()
+    public void Activate_ReturnsPending_WhenForegroundMismatch()
     {
+        // Foreground not yet confirmed synchronously → Pending (NOT a hard failure). A delayed
+        // recheck is scheduled; the caller must not treat this as failure.
         var api = new FakeActivationApi();
         api.ForegroundWindowResult = (IntPtr)999;
         var service = new WindowActivationService(api);
-        bool result = service.Activate((IntPtr)100);
-        Assert.False(result);
+        Assert.Equal(ActivationStatus.Pending, service.Activate((IntPtr)100));
     }
 
     [Fact]
@@ -281,8 +287,7 @@ public class WindowActivationServiceTests
         var api = new FakeActivationApi();
         api.SetForegroundWindowUpdatesForeground((IntPtr)100);
         var service = new WindowActivationService(api);
-        bool result = service.Activate((IntPtr)100);
-        Assert.True(result);
+        Assert.Equal(ActivationStatus.Success, service.Activate((IntPtr)100));
     }
 
     // --- Hardening: unresponsive windows must never block PeekDows. ---
@@ -294,9 +299,9 @@ public class WindowActivationServiceTests
         var api = new FakeActivationApi { IsResponsiveResult = false };
         var service = new WindowActivationService(api);
 
-        bool result = service.Activate((IntPtr)100);
+        var status = service.Activate((IntPtr)100);
 
-        Assert.False(result);
+        Assert.Equal(ActivationStatus.NotResponding, status);
         // The probe ran, but none of the blocking activation calls were attempted.
         Assert.Equal(1, api.IsResponsiveCallCount);
         Assert.Equal(0, api.AttachThreadInputCallCount);
@@ -313,11 +318,62 @@ public class WindowActivationServiceTests
         api.SetForegroundWindowUpdatesForeground((IntPtr)100);
         var service = new WindowActivationService(api);
 
-        bool result = service.Activate((IntPtr)100);
+        var status = service.Activate((IntPtr)100);
 
-        Assert.True(result);
+        Assert.Equal(ActivationStatus.Success, status);
         Assert.Equal(1, api.IsResponsiveCallCount);
         Assert.True(api.SetForegroundWindowCallCount >= 1);
+    }
+
+    // --- Foreground unlock: the ALT pulse is the safe alternative to AttachThreadInput.
+    // It must be invoked on the normal path, before SetForegroundWindow. ---
+
+    [Fact]
+    public void Activate_NormalPath_CallsAltPulseBeforeSetForegroundWindow()
+    {
+        var api = new FakeActivationApi { IsResponsiveResult = true };
+        api.SetForegroundWindowUpdatesForeground((IntPtr)100);
+        var service = new WindowActivationService(api);
+
+        service.Activate((IntPtr)100);
+
+        // The ALT pulse ran exactly once and the foreground request followed it.
+        Assert.Equal(1, api.AltPulseCallCount);
+        Assert.True(api.SetForegroundWindowCallCount >= 1);
+    }
+
+    [Fact]
+    public void Activate_NormalPath_NeverCallsAttachThreadInput_SetFocus_Topmost()
+    {
+        // Regression guard for the hardening guarantees: the dangerous calls stay banned from
+        // the normal path, foreground unlock is done via ALT pulse instead.
+        var api = new FakeActivationApi { IsResponsiveResult = true };
+        api.SetForegroundWindowUpdatesForeground((IntPtr)100);
+        var service = new WindowActivationService(api);
+
+        service.Activate((IntPtr)100);
+
+        Assert.Equal(0, api.AttachThreadInputCallCount);
+        Assert.Equal(0, api.SetFocusCallCount);
+        Assert.False(api.SetWindowPosUsedTopmost);
+        Assert.False(api.SetWindowPosUsedNoTopmost);
+    }
+
+    [Fact]
+    public void Activate_PendingResult_DoesNotMarkUnstableTracker()
+    {
+        // Foreground mismatch returns Pending, schedules a delayed recheck, and must NOT mark
+        // the window unstable (15s). Healthy windows stay arrangeable and focusable.
+        var now = new DateTime(2026, 1, 1, 12, 0, 0);
+        var tracker = new UnstableWindowTracker(() => now, null);
+        var api = new FakeActivationApi { IsResponsiveResult = true };
+        api.ForegroundWindowResult = (IntPtr)999; // mismatch → Pending
+        var service = new WindowActivationService(api, () => now, null, tracker);
+
+        var status = service.Activate((IntPtr)100);
+
+        Assert.Equal(ActivationStatus.Pending, status);
+        Assert.False(tracker.IsUnstable((IntPtr)100));
     }
 
     [Fact]
@@ -400,9 +456,9 @@ public class WindowActivationServiceTests
         api2.SetForegroundWindowUpdatesForeground((IntPtr)100);
         var service2 = new WindowActivationService(api2, () => after);
 
-        bool result = service2.Activate((IntPtr)100);
+        var status = service2.Activate((IntPtr)100);
 
-        Assert.True(result);
+        Assert.Equal(ActivationStatus.Success, status);
         Assert.Equal(1, api2.IsResponsiveCallCount);
     }
 

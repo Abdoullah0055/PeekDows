@@ -69,7 +69,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
         _settingsService = new SettingsService();
         _settings = _settingsService.Load();
-        _logger.Info($"Settings loaded: path={_settingsService.GetType().GetProperty("SettingsFilePath")?.GetValue(_settingsService) ?? "N/A"}");
+        _logger.Info($"Settings loaded: path={_settingsService.GetType().GetProperty("SettingsFilePath")?.GetValue(_settingsService) ?? "N/A"}, version={_settings.Version}");
+        _logger.Info($"DirectionalFocusThresholdPx loaded: value={_settings.DirectionalFocusThresholdPx}");
         _logger.Info($"Settings: Enabled={_settings.Enabled}");
         _logger.Info($"Settings: AutoArrange={_settings.AutoArrange}");
         _logger.Info($"Settings: AllowRepositionMaximizedWindows={_settings.AllowRepositionMaximizedWindows}");
