@@ -14,20 +14,13 @@ public sealed class DirectionalFocusService : IDisposable
     private const int TickIntervalMs = 40;
 
     /// <summary>
-    /// Minimum gap between two activations while a Ctrl+Shift gesture is held. Raising this
-    /// from the old 250ms (4 activations/s) throttles the rapid slot-hopping that could
-    /// spam several windows before any of them finished activating — a particular problem
-    /// when one target is slow or hung. ~2 activations/s keeps the feature snappy while
-    /// bounding the worst-case load.
+    /// Minimum gap between two activations while a Ctrl+Shift gesture is held. This is the
+    /// pacing for HEALTHY slot-hopping: short enough that switching windows feels instant,
+    /// long enough that we don't fire a second activation before the OS has settled the first.
+    /// Per-hwnd cooldowns (foreground-mismatch, unstable tracker) carry the heavy protection;
+    /// this global throttle only paces the gesture.
     /// </summary>
-    private const int CooldownMs = 450;
-
-    /// <summary>
-    /// Extra pause forced after an activation fails, on top of the normal cooldown. A failed
-    /// activation often signals a struggling target; backing off harder avoids hammering it
-    /// on every subsequent tick.
-    /// </summary>
-    private const int PostFailureBackoffMs = 1000;
+    private const int CooldownMs = 150;
 
     private const int RebuildCooldownMs = 500;
 
@@ -47,6 +40,7 @@ public sealed class DirectionalFocusService : IDisposable
 
     private bool _gestureWasActive;
     private Point _anchor;
+    private Rect _anchorMonitor;
     private DirectionalFocusSlot? _lastTriggeredSlot;
     private DateTime _lastFocusTime = DateTime.MinValue;
     private DateTime _cooldownUntil = DateTime.MinValue;
@@ -182,8 +176,13 @@ public sealed class DirectionalFocusService : IDisposable
         {
             _gestureWasActive = true;
             _anchor = Cursor.Position;
+            // Pin the monitor at gesture START. For the whole Ctrl+Shift hold we resolve
+            // slots against THIS monitor, so a big horizontal move that drifts across a
+            // monitor border doesn't suddenly switch the slot set mid-gesture (which caused
+            // "no slots recognized" and ignored activations).
+            _anchorMonitor = MonitorFromPointNative(_anchor.X, _anchor.Y);
             _lastTriggeredSlot = null;
-            _logger?.Info("Directional focus modifiers active: Ctrl+Shift");
+            _logger?.Info($"Directional focus modifiers active: Ctrl+Shift, anchorMonitor={_anchorMonitor}");
             return;
         }
 
@@ -200,10 +199,8 @@ public sealed class DirectionalFocusService : IDisposable
         // is already in front, re-activating it would just spam it.
         if (slot == _lastTriggeredSlot) return;
 
-        // Global throttle during a held gesture: bound how fast we can hop between slots.
-        // _cooldownUntil covers both the normal per-activation cooldown and an extended
-        // backoff applied after a failed activation, so a struggling or hung target cannot
-        // be re-attempted (or another target swapped in) on the very next 40ms tick.
+        // Global throttle during a held gesture: pace slot-hopping. Per-hwnd cooldowns and the
+        // unstable tracker carry the heavy protection; this only bounds the gesture cadence.
         var now = _nowProvider();
         if (IsThrottled(now))
         {
@@ -211,9 +208,12 @@ public sealed class DirectionalFocusService : IDisposable
             return;
         }
 
-        var mouseWorkArea = MonitorFromPointNative(current.X, current.Y);
+        // Resolve against the pinned anchor monitor, NOT the current cursor position: the slot
+        // set (A-H) belongs to the monitor where the gesture began, even if the cursor has
+        // since crossed a monitor boundary.
+        var mouseWorkArea = _anchorMonitor;
 
-        _logger?.Info($"Directional focus trigger candidate: slot={slot.Value}, dx={dx}, dy={dy}, anchor=({_anchor.X},{_anchor.Y}), current=({current.X},{current.Y}), mouseMonitor={mouseWorkArea}, threshold={threshold}");
+        _logger?.Info($"Directional focus trigger candidate: slot={slot.Value}, dx={dx}, dy={dy}, anchor=({_anchor.X},{_anchor.Y}), current=({current.X},{current.Y}), anchorMonitor={mouseWorkArea}, threshold={threshold}");
 
         ActivateSlot(mouseWorkArea, slot.Value, now);
     }
@@ -232,9 +232,12 @@ public sealed class DirectionalFocusService : IDisposable
     /// </summary>
     internal void SetPostActivationCooldown(DateTime now, bool success)
     {
-        _cooldownUntil = success
-            ? now.AddMilliseconds(CooldownMs)
-            : now.AddMilliseconds(CooldownMs + PostFailureBackoffMs);
+        // Same short pacing for success and failure. A foreground-mismatch (the common
+        // failure) is now handled by the per-hwnd short cooldown inside WindowActivationService
+        // — it must NOT trigger a long global backoff here, or healthy windows get throttled
+        // and the gesture feels sluggish. Genuinely dangerous failures (hung windows) are
+        // excluded much earlier by the unstable tracker and the placement cooldowns.
+        _cooldownUntil = now.AddMilliseconds(CooldownMs);
         _lastFocusTime = now;
     }
 
@@ -343,7 +346,7 @@ public sealed class DirectionalFocusService : IDisposable
         {
             var finalForeground = NativeMethods.GetForegroundWindow();
             _logger?.Warn($"Directional focus activation failed: slot={slot}, hwnd={hwnd.Value}, foregroundHwnd={finalForeground}");
-            _logger?.Info($"Directional focus activation failed, hwnd cooldown started: hwnd={hwnd.Value}, backoffMs={CooldownMs + PostFailureBackoffMs}");
+            _logger?.Info($"Directional focus activation failed (foreground-mismatch), short pacing applied: hwnd={hwnd.Value}");
         }
 
         // The per-hwnd cooldown inside WindowActivationService already shields this specific
@@ -399,6 +402,7 @@ public sealed class DirectionalFocusService : IDisposable
     private void ResetState()
     {
         _anchor = Point.Empty;
+        _anchorMonitor = default;
         _lastTriggeredSlot = null;
         // Releasing Ctrl+Shift (or stopping the service) clears the throttle so the next
         // gesture begins fresh rather than inheriting the previous hold's cooldown.

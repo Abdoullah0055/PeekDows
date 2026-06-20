@@ -87,7 +87,26 @@ public sealed class WindowActivationService
     /// </summary>
     private const uint ResponsivenessProbeTimeoutMs = 200;
 
-    private readonly Dictionary<IntPtr, DateTime> _failedCooldownUntil = new();
+    /// <summary>Short throttle after a successful activation, pacing rapid slot-hopping.</summary>
+    private const int NormalActivationCooldownMs = 150;
+
+    /// <summary>
+    /// Short cooldown after a foreground-mismatch — NOT a dangerous signal, so never reaches
+    /// the 15s tracker. Bounds rapid retries without excluding healthy windows from arrange.
+    /// </summary>
+    private const int ForegroundMismatchCooldownMs = 400;
+
+    /// <summary>
+    /// Local cooldown applied alongside the tracker for genuinely dangerous activation
+    /// failures (not-responding). The tracker's 15s is the dominant protection; this just
+    /// guards the dict within the same service.
+    /// </summary>
+    private const int HardFailureCooldownMs = 3000;
+
+    /// <summary>Delay before the deferred, non-blocking foreground recheck (Fix 3).</summary>
+    private const int ForegroundRecheckDelayMs = 100;
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, DateTime> _failedCooldownUntil = new();
     private readonly Func<DateTime> _nowProvider;
 
     public WindowActivationService(IWindowActivationApi api, FileLogger? logger = null)
@@ -120,10 +139,19 @@ public sealed class WindowActivationService
         return _failedCooldownUntil.TryGetValue(hwnd, out var until) && now < until;
     }
 
-    private void MarkCooldown(IntPtr hwnd, DateTime now, string? reason = null)
+    private void MarkCooldown(IntPtr hwnd, DateTime now, string? reason = null, bool markUnstable = true)
     {
-        _failedCooldownUntil[hwnd] = now.AddMilliseconds(3000);
-        _tracker?.MarkUnstable(hwnd, now, reason ?? "activation-failed");
+        // foreground-mismatch is NOT a dangerous Win32 signal — Windows routinely denies
+        // SetForegroundWindow when PeekDows does not already own the foreground. Treating it
+        // like a hung window (15s unstable) excludes healthy windows from arrange and focus
+        // for far too long, which is what made the shortcut feel sluggish. So a mismatch gets
+        // only a SHORT local cooldown; only genuinely dangerous reasons reach the tracker.
+        int cooldownMs = reason == "foreground-mismatch" ? ForegroundMismatchCooldownMs : HardFailureCooldownMs;
+        _failedCooldownUntil[hwnd] = now.AddMilliseconds(cooldownMs);
+        if (markUnstable)
+        {
+            _tracker?.MarkUnstable(hwnd, now, reason ?? "activation-failed");
+        }
     }
 
     /// <summary>
@@ -149,17 +177,11 @@ public sealed class WindowActivationService
 
         var now = _nowProvider();
 
-        // Per-hwnd cooldown: a window that just failed activation (or was detected as hung
-        // by the placement path) is skipped entirely for a few seconds.
-        if (IsInCooldown(hwnd, now))
-        {
-            _logger?.Info($"Directional focus skipped: hwnd={hwnd} in failed activation cooldown");
-            return false;
-        }
-
-        // Shared unstable tracker: a window marked unstable by WindowPlacementService (or any
-        // other path) is off-limits for the full cooldown even after this service's shorter
-        // 3s dict entry expires. No probe, no restore, no SetWindowPos, no SetForegroundWindow.
+        // Shared unstable tracker FIRST: a window marked unstable by WindowPlacementService
+        // (not-responding, slow SetWindowPos, setwindowpos-failed) is off-limits for the full
+        // 15s cooldown. Checked before the local dict so the long cooldown always wins.
+        // Note: a foreground-mismatch never reaches the tracker, so healthy windows are never
+        // blocked here for 15s.
         if (_tracker is not null && _tracker.IsUnstable(hwnd, now))
         {
             _tracker.TryGetReason(hwnd, out var reason);
@@ -167,12 +189,21 @@ public sealed class WindowActivationService
             return false;
         }
 
+        // Short per-hwnd cooldown for recent activation failures (including foreground
+        // mismatch). This bounds rapid retries without the 15s penalty of the tracker.
+        if (IsInCooldown(hwnd, now))
+        {
+            _logger?.Info($"Directional focus skipped: hwnd={hwnd} in failed activation cooldown");
+            return false;
+        }
+
         // Responsiveness probe BEFORE any blocking call. This is the only line that can wait
-        // on the target thread, and it is bounded by ResponsivenessProbeTimeoutMs.
+        // on the target thread, and it is bounded by ResponsivenessProbeTimeoutMs. A window
+        // that fails here is a TRUE dangerous signal → tracker (15s).
         if (!_api.IsResponsive(hwnd, ResponsivenessProbeTimeoutMs))
         {
             _logger?.Warn($"Directional focus skipped: target window not responding, hwnd={hwnd}");
-            MarkCooldown(hwnd, now, "not-responding-activation");
+            MarkCooldown(hwnd, now, "not-responding-activation", markUnstable: true);
             return false;
         }
 
@@ -192,9 +223,11 @@ public sealed class WindowActivationService
             _logger?.Info("Activation step: restore skipped/not needed");
         }
 
-        // Raise the window with a single async SetWindowPos(HWND_TOP). BringWindowToTop was
-        // removed: it re-issues against the target thread and is redundant with the HWND_TOP
-        // move that immediately follows.
+        // Bring the window to the top and request foreground. Order chosen so the window is
+        // already raised before we ask for foreground — Windows is more likely to grant
+        // SetForegroundWindow to a window that is already on top. SWP_ASYNCWINDOWPOS keeps
+        // this non-blocking (no dangerous fallback: no AttachThreadInput, no SetFocus, no
+        // HWND_TOPMOST/NOTOPMOST dance).
         uint setPosFlags = NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_ASYNCWINDOWPOS;
         bool setPos = _api.SetWindowPos(hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0, setPosFlags);
         _logger?.Info($"Activation step: SetWindowPos(HWND_TOP)={setPos}");
@@ -202,19 +235,69 @@ public sealed class WindowActivationService
         bool setFg = _api.SetForegroundWindow(hwnd);
         _logger?.Info($"Activation step: SetForegroundWindow={setFg}");
 
-        // Single foreground check. If it did not stick, we do NOT escalate (no topmost dance,
-        // no second SetForegroundWindow) — the target is treated as unsafe and backed off.
+        // Immediate foreground check. Windows often needs a moment to settle the foreground
+        // change, so a false here is treated as a SHORT (foreground-mismatch) cooldown, NOT a
+        // dangerous signal: we do not touch the tracker, so arrange and the A-H registry are
+        // untouched and the window stays focusable. A deferred non-blocking recheck (see
+        // <see cref="ScheduleForegroundRecheck"/>) tries once more shortly after.
         var finalForeground = _api.GetForegroundWindow();
         bool success = finalForeground == hwnd;
         _logger?.Info($"Activation result: success={success}, foregroundHwnd={finalForeground}, expected={hwnd}");
 
-        if (!success)
+        if (success)
         {
-            MarkCooldown(hwnd, _nowProvider(), "foreground-mismatch");
-            _logger?.Info($"Directional focus activation failed, hwnd cooldown started: hwnd={hwnd}");
+            // Healthy activation: just a short throttle so the next slot-hop is paced.
+            _failedCooldownUntil[hwnd] = now.AddMilliseconds(NormalActivationCooldownMs);
+        }
+        else
+        {
+            // foreground-mismatch: short local cooldown only, NEVER the 15s tracker.
+            MarkCooldown(hwnd, now, "foreground-mismatch", markUnstable: false);
+            _logger?.Info($"Directional focus activation foreground-mismatch, short cooldown started: hwnd={hwnd}");
+            ScheduleForegroundRecheck(hwnd);
         }
 
         return success;
+    }
+
+    /// <summary>
+    /// Deferred, non-blocking re-attempt: Windows sometimes grants foreground only a few
+    /// milliseconds after SetForegroundWindow (the "taskbar flashes orange but window stays
+    /// behind" symptom). We retry once after a short delay WITHOUT blocking the UI thread.
+    /// No AttachThreadInput / SetFocus / topmost — just a second safe SetWindowPos + foreground
+    /// request. Failure here is silent (the short foreground-mismatch cooldown already
+    /// applies from the synchronous path).
+    /// </summary>
+    private void ScheduleForegroundRecheck(IntPtr hwnd)
+    {
+        // Use a one-shot WinForms timer so the recheck runs on the UI thread (required for
+        // foreground APIs) without reentrancy hazards. Fire-and-forget by design.
+        var timer = new System.Windows.Forms.Timer { Interval = ForegroundRecheckDelayMs };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            timer.Dispose();
+            try
+            {
+                if (!_api.IsWindow(hwnd)) return;
+                uint flags = NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_ASYNCWINDOWPOS;
+                _api.SetWindowPos(hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0, flags);
+                _api.SetForegroundWindow(hwnd);
+                bool ok = _api.GetForegroundWindow() == hwnd;
+                _logger?.Info($"Activation deferred recheck: hwnd={hwnd}, success={ok}");
+                if (ok)
+                {
+                    // It finally stuck — clear any short cooldown so the window is immediately
+                    // available again.
+                    _failedCooldownUntil.TryRemove(hwnd, out _);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.Warn($"Activation deferred recheck failed: hwnd={hwnd}, {ex.Message}");
+            }
+        };
+        timer.Start();
     }
 
     private string GetWindowTitle(IntPtr hwnd)

@@ -82,44 +82,45 @@ public class DirectionalFocusThrottleTests
         service.SetPostActivationCooldown(now, success: true);
 
         // 450ms cooldown: throttled just under, free just over.
-        Assert.True(service.IsThrottled(now.AddMilliseconds(449)));
-        Assert.False(service.IsThrottled(now.AddMilliseconds(451)));
+        Assert.True(service.IsThrottled(now.AddMilliseconds(149)));
+        Assert.False(service.IsThrottled(now.AddMilliseconds(151)));
     }
 
     [Fact]
-    public void AfterFailedActivation_BackoffIsLongerThanNormalCooldown()
+    public void AfterFailedActivation_SameShortThrottle_NoLongBackoff()
     {
+        // Fluidity fix: a foreground-mismatch used to trigger a 1450ms global backoff, which
+        // made rapid slot-hopping feel sluggish. Now success and failure use the SAME short
+        // pacing — the per-hwnd cooldown (and the unstable tracker for hung windows) carry
+        // the heavy protection, so the global throttle only paces the gesture.
         var now = new DateTime(2026, 1, 1, 12, 0, 0);
         var service = CreateService(() => now);
 
         service.SetPostActivationCooldown(now, success: false);
 
-        // Normal cooldown (450ms) elapsed but failure backoff (450+1000=1450ms) still active.
-        Assert.True(service.IsThrottled(now.AddMilliseconds(460)));
-        Assert.True(service.IsThrottled(now.AddMilliseconds(1449)));
-        Assert.False(service.IsThrottled(now.AddMilliseconds(1451)));
+        Assert.True(service.IsThrottled(now.AddMilliseconds(149)));
+        Assert.False(service.IsThrottled(now.AddMilliseconds(151)));
     }
 
     [Fact]
     public void RapidDirectionChanges_WhileHeld_AreThrottled()
     {
-        // Models the bug: user holds Ctrl+Shift and whips the mouse between slots. The first
-        // activation applies a cooldown; every subsequent change within that window is
-        // throttled rather than each one firing an activation.
+        // Models the gesture: user holds Ctrl+Shift and whips the mouse between slots. The
+        // first activation applies the short cooldown; subsequent changes within that window
+        // are throttled rather than each one firing an activation.
         var t = new DateTime(2026, 1, 1, 12, 0, 0);
         var service = CreateService(() => t);
 
         // First slot-hop fires and starts the cooldown.
         service.SetPostActivationCooldown(t, success: true);
 
-        // Several ticks later (each 40ms apart, like the real timer) — all throttled.
+        // Ticks later (each 40ms apart, like the real timer) — all throttled.
         Assert.True(service.IsThrottled(t.AddMilliseconds(40)));
         Assert.True(service.IsThrottled(t.AddMilliseconds(80)));
         Assert.True(service.IsThrottled(t.AddMilliseconds(120)));
-        Assert.True(service.IsThrottled(t.AddMilliseconds(200)));
 
-        // Only after the full cooldown elapses can another activation proceed.
-        Assert.False(service.IsThrottled(t.AddMilliseconds(451)));
+        // Only after the short cooldown elapses can another activation proceed.
+        Assert.False(service.IsThrottled(t.AddMilliseconds(151)));
     }
 
     [Fact]

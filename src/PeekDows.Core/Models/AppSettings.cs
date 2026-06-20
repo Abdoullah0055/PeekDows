@@ -23,7 +23,7 @@ public sealed class AppSettings
     public bool RearrangeOnFocus { get; set; } = false;
 
     public bool DirectionalFocusEnabled { get; set; } = true;
-    public int DirectionalFocusThresholdPx { get; set; } = 80;
+    public int DirectionalFocusThresholdPx { get; set; } = 60;
 
     /// <summary>
     /// When false (default), windows that are truly maximized via Windows are skipped during

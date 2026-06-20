@@ -321,19 +321,44 @@ public class WindowActivationServiceTests
     }
 
     [Fact]
-    public void Activate_FailedActivation_PutsHwndInCooldown()
+    public void Activate_ForegroundMismatch_AppliesShortCooldown_AndDoesNotMarkUnstable()
     {
-        // A failed activation (foreground mismatch) must place the hwnd on cooldown so it
-        // isn't retried immediately. Uses a controllable clock.
+        // A foreground-mismatch is NOT a dangerous Win32 signal (Windows routinely denies
+        // SetForegroundWindow). It must apply only a SHORT local cooldown and must NOT reach
+        // the UnstableWindowTracker — otherwise healthy windows get excluded for 15s, which
+        // is what made the shortcut sluggish.
         var now = new DateTime(2026, 1, 1, 12, 0, 0);
+        var tracker = new UnstableWindowTracker(() => now, null);
         var api = new FakeActivationApi();
-        api.ForegroundWindowResult = (IntPtr)999; // foreground never matches → failure
-        var service = new WindowActivationService(api, () => now);
+        api.ForegroundWindowResult = (IntPtr)999; // foreground never matches → mismatch
+        var service = new WindowActivationService(api, () => now, null, tracker);
 
         service.Activate((IntPtr)100);
 
+        // Short cooldown (~400ms) so rapid retries are paced...
         Assert.True(service.IsInCooldown((IntPtr)100, now));
-        Assert.True(service.IsInCooldown((IntPtr)100, now.AddMilliseconds(2999)));
+        Assert.True(service.IsInCooldown((IntPtr)100, now.AddMilliseconds(399)));
+        Assert.False(service.IsInCooldown((IntPtr)100, now.AddMilliseconds(401)));
+        // ...but the window is NOT marked unstable, so arrange and the A-H registry keep it.
+        Assert.False(tracker.IsUnstable((IntPtr)100));
+    }
+
+    [Fact]
+    public void Activate_NotResponding_MarksUnstableFor15Seconds()
+    {
+        // A truly unresponsive window IS a dangerous signal → tracker (15s), regardless of
+        // the shorter foreground-mismatch cooldown. This guards the anti-freeze protection
+        // is retained for real hung windows.
+        var now = new DateTime(2026, 1, 1, 12, 0, 0);
+        var tracker = new UnstableWindowTracker(() => now, null);
+        var api = new FakeActivationApi { IsResponsiveResult = false };
+        var service = new WindowActivationService(api, () => now, null, tracker);
+
+        service.Activate((IntPtr)100);
+
+        Assert.True(tracker.IsUnstable((IntPtr)100, now));
+        Assert.True(tracker.IsUnstable((IntPtr)100, now.AddMilliseconds(14999)));
+        Assert.False(tracker.IsUnstable((IntPtr)100, now.AddMilliseconds(15001)));
     }
 
     [Fact]
