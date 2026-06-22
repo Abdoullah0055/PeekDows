@@ -69,6 +69,15 @@ public interface IWindowActivationApi
 
 public sealed class Win32ActivationApi : IWindowActivationApi
 {
+    private readonly IInputSimulator _inputSimulator;
+
+    public Win32ActivationApi() : this(new Win32InputSimulator()) { }
+
+    public Win32ActivationApi(IInputSimulator inputSimulator)
+    {
+        _inputSimulator = inputSimulator;
+    }
+
     public bool IsWindow(IntPtr hwnd) => NativeMethods.IsWindow(hwnd);
     public bool IsIconic(IntPtr hwnd) => NativeMethods.IsIconic(hwnd);
     public bool ShowWindow(IntPtr hwnd, int cmdShow) => NativeMethods.ShowWindow(hwnd, cmdShow);
@@ -105,27 +114,9 @@ public sealed class Win32ActivationApi : IWindowActivationApi
 
     public bool TryUnlockForegroundWithAltPulse()
     {
-        // A single ALT key-down/key-up via SendInput. Windows' foreground-lock heuristic
-        // considers a thread eligible to call SetForegroundWindow if it has just processed
-        // synthetic input, so this benign pulse (no key reaches the active app's input — it
-        // is consumed as a system event) re-arms the right. SendInput is non-blocking and
-        // never touches the target window's thread, so it cannot freeze PeekDows.
-        var inputs = new NativeMethods.INPUT[2];
-        inputs[0].type = NativeMethods.INPUT_KEYBOARD;
-        inputs[0].ki = new NativeMethods.KEYBDINPUT
-        {
-            wVk = NativeMethods.VK_MENU,
-            dwFlags = 0 // keydown
-        };
-        inputs[1].type = NativeMethods.INPUT_KEYBOARD;
-        inputs[1].ki = new NativeMethods.KEYBDINPUT
-        {
-            wVk = NativeMethods.VK_MENU,
-            dwFlags = NativeMethods.KEYEVENTF_KEYUP
-        };
-
-        uint sent = NativeMethods.SendInput((uint)inputs.Length, inputs, System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.INPUT>());
-        return sent == inputs.Length;
+        // Delegated to the input simulator so the real SendInput/keybd_event plumbing (and
+        // its logging) lives in one testable place. Non-blocking, no AttachThreadInput/SetFocus.
+        return _inputSimulator.TryAltPulse();
     }
 }
 

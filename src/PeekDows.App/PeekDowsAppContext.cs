@@ -129,7 +129,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             hwnd => _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd),
             _logger);
         var gestureDetector = new DirectionalFocusGestureDetector();
-        _windowActivationService = new WindowActivationService(new Win32ActivationApi(), _logger, _unstableWindowTracker);
+        _windowActivationService = new WindowActivationService(new Win32ActivationApi(new Win32InputSimulator(_logger)), _logger, _unstableWindowTracker);
 
         _directionalFocusSnapshotService = new DirectionalFocusLayoutSnapshotService(
             _monitorService,

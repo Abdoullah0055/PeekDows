@@ -160,6 +160,45 @@ public static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
+    /// <summary>
+    /// Legacy input synthesizer kept as a defensive fallback if <see cref="SendInput"/> fails.
+    /// Internally modern Windows routes keybd_event through SendInput, but it tolerates a
+    /// simpler call shape, so it is useful when a struct-size/alignment issue would otherwise
+    /// block the ALT pulse entirely.
+    /// </summary>
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, IntPtr dwExtraInfo);
+
+    // Canonical Win32 INPUT layout (28-byte union ⇒ 40 bytes total on x64: type(4) + pad(4)
+    // + union(32)). The earlier declaration used LayoutKind.Explicit with a single KEYBDINPUT
+    // field at offset 8, which produced a 28-byte struct — the wrong cbSize made SendInput
+    // fail with ERROR_INVALID_PARAMETER, so the ALT pulse never unlocked the foreground lock.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT
+    {
+        public uint type;
+        public InputUnion U;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    public struct InputUnion
+    {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct KEYBDINPUT
     {
@@ -170,10 +209,11 @@ public static class NativeMethods
         public IntPtr dwExtraInfo;
     }
 
-    [StructLayout(LayoutKind.Explicit)]
-    public struct INPUT
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HARDWAREINPUT
     {
-        [FieldOffset(0)] public uint type;
-        [FieldOffset(8)]  public KEYBDINPUT ki;
+        public uint uMsg;
+        public ushort wParamL;
+        public ushort wParamH;
     }
 }
