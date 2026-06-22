@@ -357,17 +357,142 @@ public class DirectionalFocusServiceRebuildTests
     }
 
     [Fact]
-    public void WhenEdgeSlot_E_AbsentFromLayout_ResolvesNull()
+    public void WhenEdgeSlot_E_AbsentButAlignedSlotExists_FallsBackToIt()
     {
-        // No window is in slot E → Ctrl+Shift+up is a silent no-op.
+        // TopCenter (E) is empty, but slot A (TopLeft) is available and is aligned "up" with
+        // the gesture. The fallback must return A instead of null — this is the fix for the
+        // "6 windows, MiddleRight empty, gesture does nothing" UX bug.
         var registry = new DirectionalFocusRegistry(_ => true, _ => true);
-        // Only slot A is physically present; E/F/G/H are empty.
         var rectA = SlotRect("A");
         var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)130 ? rectA : default);
+        registry.SetSlotsForMonitor(WorkArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)130
+        });
 
         var service = CreateService(registry, snapshot, () => new[] { (IntPtr)130 });
 
         var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopCenter);
+
+        Assert.Equal((IntPtr)130, hwnd);
+    }
+
+    [Fact]
+    public void WhenNoAlignedSlotExists_FallsBackToNull()
+    {
+        // Only slot A (TopLeft, up-left) is available, but the gesture targets BottomRight
+        // (down-right) — the opposite direction. The fallback must NOT focus a window in the
+        // opposite direction; it returns null cleanly.
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var rectA = SlotRect("A");
+        var snapshot = CreateSnapshot(hwnd => hwnd == (IntPtr)131 ? rectA : default);
+        registry.SetSlotsForMonitor(WorkArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)131
+        });
+
+        var service = CreateService(registry, snapshot, () => new[] { (IntPtr)131 });
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.BottomRight);
+
+        Assert.Null(hwnd);
+    }
+
+    // --- 6-window scenario: corners A-D + centers E/F populated, edge slots G/H empty.
+    // A gesture toward an empty edge slot must fall back to an aligned populated slot. ---
+
+    private static (DirectionalFocusRegistry registry, DirectionalFocusLayoutSnapshotService snapshot, IReadOnlyList<IntPtr> hwnds)
+        BuildSixWindowLayout()
+    {
+        // 6 windows: A(1)=TopLeft, B(2)=BottomRight, C(3)=TopRight, D(4)=BottomLeft,
+        // E(5)=TopCenter, F(6)=BottomCenter. G(MiddleRight) and H(MiddleLeft) are EMPTY —
+        // exactly the situation where the old code did nothing on a left/right gesture.
+        var slots = new (string SlotId, DirectionalFocusSlot Slot, IntPtr Hwnd)[]
+        {
+            ("A", DirectionalFocusSlot.TopLeft, (IntPtr)1),
+            ("B", DirectionalFocusSlot.BottomRight, (IntPtr)2),
+            ("C", DirectionalFocusSlot.TopRight, (IntPtr)3),
+            ("D", DirectionalFocusSlot.BottomLeft, (IntPtr)4),
+            ("E", DirectionalFocusSlot.TopCenter, (IntPtr)5),
+            ("F", DirectionalFocusSlot.BottomCenter, (IntPtr)6)
+        };
+
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var map = new Dictionary<DirectionalFocusSlot, IntPtr>();
+        var rectByHwnd = new Dictionary<IntPtr, Rect>();
+        foreach (var (slotId, slot, hwnd) in slots)
+        {
+            map[slot] = hwnd;
+            rectByHwnd[hwnd] = SlotRect(slotId);
+        }
+        registry.SetSlotsForMonitor(WorkArea, map);
+
+        var snapshot = CreateSnapshot(hwnd => rectByHwnd.TryGetValue(hwnd, out var r) ? r : default);
+        var hwnds = slots.Select(s => s.Hwnd).ToList();
+        return (registry, snapshot, hwnds);
+    }
+
+    [Fact]
+    public void SixWindows_MiddleRightEmpty_FallsBackToTopRightOrBottomRight()
+    {
+        // Gesture "right" → MiddleRight (G), which is empty. Both TopRight (C) and
+        // BottomRight (B) are aligned right; the fallback must return one of them.
+        var (registry, snapshot, hwnds) = BuildSixWindowLayout();
+        var service = CreateService(registry, snapshot, () => hwnds);
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleRight);
+
+        Assert.NotNull(hwnd);
+        // Must be a right-edge window (C=3 or B=2), never a left/center one.
+        Assert.Contains(hwnd!.Value, new[] { (IntPtr)3, (IntPtr)2 });
+    }
+
+    [Fact]
+    public void SixWindows_MiddleLeftEmpty_FallsBackToTopLeftOrBottomLeft()
+    {
+        // Gesture "left" → MiddleLeft (H), empty. Fallback must be a left-edge window.
+        var (registry, snapshot, hwnds) = BuildSixWindowLayout();
+        var service = CreateService(registry, snapshot, () => hwnds);
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleLeft);
+
+        Assert.NotNull(hwnd);
+        Assert.Contains(hwnd!.Value, new[] { (IntPtr)1, (IntPtr)4 });
+    }
+
+    [Fact]
+    public void SixWindows_TopCenterPopulated_ReturnsItDirectly()
+    {
+        // Non-regression: when the exact slot IS populated, no fallback occurs.
+        var (registry, snapshot, hwnds) = BuildSixWindowLayout();
+        var service = CreateService(registry, snapshot, () => hwnds);
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopCenter);
+
+        Assert.Equal((IntPtr)5, hwnd);
+    }
+
+    [Fact]
+    public void SixWindows_BottomCenterPopulated_ReturnsItDirectly()
+    {
+        var (registry, snapshot, hwnds) = BuildSixWindowLayout();
+        var service = CreateService(registry, snapshot, () => hwnds);
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.BottomCenter);
+
+        Assert.Equal((IntPtr)6, hwnd);
+    }
+
+    [Fact]
+    public void NoSlotsPopulated_ReturnsNull_LayoutNotRecognized()
+    {
+        // Zero slots on the monitor → genuinely "layout not recognized": return null so the
+        // user-facing log can still suggest running Arrange Now.
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var snapshot = CreateSnapshot(_ => default);
+        var service = CreateService(registry, snapshot, () => Array.Empty<IntPtr>());
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleRight);
 
         Assert.Null(hwnd);
     }

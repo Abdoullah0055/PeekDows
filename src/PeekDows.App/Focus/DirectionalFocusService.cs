@@ -300,10 +300,94 @@ public sealed class DirectionalFocusService : IDisposable
 
         if (hwnd == null || hwnd == IntPtr.Zero)
         {
-            _logger?.Info($"Directional focus ignored: current layout not recognized; run Arrange Now first. slot={slot}, monitor={mouseWorkArea}");
+            // The exact slot is empty OR no layout is recognised at all. Distinguish the two:
+            // if some slots ARE populated on this monitor, the layout is recognised and we can
+            // fall back to the best-aligned available slot in the gesture direction. Only when
+            // NO slot is populated do we tell the user to run Arrange Now.
+            var fallback = ResolveWithFallback(mouseWorkArea, slot);
+            if (fallback != null && fallback != IntPtr.Zero)
+            {
+                _logger?.Info($"Directional focus fallback selected: requested={slot}, monitor={mouseWorkArea}, hwnd={fallback}");
+                return fallback;
+            }
+
+            if (_registry.HasSlotsForMonitor(mouseWorkArea))
+            {
+                var available = string.Join(",", _registry.GetAvailableSlots(mouseWorkArea).Select(s => s.Slot));
+                _logger?.Info($"Directional focus exact slot empty: requested={slot}, availableSlots=[{available}], no aligned fallback on monitor={mouseWorkArea}");
+            }
+            else
+            {
+                _logger?.Info($"Directional focus ignored: current layout not recognized; run Arrange Now first. slot={slot}, monitor={mouseWorkArea}");
+            }
         }
 
         return hwnd;
+    }
+
+    /// <summary>
+    /// Fallback used when the exact requested slot is empty (e.g. only 6 windows, so the
+    /// edge-centred slots are unpopulated). Picks the available slot whose screen position is
+    /// most aligned with the gesture direction, so a "move right" still focuses a window on
+    /// the right edge even when MiddleRight is empty. Returns null only if no reasonable
+    /// target exists in that direction.
+    /// </summary>
+    private IntPtr? ResolveWithFallback(Rect mouseWorkArea, DirectionalFocusSlot requested)
+    {
+        var available = _registry.GetAvailableSlots(mouseWorkArea);
+        if (available.Count == 0)
+            return null;
+
+        var requestedDir = SlotDirection(requested);
+        IntPtr? best = null;
+        double bestScore = double.MinValue;
+
+        foreach (var (candidateSlot, candidateHwnd) in available)
+        {
+            if (candidateSlot == requested)
+                continue; // already tried, it's empty
+
+            // Skip the candidate if its window is no longer in its slot rect (same staleness
+            // guard as the primary path) — a drifted window is not a reliable target.
+            if (!_snapshotService.IsWindowStillInSlot(candidateHwnd, mouseWorkArea, candidateSlot))
+                continue;
+
+            var candidateDir = SlotDirection(candidateSlot);
+            // Dot product of unit direction vectors: 1 = same direction, 0 = perpendicular,
+            // -1 = opposite. Higher = better alignment with the gesture.
+            double score = requestedDir.dx * candidateDir.dx + requestedDir.dy * candidateDir.dy;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = candidateHwnd;
+            }
+        }
+
+        // Only accept a fallback that is at least roughly aligned (dot > 0.3): we never want to
+        // focus a window in the OPPOSITE direction of the gesture just because it's the only
+        // one available. 0.3 ≈ within ~70° of the requested direction.
+        return bestScore > 0.3 ? best : null;
+    }
+
+    /// <summary>
+    /// Unit direction vector (dx, dy) pointing from screen centre toward a slot's anchor.
+    /// dy is negative for "up" to match the gesture detector's convention. Used to score
+    /// fallback candidates by alignment with the requested gesture direction.
+    /// </summary>
+    private static (double dx, double dy) SlotDirection(DirectionalFocusSlot slot)
+    {
+        return slot switch
+        {
+            DirectionalFocusSlot.TopLeft => (-1, -1),
+            DirectionalFocusSlot.TopCenter => (0, -1),
+            DirectionalFocusSlot.TopRight => (1, -1),
+            DirectionalFocusSlot.MiddleLeft => (-1, 0),
+            DirectionalFocusSlot.MiddleRight => (1, 0),
+            DirectionalFocusSlot.BottomLeft => (-1, 1),
+            DirectionalFocusSlot.BottomCenter => (0, 1),
+            DirectionalFocusSlot.BottomRight => (1, 1),
+            _ => (0, 0)
+        };
     }
 
     private void ActivateSlot(Rect mouseWorkArea, DirectionalFocusSlot slot, DateTime now)

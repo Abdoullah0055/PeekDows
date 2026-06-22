@@ -133,6 +133,29 @@ public sealed class DirectionalFocusRegistry
         return _slotsByMonitor.ContainsKey(monitorWorkArea) && _slotsByMonitor[monitorWorkArea].Count > 0;
     }
 
+    /// <summary>
+    /// Returns every (slot, hwnd) pair currently populated and valid for a monitor — i.e. hwnd
+    /// is a live window on the current virtual desktop. Used by Directional Focus to pick a
+    /// fallback slot when the exact requested slot is empty (e.g. fewer than 8 windows, so the
+    /// edge-centred slots are unpopulated). Pairs are returned in no particular order.
+    /// </summary>
+    public IReadOnlyList<(DirectionalFocusSlot Slot, IntPtr Hwnd)> GetAvailableSlots(Rect monitorWorkArea)
+    {
+        var result = new List<(DirectionalFocusSlot, IntPtr)>();
+        if (!_slotsByMonitor.TryGetValue(monitorWorkArea, out var slotMap))
+            return result;
+
+        foreach (var kv in slotMap)
+        {
+            if (!_isWindowValid(kv.Value))
+                continue;
+            if (!_isOnCurrentVirtualDesktop(kv.Value))
+                continue;
+            result.Add((kv.Key, kv.Value));
+        }
+        return result;
+    }
+
     internal static DirectionalFocusSlot? MapSlotId(string slotId)
     {
         return slotId switch
