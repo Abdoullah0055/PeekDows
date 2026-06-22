@@ -44,6 +44,28 @@ dotnet publish src/PeekDows.App/PeekDows.App.csproj -c Release -r win-x64 --self
 
 Output: `publish/PeekDows.App.exe` (standalone, no .NET runtime required on target machine).
 
+## Windows Installer
+
+A ready-to-run installer is produced from the self-contained build via [Inno Setup](https://jrsoftware.org/isdl.php).
+
+**1. Build the portable single-file output:**
+
+```powershell
+.\scripts\publish-windows.ps1
+```
+
+Output: `artifacts\publish\win-x64\PeekDows.App.exe`
+
+**2. Build the installer** (requires Inno Setup 6):
+
+```powershell
+ISCC.exe installer\PeekDows.iss
+```
+
+Output: `artifacts\installer\PeekDowsSetup-x64.exe` — copy this to the target PC and double-click to install.
+
+The installer is user-level (no admin required), creates Start Menu + optional Desktop shortcuts, launches PeekDows after install, and **enables Start with Windows by default**. See [`docs/installer.md`](docs/installer.md) for full details.
+
 ## Configuration
 
 Settings are stored at `%APPDATA%\PeekDows\settings.json`.
