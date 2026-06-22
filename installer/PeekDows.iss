@@ -74,12 +74,25 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; Comment: "Re
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; Comment: "PeekDows — window arrangement"
 
 [Run]
-; Launch PeekDows after install and enable Start with Windows (default ON).
-; nowait: don't block the installer; the tray app keeps running in the background.
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--enable-startup"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent; Check: WizardSilentLaunchAllowed
+; Two separate steps so the tray app actually starts after install:
+;   1. Hook "PeekDows.App.exe --enable-startup" — activates Start with Windows
+;      via the existing StartupService, then EXITS immediately (it does not run
+;      the tray app). runhidden + waituntilterminated so it finishes BEFORE step 2.
+;   2. Real launch with NO arguments — runs the tray app normally so the icon
+;      appears and stays in the background. The postinstall checkbox on GUI
+;      installs lets the user opt out (default checked).
 
-; On silent installs we still want the app started (no postinstall checkbox there).
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--enable-startup"; Flags: nowait; Check: WizardIsSilent
+; --- GUI install ---
+; Step 1 (silent hook, must complete first)
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--enable-startup"; Flags: runhidden waituntilterminated; Check: WizardSilentLaunchAllowed
+; Step 2 (real launch, user can uncheck via postinstall)
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent; Check: WizardSilentLaunchAllowed
+
+; --- Silent install ---
+; Step 1 (silent hook)
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--enable-startup"; Flags: runhidden waituntilterminated; Check: WizardIsSilent
+; Step 2 (real launch, no checkbox in silent mode)
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: WizardIsSilent
 
 [UninstallRun]
 ; Best-effort: ask the running app to exit via taskkill before removing files.
