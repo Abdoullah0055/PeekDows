@@ -119,6 +119,7 @@ public class RepositionMaximizedWindowsToggleTests
         public bool IsStartWithWindowsEnabled => false;
         public bool IsDirectionalFocusEnabled => false;
         public bool AllowRepositionMaximizedWindows => CurrentSettings.AllowRepositionMaximizedWindows;
+        public WindowSizePreset CurrentWindowSizePreset => WindowSizePreset.Small;
         public bool IsPaused => false;
         public DateTimeOffset? PauseUntil => null;
         public string? PauseDescription => null;
@@ -128,6 +129,7 @@ public class RepositionMaximizedWindowsToggleTests
         public event Action<bool>? StartWithWindowsChanged;
         public event Action<bool>? DirectionalFocusChanged;
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
+        public event Action<WindowSizePreset>? WindowSizePresetChanged;
 
         public void ArrangeNow() { }
         public void TogglePause() { }
@@ -144,6 +146,8 @@ public class RepositionMaximizedWindowsToggleTests
             _settingsService?.Save(CurrentSettings);
             AllowRepositionMaximizedWindowsChanged?.Invoke(CurrentSettings.AllowRepositionMaximizedWindows);
         }
+
+        public void SetWindowSizePreset(WindowSizePreset preset) { }
 
         public void OpenSettings() { }
         public void OpenLogFile() { }

@@ -38,6 +38,8 @@ public sealed class AppSettings
     /// </summary>
     public bool AllowRepositionMaximizedWindows { get; set; } = false;
 
+    public WindowSizePreset WindowSizePreset { get; set; } = WindowSizePreset.Small;
+
     public List<string> IgnoredProcesses { get; set; } = new()
     {
         "PeekDows.exe",

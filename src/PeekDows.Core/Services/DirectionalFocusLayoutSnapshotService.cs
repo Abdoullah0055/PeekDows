@@ -30,6 +30,7 @@ public sealed class DirectionalFocusLayoutSnapshotService
     private readonly LayoutEngine _layoutEngine;
     private readonly Func<IntPtr, Rect> _getWindowRect;
     private readonly Func<IntPtr, bool> _isOnCurrentVirtualDesktop;
+    private readonly Func<double> _getRatio;
     private readonly int _tolerancePx;
 
     public DirectionalFocusLayoutSnapshotService(
@@ -37,6 +38,7 @@ public sealed class DirectionalFocusLayoutSnapshotService
         LayoutEngine layoutEngine,
         Func<IntPtr, Rect> getWindowRect,
         Func<IntPtr, bool> isOnCurrentVirtualDesktop,
+        Func<double> getRatio,
         int tolerancePx = DefaultTolerancePx,
         FileLogger? logger = null)
     {
@@ -44,8 +46,22 @@ public sealed class DirectionalFocusLayoutSnapshotService
         _layoutEngine = layoutEngine;
         _getWindowRect = getWindowRect;
         _isOnCurrentVirtualDesktop = isOnCurrentVirtualDesktop;
+        _getRatio = getRatio;
         _tolerancePx = tolerancePx;
         Logger = logger;
+    }
+
+    // Backward-compatible constructor for tests that defaults to Small ratio.
+    public DirectionalFocusLayoutSnapshotService(
+        IMonitorResolver monitorResolver,
+        LayoutEngine layoutEngine,
+        Func<IntPtr, Rect> getWindowRect,
+        Func<IntPtr, bool> isOnCurrentVirtualDesktop,
+        int tolerancePx = DefaultTolerancePx,
+        FileLogger? logger = null)
+        : this(monitorResolver, layoutEngine, getWindowRect, isOnCurrentVirtualDesktop,
+               () => LayoutEngine.GetPresetRatio(WindowSizePreset.Small), tolerancePx, logger)
+    {
     }
 
     internal FileLogger? Logger { get; }
@@ -57,7 +73,8 @@ public sealed class DirectionalFocusLayoutSnapshotService
     /// </summary>
     public IReadOnlyDictionary<DirectionalFocusSlot, IntPtr> BuildSlotMap(Rect monitorWorkArea, IEnumerable<IntPtr> candidateHwnds)
     {
-        var slotRectsById = _layoutEngine.CalculateClassicPeekGridSlotRects(monitorWorkArea);
+        var ratio = _getRatio();
+        var slotRectsById = _layoutEngine.CalculateClassicPeekGridSlotRects(monitorWorkArea, ratio);
 
         var result = new Dictionary<DirectionalFocusSlot, IntPtr>();
 
@@ -151,7 +168,8 @@ public sealed class DirectionalFocusLayoutSnapshotService
             return false;
         }
 
-        var slotRectsById = _layoutEngine.CalculateClassicPeekGridSlotRects(monitorWorkArea);
+        var ratio = _getRatio();
+        var slotRectsById = _layoutEngine.CalculateClassicPeekGridSlotRects(monitorWorkArea, ratio);
         var expectedRect = slotRectsById[slotId];
 
         return RectApproximatelyEquals(rect, expectedRect, _tolerancePx);

@@ -587,6 +587,167 @@ public class LayoutEngineTests
     }
 
     [Fact]
+    public void ClassicPeekGrid_UsesSmallRatio()
+    {
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var settings = new AppSettings { WindowSizePreset = WindowSizePreset.Small };
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+        var a = placements.First(p => p.SlotId == "A");
+
+        Assert.Equal((int)Math.Round(workArea.Width * 0.90), a.TargetRect.Width);
+        Assert.Equal((int)Math.Round(workArea.Height * 0.90), a.TargetRect.Height);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_UsesMediumRatio()
+    {
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var settings = new AppSettings { WindowSizePreset = WindowSizePreset.Medium };
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+        var a = placements.First(p => p.SlotId == "A");
+
+        Assert.Equal((int)Math.Round(workArea.Width * 0.95), a.TargetRect.Width);
+        Assert.Equal((int)Math.Round(workArea.Height * 0.95), a.TargetRect.Height);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_UsesLargeRatio()
+    {
+        var workArea = new Rect(0, 0, 1920, 1080);
+        var settings = new AppSettings { WindowSizePreset = WindowSizePreset.Large };
+        var windows = new List<ManagedWindow>
+        {
+            new() { Hwnd = (IntPtr)1, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)2, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)3, FirstSeenAt = DateTime.Now },
+            new() { Hwnd = (IntPtr)4, FirstSeenAt = DateTime.Now }
+        };
+        var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
+        var a = placements.First(p => p.SlotId == "A");
+
+        Assert.Equal((int)Math.Round(workArea.Width * 0.98), a.TargetRect.Width);
+        Assert.Equal((int)Math.Round(workArea.Height * 0.98), a.TargetRect.Height);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_SmallRatio_OffsetsCorrect()
+    {
+        var workArea = new Rect(0, 0, 1280, 720);
+        var settings = new AppSettings { WindowSizePreset = WindowSizePreset.Small };
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(workArea,
+            LayoutEngine.GetPresetRatio(WindowSizePreset.Small));
+
+        int spanW = (int)Math.Round(1280 * 0.90);
+        int spanH = (int)Math.Round(720 * 0.90);
+        int leftoverW = 1280 - spanW;
+        int leftoverH = 720 - spanH;
+
+        // TopLeft anchored to top-left
+        Assert.Equal(0, slotRects["A"].Left);
+        Assert.Equal(0, slotRects["A"].Top);
+        Assert.Equal(spanW, slotRects["A"].Width);
+        Assert.Equal(spanH, slotRects["A"].Height);
+
+        // BottomRight anchored to bottom-right (offset = leftover)
+        Assert.Equal(leftoverW, slotRects["B"].Left);
+        Assert.Equal(leftoverH, slotRects["B"].Top);
+        Assert.Equal(workArea.Right, slotRects["B"].Right);
+        Assert.Equal(workArea.Bottom, slotRects["B"].Bottom);
+
+        // TopCenter: centred horizontally, flush top
+        int centerX = workArea.Left + (leftoverW / 2);
+        Assert.Equal(centerX, slotRects["E"].Left);
+        Assert.Equal(0, slotRects["E"].Top);
+        Assert.Equal(spanW, slotRects["E"].Width);
+        Assert.Equal(spanH, slotRects["E"].Height);
+
+        // MiddleRight: centred vertically, flush right
+        int centerY = workArea.Top + (leftoverH / 2);
+        Assert.Equal(workArea.Right, slotRects["G"].Right);
+        Assert.Equal(centerY, slotRects["G"].Top);
+        Assert.Equal(spanW, slotRects["G"].Width);
+        Assert.Equal(spanH, slotRects["G"].Height);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_MediumRatio_OffsetsCorrect()
+    {
+        var workArea = new Rect(0, 0, 1280, 720);
+        var settings = new AppSettings { WindowSizePreset = WindowSizePreset.Medium };
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(workArea,
+            LayoutEngine.GetPresetRatio(WindowSizePreset.Medium));
+
+        int spanW = (int)Math.Round(1280 * 0.95);
+        int spanH = (int)Math.Round(720 * 0.95);
+        int leftoverW = 1280 - spanW;
+        int leftoverH = 720 - spanH;
+
+        Assert.Equal(0, slotRects["A"].Left);
+        Assert.Equal(0, slotRects["A"].Top);
+        Assert.Equal(spanW, slotRects["A"].Width);
+        Assert.Equal(spanH, slotRects["A"].Height);
+
+        Assert.Equal(leftoverW, slotRects["B"].Left);
+        Assert.Equal(leftoverH, slotRects["B"].Top);
+        Assert.Equal(workArea.Right, slotRects["B"].Right);
+        Assert.Equal(workArea.Bottom, slotRects["B"].Bottom);
+
+        int centerX = workArea.Left + (leftoverW / 2);
+        Assert.Equal(centerX, slotRects["E"].Left);
+        Assert.Equal(0, slotRects["E"].Top);
+
+        int centerY = workArea.Top + (leftoverH / 2);
+        Assert.Equal(workArea.Right, slotRects["G"].Right);
+        Assert.Equal(centerY, slotRects["G"].Top);
+    }
+
+    [Fact]
+    public void ClassicPeekGrid_LargeRatio_OffsetsCorrect()
+    {
+        var workArea = new Rect(0, 0, 1280, 720);
+        var settings = new AppSettings { WindowSizePreset = WindowSizePreset.Large };
+        var slotRects = _engine.CalculateClassicPeekGridSlotRects(workArea,
+            LayoutEngine.GetPresetRatio(WindowSizePreset.Large));
+
+        int spanW = (int)Math.Round(1280 * 0.98);
+        int spanH = (int)Math.Round(720 * 0.98);
+        int leftoverW = 1280 - spanW;
+        int leftoverH = 720 - spanH;
+
+        Assert.Equal(0, slotRects["A"].Left);
+        Assert.Equal(0, slotRects["A"].Top);
+        Assert.Equal(spanW, slotRects["A"].Width);
+        Assert.Equal(spanH, slotRects["A"].Height);
+
+        Assert.Equal(leftoverW, slotRects["B"].Left);
+        Assert.Equal(leftoverH, slotRects["B"].Top);
+        Assert.Equal(workArea.Right, slotRects["B"].Right);
+        Assert.Equal(workArea.Bottom, slotRects["B"].Bottom);
+
+        int centerX = workArea.Left + (leftoverW / 2);
+        Assert.Equal(centerX, slotRects["E"].Left);
+        Assert.Equal(0, slotRects["E"].Top);
+
+        int centerY = workArea.Top + (leftoverH / 2);
+        Assert.Equal(workArea.Right, slotRects["G"].Right);
+        Assert.Equal(centerY, slotRects["G"].Top);
+    }
+
+    [Fact]
     public void ClassicPeekGrid_TwoWindows_A_and_B()
     {
         var settings = new AppSettings();

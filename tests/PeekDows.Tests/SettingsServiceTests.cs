@@ -201,6 +201,36 @@ public class SettingsServiceTests : IDisposable
         Assert.True(loadedSettings.AllowRepositionMaximizedWindows);
     }
 
+    [Fact]
+    public void DefaultWindowSizePreset_IsSmall()
+    {
+        var settings = new AppSettings();
+
+        Assert.Equal(WindowSizePreset.Small, settings.WindowSizePreset);
+    }
+
+    [Fact]
+    public void Save_And_Load_PreservesWindowSizePreset()
+    {
+        var settings = _settingsService.Load();
+        settings.WindowSizePreset = WindowSizePreset.Medium;
+        _settingsService.Save(settings);
+
+        var loadedSettings = _settingsService.Load();
+
+        Assert.Equal(WindowSizePreset.Medium, loadedSettings.WindowSizePreset);
+    }
+
+    [Fact]
+    public void Load_MissingWindowSizePreset_DefaultsToSmall()
+    {
+        File.WriteAllText(_testSettingsPath, "{\"AutoArrange\":true}");
+
+        var settings = _settingsService.Load();
+
+        Assert.Equal(WindowSizePreset.Small, settings.WindowSizePreset);
+    }
+
     public void Dispose()
     {
         var dir = Path.GetDirectoryName(_testSettingsPath);

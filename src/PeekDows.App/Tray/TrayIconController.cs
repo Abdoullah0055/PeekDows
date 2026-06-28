@@ -25,6 +25,9 @@ public class TrayIconController : IDisposable
     private ToolStripMenuItem? _repositionMaximizedItem;
     private ToolStripMenuItem? _startWithWindowsItem;
     private ToolStripMenuItem? _directionalFocusItem;
+    private ToolStripMenuItem? _smallPresetItem;
+    private ToolStripMenuItem? _mediumPresetItem;
+    private ToolStripMenuItem? _largePresetItem;
 
     public TrayIconController(IPeekDowsController controller) : this(controller, null) { }
 
@@ -55,6 +58,7 @@ public class TrayIconController : IDisposable
         _controller.StartWithWindowsChanged += OnStartWithWindowsChanged;
         _controller.DirectionalFocusChanged += OnDirectionalFocusChanged;
         _controller.AllowRepositionMaximizedWindowsChanged += OnAllowRepositionMaximizedWindowsChanged;
+        _controller.WindowSizePresetChanged += OnWindowSizePresetChanged;
 
         UpdateMenuState(_controller.State);
         UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
@@ -63,7 +67,7 @@ public class TrayIconController : IDisposable
         UpdateRepositionMaximizedMenu(_controller.CurrentSettings?.AllowRepositionMaximizedWindows ?? false);
     }
 
-    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem, ToolStripMenuItem autoArrangeItem, ToolStripMenuItem repositionMaximizedItem, ToolStripMenuItem startWithWindowsItem, ToolStripMenuItem directionalFocusItem)
+    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem, ToolStripMenuItem autoArrangeItem, ToolStripMenuItem repositionMaximizedItem, ToolStripMenuItem startWithWindowsItem, ToolStripMenuItem directionalFocusItem, ToolStripMenuItem smallPresetItem, ToolStripMenuItem mediumPresetItem, ToolStripMenuItem largePresetItem)
     {
         _statusItem = statusItem;
         _pauseResumeItem = pauseResumeItem;
@@ -71,11 +75,15 @@ public class TrayIconController : IDisposable
         _repositionMaximizedItem = repositionMaximizedItem;
         _startWithWindowsItem = startWithWindowsItem;
         _directionalFocusItem = directionalFocusItem;
+        _smallPresetItem = smallPresetItem;
+        _mediumPresetItem = mediumPresetItem;
+        _largePresetItem = largePresetItem;
         UpdateMenuState(_controller.State);
         UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
         UpdateStartWithWindowsMenu(_controller.CurrentSettings?.StartWithWindows ?? false);
         UpdateDirectionalFocusMenu(_controller.CurrentSettings?.DirectionalFocusEnabled ?? false);
         UpdateRepositionMaximizedMenu(_controller.CurrentSettings?.AllowRepositionMaximizedWindows ?? false);
+        UpdateWindowSizePresetMenu(_controller.CurrentSettings?.WindowSizePreset ?? WindowSizePreset.Small);
     }
 
     internal void UpdatePauseState()
@@ -226,6 +234,21 @@ public class TrayIconController : IDisposable
         {
             _repositionMaximizedItem.Checked = isEnabled;
         }
+    }
+
+    private void OnWindowSizePresetChanged(WindowSizePreset preset)
+    {
+        UpdateWindowSizePresetMenu(preset);
+    }
+
+    private void UpdateWindowSizePresetMenu(WindowSizePreset preset)
+    {
+        if (_smallPresetItem != null)
+            _smallPresetItem.Checked = preset == WindowSizePreset.Small;
+        if (_mediumPresetItem != null)
+            _mediumPresetItem.Checked = preset == WindowSizePreset.Medium;
+        if (_largePresetItem != null)
+            _largePresetItem.Checked = preset == WindowSizePreset.Large;
     }
 
     public void Dispose()

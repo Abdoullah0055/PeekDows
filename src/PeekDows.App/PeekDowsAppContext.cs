@@ -54,11 +54,14 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
     public bool AllowRepositionMaximizedWindows => _settings.AllowRepositionMaximizedWindows;
 
+    public WindowSizePreset CurrentWindowSizePreset => _settings.WindowSizePreset;
+
     public event Action<RuntimeState>? StateChanged;
     public event Action<bool>? AutoArrangeChanged;
     public event Action<bool>? StartWithWindowsChanged;
     public event Action<bool>? DirectionalFocusChanged;
     public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
+    public event Action<WindowSizePreset>? WindowSizePresetChanged;
 
     public string LogFilePath => _logger.LogFilePath;
 
@@ -143,6 +146,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return default;
             },
             hwnd => _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd),
+            () => LayoutEngine.GetPresetRatio(_settings.WindowSizePreset),
             logger: _logger);
 
         _directionalFocusService = new DirectionalFocusService(
@@ -334,6 +338,17 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _logger.Info($"AllowRepositionMaximizedWindows changed: {_settings.AllowRepositionMaximizedWindows}");
 
         AllowRepositionMaximizedWindowsChanged?.Invoke(_settings.AllowRepositionMaximizedWindows);
+    }
+
+    public void SetWindowSizePreset(WindowSizePreset preset)
+    {
+        if (_settings.WindowSizePreset == preset) return;
+
+        _settings.WindowSizePreset = preset;
+        _settingsService.Save(_settings);
+        _logger.Info($"WindowSizePreset changed: {preset} = {LayoutEngine.GetPresetRatio(preset):P0}");
+        WindowSizePresetChanged?.Invoke(preset);
+        ArrangeNow();
     }
 
     // When StartWithWindows is false, do not delete an existing shortcut here.
@@ -570,7 +585,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return;
             }
 
-            _logger.Info("ClassicPeekGrid layout selected per monitor: 90% overlap ratio");
+            var ratio = LayoutEngine.GetPresetRatio(_settings.WindowSizePreset);
+            _logger.Info($"ClassicPeekGrid layout selected per monitor: {ratio:P0} overlap ratio");
             var placements = _multiMonitorLayoutService.CalculatePlacementsByMonitor(arrangeable, _settings);
             _logger.Info($"Placement count={placements.Count}");
 

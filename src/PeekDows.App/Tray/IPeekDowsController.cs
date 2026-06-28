@@ -13,6 +13,7 @@ public interface IPeekDowsController
     bool IsStartWithWindowsEnabled { get; }
     bool IsDirectionalFocusEnabled { get; }
     bool AllowRepositionMaximizedWindows { get; }
+    WindowSizePreset CurrentWindowSizePreset { get; }
     bool IsPaused { get; }
     DateTimeOffset? PauseUntil { get; }
     string? PauseDescription { get; }
@@ -25,6 +26,7 @@ public interface IPeekDowsController
     void ToggleStartWithWindows();
     void ToggleDirectionalFocus();
     void ToggleAllowRepositionMaximizedWindows();
+    void SetWindowSizePreset(WindowSizePreset preset);
     void OpenSettings();
     void OpenLogFile();
     void OpenLogsFolder();
@@ -35,4 +37,5 @@ public interface IPeekDowsController
     event Action<bool>? StartWithWindowsChanged;
     event Action<bool>? DirectionalFocusChanged;
     event Action<bool>? AllowRepositionMaximizedWindowsChanged;
+    event Action<WindowSizePreset>? WindowSizePresetChanged;
 }

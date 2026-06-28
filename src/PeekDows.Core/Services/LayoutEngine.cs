@@ -7,8 +7,13 @@ namespace PeekDows.Core.Services;
 
 public class LayoutEngine
 {
-    private const double ClassicPeekGridWidthRatio = 0.90;
-    private const double ClassicPeekGridHeightRatio = 0.90;
+    public static double GetPresetRatio(WindowSizePreset preset) => preset switch
+    {
+        WindowSizePreset.Small => 0.90,
+        WindowSizePreset.Medium => 0.95,
+        WindowSizePreset.Large => 0.98,
+        _ => 0.90
+    };
 
     public IReadOnlyList<WindowPlacement> CalculateClassicPeekGridPlacements(
         IReadOnlyList<ManagedWindow> windows,
@@ -20,7 +25,8 @@ public class LayoutEngine
 
         var priorityWindows = PrioritizeForClassicPeekGrid(windows);
 
-        var slotRects = CalculateClassicPeekGridSlotRects(workArea);
+        var ratio = GetPresetRatio(settings.WindowSizePreset);
+        var slotRects = CalculateClassicPeekGridSlotRects(workArea, ratio);
 
         if (priorityWindows.Count == 1)
         {
@@ -90,9 +96,12 @@ public class LayoutEngine
     /// slots split that 10% into two 5% strips so the window stays centred along its edge.
     /// </remarks>
     public IReadOnlyDictionary<string, Rect> CalculateClassicPeekGridSlotRects(Rect workArea)
+        => CalculateClassicPeekGridSlotRects(workArea, GetPresetRatio(WindowSizePreset.Small));
+
+    public IReadOnlyDictionary<string, Rect> CalculateClassicPeekGridSlotRects(Rect workArea, double ratio)
     {
-        int spanW = (int)Math.Round(workArea.Width * ClassicPeekGridWidthRatio);
-        int spanH = (int)Math.Round(workArea.Height * ClassicPeekGridHeightRatio);
+        int spanW = (int)Math.Round(workArea.Width * ratio);
+        int spanH = (int)Math.Round(workArea.Height * ratio);
 
         spanW = Math.Clamp(spanW, 1, workArea.Width);
         spanH = Math.Clamp(spanH, 1, workArea.Height);

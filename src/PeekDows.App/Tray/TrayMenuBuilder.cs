@@ -79,6 +79,25 @@ public class TrayMenuBuilder
 
         menu.Items.Add(pauseForMenu);
 
+        var windowSizeMenu = NewItem("Window size", "window-size");
+
+        var smallPresetItem = new ToolStripMenuItem("Small — 90%");
+        smallPresetItem.Checked = _controller.CurrentWindowSizePreset == WindowSizePreset.Small;
+        smallPresetItem.Click += (s, e) => _controller.SetWindowSizePreset(WindowSizePreset.Small);
+        windowSizeMenu.DropDownItems.Add(smallPresetItem);
+
+        var mediumPresetItem = new ToolStripMenuItem("Medium — 95%");
+        mediumPresetItem.Checked = _controller.CurrentWindowSizePreset == WindowSizePreset.Medium;
+        mediumPresetItem.Click += (s, e) => _controller.SetWindowSizePreset(WindowSizePreset.Medium);
+        windowSizeMenu.DropDownItems.Add(mediumPresetItem);
+
+        var largePresetItem = new ToolStripMenuItem("Large — 98%");
+        largePresetItem.Checked = _controller.CurrentWindowSizePreset == WindowSizePreset.Large;
+        largePresetItem.Click += (s, e) => _controller.SetWindowSizePreset(WindowSizePreset.Large);
+        windowSizeMenu.DropDownItems.Add(largePresetItem);
+
+        menu.Items.Add(windowSizeMenu);
+
         menu.Items.Add(new ToolStripSeparator());
 
         var autoArrangeItem = NewItem("Enable Auto Arrange", "auto-arrange");
@@ -120,7 +139,7 @@ public class TrayMenuBuilder
         exitItem.Click += (s, e) => _controller.Exit();
         menu.Items.Add(exitItem);
 
-        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, repositionMaximizedItem, startWithWindowsItem, directionalFocusItem);
+        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, repositionMaximizedItem, startWithWindowsItem, directionalFocusItem, smallPresetItem, mediumPresetItem, largePresetItem);
 
         return menu;
     }
