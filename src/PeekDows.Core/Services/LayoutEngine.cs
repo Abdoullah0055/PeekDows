@@ -80,20 +80,22 @@ public class LayoutEngine
     public const int ClassicPeekGridMaxSlots = 8;
 
     /// <summary>
-    /// Computes the ClassicPeekGrid (90% overlap) slot rects for a monitor work area,
+    /// Computes the ClassicPeekGrid slot rects for a monitor work area using the
+    /// <see cref="WindowSizePreset"/> ratio (default <see cref="WindowSizePreset.Small"/>),
     /// using exactly the same math as <see cref="CalculateClassicPeekGridPlacements"/> so a
     /// window physically sitting in one of these rects can be recognised as belonging to
     /// that slot without being re-arranged.
     /// </summary>
     /// <remarks>
-    /// Every slot is the same size: ~90% of the work-area width and height. Only the anchor
+    /// Every slot is the same size: ratio × work-area width and height. Only the anchor
     /// point changes. Slot id mapping:
     /// <list type="bullet">
     /// <item>A = TopLeft,    B = BottomRight, C = TopRight,    D = BottomLeft (corner slots)</item>
     /// <item>E = TopCenter,  F = BottomCenter, G = CenterRight, H = CenterLeft (edge-centred slots)</item>
     /// </list>
-    /// Corner slots leave a single 10% strip exposed on the opposite edges; edge-centred
-    /// slots split that 10% into two 5% strips so the window stays centred along its edge.
+    /// Corner slots leave a single (1 − ratio) strip exposed on the opposite edges;
+    /// edge-centred slots split that strip into two equal halves so the window stays
+    /// centred along its edge.
     /// </remarks>
     public IReadOnlyDictionary<string, Rect> CalculateClassicPeekGridSlotRects(Rect workArea)
         => CalculateClassicPeekGridSlotRects(workArea, GetPresetRatio(WindowSizePreset.Small));
@@ -110,7 +112,7 @@ public class LayoutEngine
         int rightX = workArea.Right - spanW;
         int topY = workArea.Top;
         int bottomY = workArea.Bottom - spanH;
-        // Edge-centred slots split the leftover 10% (work area − span) evenly into two 5%
+        // Edge-centred slots split the leftover (work area − span) evenly into two equal
         // margins, so the window is flush with one edge but centred along it.
         int centerX = workArea.Left + ((workArea.Width - spanW) / 2);
         int centerY = workArea.Top + ((workArea.Height - spanH) / 2);
