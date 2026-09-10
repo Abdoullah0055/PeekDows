@@ -442,6 +442,116 @@ public class MultiMonitorLayoutServiceTests
         Assert.DoesNotContain(placements, p => p.Hwnd == (IntPtr)2);
     }
 
+    [Fact]
+    public void LoneWindow_WithoutPolicy_UsesEngineSlotA()
+    {
+        // Default ctor (no policy) preserves the pre-maximize behavior: the engine places
+        // the lone window into slot A.
+        var workArea = new Rect(0, 0, 1280, 720);
+        var monitor = new MonitorInfo { Handle = (IntPtr)1, WorkArea = workArea, FullArea = workArea, IsPrimary = true };
+        var resolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo> { [(IntPtr)1] = monitor }, monitor);
+        var service = new MultiMonitorLayoutService(resolver, new LayoutEngine());
+
+        var placements = service.CalculatePlacementsByMonitor([MakeWindow(1)], new AppSettings());
+
+        Assert.Single(placements);
+        Assert.Equal("A", placements[0].SlotId);
+        Assert.Equal(PlacementKind.Reposition, placements[0].Kind);
+    }
+
+    [Fact]
+    public void LoneWindow_WithPolicy_ReturnsMaximizePlacement()
+    {
+        var workArea = new Rect(0, 0, 1280, 720);
+        var monitor = new MonitorInfo { Handle = (IntPtr)1, WorkArea = workArea, FullArea = workArea, IsPrimary = true };
+        var resolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo> { [(IntPtr)1] = monitor }, monitor);
+        var policy = new LoneWindowMaximizePolicy();
+        var service = new MultiMonitorLayoutService(resolver, new LayoutEngine(), policy);
+
+        var placements = service.CalculatePlacementsByMonitor([MakeWindow(1)], new AppSettings());
+
+        Assert.Single(placements);
+        var p = placements[0];
+        Assert.Equal(PlacementKind.Maximize, p.Kind);
+        Assert.Equal("Maximize", p.SlotId);
+        Assert.Equal(workArea, p.TargetRect);
+        Assert.Equal((IntPtr)1, p.Hwnd);
+    }
+
+    [Fact]
+    public void LoneWindow_UserRestored_IsLeftAlone()
+    {
+        var workArea = new Rect(0, 0, 1280, 720);
+        var monitor = new MonitorInfo { Handle = (IntPtr)1, WorkArea = workArea, FullArea = workArea, IsPrimary = true };
+        var resolver = new FakeMonitorResolver(new Dictionary<IntPtr, MonitorInfo> { [(IntPtr)1] = monitor }, monitor);
+        var policy = new LoneWindowMaximizePolicy();
+        var service = new MultiMonitorLayoutService(resolver, new LayoutEngine(), policy);
+
+        // Arrange once with count 1, then simulate the user restoring the PeekDows-maximized
+        // window. The next arrange with the SAME count must produce no placement at all.
+        service.CalculatePlacementsByMonitor([MakeWindow(1)], new AppSettings());
+        policy.NotifyUserRestored((IntPtr)1, workArea);
+
+        var placements = service.CalculatePlacementsByMonitor([MakeWindow(1)], new AppSettings());
+
+        Assert.Empty(placements);
+    }
+
+    [Fact]
+    public void OneOnLaptop_ThreeOnExternal_MaximizesLaptopOnly()
+    {
+        var laptopWorkArea = new Rect(0, 0, 1280, 720);
+        var externalWorkArea = new Rect(1280, 0, 1920, 1080);
+        var laptop = new MonitorInfo { Handle = (IntPtr)1, WorkArea = laptopWorkArea, FullArea = laptopWorkArea, IsPrimary = true };
+        var external = new MonitorInfo { Handle = (IntPtr)2, WorkArea = externalWorkArea, FullArea = externalWorkArea, IsPrimary = false };
+
+        var resolver = new FakeMonitorResolver(
+            new Dictionary<IntPtr, MonitorInfo>
+            {
+                [(IntPtr)1] = laptop,
+                [(IntPtr)2] = external,
+                [(IntPtr)3] = external,
+                [(IntPtr)4] = external
+            },
+            laptop);
+        var service = new MultiMonitorLayoutService(resolver, new LayoutEngine(), new LoneWindowMaximizePolicy());
+
+        var windows = new List<ManagedWindow> { MakeWindow(1), MakeWindow(2), MakeWindow(3), MakeWindow(4) };
+
+        var placements = service.CalculatePlacementsByMonitor(windows, new AppSettings());
+
+        Assert.Equal(4, placements.Count);
+
+        var laptopPlacement = placements.Single(p => p.Hwnd == (IntPtr)1);
+        Assert.Equal(PlacementKind.Maximize, laptopPlacement.Kind);
+        Assert.Equal(laptopWorkArea, laptopPlacement.TargetRect);
+
+        var externalPlacements = placements.Where(p => p.Hwnd != (IntPtr)1).ToList();
+        Assert.All(externalPlacements, p => Assert.Equal(PlacementKind.Reposition, p.Kind));
+        Assert.Equal(new[] { "A", "B", "C" }, externalPlacements.Select(p => p.SlotId).OrderBy(s => s).ToArray());
+    }
+
+    [Fact]
+    public void MaximizedWindow_InMultiWindowGroup_MarkedRestoreAndReposition()
+    {
+        var workArea = new Rect(0, 0, 1280, 720);
+        var monitor = new MonitorInfo { Handle = (IntPtr)1, WorkArea = workArea, FullArea = workArea, IsPrimary = true };
+        var resolver = new FakeMonitorResolver(
+            new Dictionary<IntPtr, MonitorInfo> { [(IntPtr)1] = monitor, [(IntPtr)2] = monitor },
+            monitor);
+        var service = new MultiMonitorLayoutService(resolver, new LayoutEngine(), new LoneWindowMaximizePolicy());
+
+        var maximized = MakeWindow(1);
+        maximized.IsMaximized = true;
+        var windows = new List<ManagedWindow> { maximized, MakeWindow(2) };
+
+        var placements = service.CalculatePlacementsByMonitor(windows, new AppSettings());
+
+        Assert.Equal(2, placements.Count);
+        Assert.Equal(PlacementKind.RestoreAndReposition, placements.Single(p => p.Hwnd == (IntPtr)1).Kind);
+        Assert.Equal(PlacementKind.Reposition, placements.Single(p => p.Hwnd == (IntPtr)2).Kind);
+    }
+
     private sealed class ThrowingFakeMonitorResolver : IMonitorResolver
     {
         private readonly Dictionary<IntPtr, MonitorInfo> _map;

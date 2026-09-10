@@ -76,6 +76,7 @@ public static class NativeMethods
     public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
     public const int SW_RESTORE = 9;
+    public const int SW_MAXIMIZE = 3;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -105,6 +106,12 @@ public static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(System.Drawing.Point pt);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetParent(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

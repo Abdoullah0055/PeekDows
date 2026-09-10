@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Windows.Forms;
 using PeekDows.App.AutoArrange;
+using PeekDows.App.Animation;
 using PeekDows.App.Focus;
 using PeekDows.App.Hotkeys;
 using PeekDows.App.Startup;
@@ -35,6 +36,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     private readonly IVirtualDesktopService _virtualDesktopService;
     private readonly WindowActivationService _windowActivationService;
     private readonly UnstableWindowTracker _unstableWindowTracker;
+    private readonly WindowAnimationService _animationService;
+    private readonly LoneWindowMaximizePolicy _loneWindowMaximizePolicy;
     private int _arrangeInProgress;
 
     private AppSettings _settings;
@@ -60,6 +63,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     public event Action<bool>? AutoArrangeChanged;
     public event Action<bool>? StartWithWindowsChanged;
     public event Action<bool>? DirectionalFocusChanged;
+    public event Action<bool>? AnimateWindowTransitionsChanged;
     public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
     public event Action<WindowSizePreset>? WindowSizePresetChanged;
 
@@ -77,7 +81,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _logger.Info($"Settings: Enabled={_settings.Enabled}");
         _logger.Info($"Settings: AutoArrange={_settings.AutoArrange}");
         _logger.Info($"Settings: AllowRepositionMaximizedWindows={_settings.AllowRepositionMaximizedWindows}");
-        _logger.Info($"Settings: SingleWindowMode={_settings.SingleWindowMode}");
+        _logger.Info($"Settings: AnimateWindowTransitions={_settings.AnimateWindowTransitions}");
         _logger.Info($"Settings: IgnoredProcesses.Count={_settings.IgnoredProcesses.Count}");
         _logger.Info($"Settings: IgnoredClasses.Count={_settings.IgnoredClasses.Count}");
 
@@ -86,11 +90,14 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         _classifier = new WindowClassifier(_settings, hwnd => _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd));
         _monitorService = new MonitorService(_logger);
         _layoutEngine = new LayoutEngine();
-        _multiMonitorLayoutService = new MultiMonitorLayoutService(_monitorService, _layoutEngine, _logger);
+        _loneWindowMaximizePolicy = new LoneWindowMaximizePolicy(_logger);
+        _multiMonitorLayoutService = new MultiMonitorLayoutService(_monitorService, _layoutEngine, _loneWindowMaximizePolicy, _logger);
         // One shared tracker: placements, activation and the ArrangeNow circuit breaker all
         // consult it so a window that hung/blocked once is skipped everywhere until it settles.
         _unstableWindowTracker = new UnstableWindowTracker(_logger);
-        _placementService = new WindowPlacementService(_logger, _unstableWindowTracker);
+        _animationService = new WindowAnimationService(new Win32AnimationApi(), _unstableWindowTracker, _logger);
+        _placementService = new WindowPlacementService(
+            _logger, _unstableWindowTracker, _animationService, () => _settings.AnimateWindowTransitions);
 
         _pauseState = new PauseStateService();
         _pauseState.StateChanged += OnPauseStateChanged;
@@ -158,7 +165,8 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             _directionalFocusSnapshotService,
             GetDirectionalFocusCandidateWindows,
             () => _settings.DirectionalFocusThresholdPx,
-            _logger);
+            _logger,
+            _animationService);
 
         if (_settings.DirectionalFocusEnabled)
         {
@@ -270,6 +278,12 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
     private void OnPauseStateChanged(RuntimeState state)
     {
+        if (state == RuntimeState.Paused)
+        {
+            // Cancellation rule 4 (spec): pausing lands every in-flight tween on its target
+            // instantly so nothing keeps moving while paused.
+            _animationService.SnapAllToTarget();
+        }
         StateChanged?.Invoke(state);
     }
 
@@ -331,6 +345,24 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
         DirectionalFocusChanged?.Invoke(_settings.DirectionalFocusEnabled);
     }
 
+    public bool IsAnimateWindowTransitionsEnabled => _settings.AnimateWindowTransitions;
+
+    public void ToggleAnimateWindowTransitions()
+    {
+        _settings.AnimateWindowTransitions = !_settings.AnimateWindowTransitions;
+        _settingsService.Save(_settings);
+        _logger.Info($"AnimateWindowTransitions toggled to {_settings.AnimateWindowTransitions}");
+
+        if (!_settings.AnimateWindowTransitions)
+        {
+            // Turning animation off mid-flight: land every tween instantly rather than
+            // letting them keep running with the engine that is being switched off.
+            _animationService.SnapAllToTarget();
+        }
+
+        AnimateWindowTransitionsChanged?.Invoke(_settings.AnimateWindowTransitions);
+    }
+
     public void ToggleAllowRepositionMaximizedWindows()
     {
         _settings.AllowRepositionMaximizedWindows = !_settings.AllowRepositionMaximizedWindows;
@@ -386,10 +418,12 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     public void Exit()
     {
         _logger.Info("PeekDows exiting");
+        try { _animationService.SnapAllToTarget(); } catch { }
         _pauseCheckTimer.Stop();
         _pauseCheckTimer.Dispose();
         _autoArrangeService.Dispose();
         _directionalFocusService.Dispose();
+        _animationService.Dispose();
         _hotkeyService.Dispose();
         _trayController.Dispose();
         Application.Exit();
@@ -524,6 +558,24 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 _logger.Info($"Eligible window: hwnd={w.Hwnd}, title={w.Title}, process={w.ProcessName}, class={w.ClassName}, rect={w.CurrentRect}, foreground={w.IsForeground}");
             }
 
+            // LoneWindowMaximizePolicy bookkeeping: prune hwnds that no longer exist, then
+            // detect a user restoring a window PeekDows had maximized (respect-user rule).
+            // B3 fix: prune against ALL known hwnds (not just eligible) so a PeekDows-
+            // maximized window that became ineligible (cloaked/empty title) doesn't stay
+            // tracked forever. Also pass handle-aware restore when possible.
+            var allKnownHwnds = _discoveryService.GetKnownWindows().Select(w => w.Hwnd).ToList();
+            var pruneSet = allKnownHwnds.Count > 0 ? allKnownHwnds : eligibleWindows.Select(w => w.Hwnd).ToList();
+            _loneWindowMaximizePolicy.PruneMaximizedSet(pruneSet);
+            foreach (var w in eligibleWindows)
+            {
+                if (_loneWindowMaximizePolicy.WasMaximizedByPeekDows(w.Hwnd) && !w.IsMaximized)
+                {
+                    var restoredMonitor = _monitorService.GetMonitorForWindow(w.Hwnd);
+                    // Prefer handle-aware call so policy keys by stable handle.
+                    _loneWindowMaximizePolicy.NotifyUserRestored(w.Hwnd, restoredMonitor.Handle, restoredMonitor.WorkArea);
+                }
+            }
+
             var foregroundWindow = eligibleWindows.FirstOrDefault(w => w.IsForeground);
             Rect primaryWorkArea;
 
@@ -552,7 +604,12 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
             foreach (var w in eligibleWindows)
             {
-                if (w.IsMaximized && !_settings.AllowRepositionMaximizedWindows)
+                // A window PeekDows itself maximized must stay arrangeable even when
+                // AllowRepositionMaximizedWindows is false — otherwise a lone window that
+                // was auto-maximized could never be un-maximized when a second window
+                // appears (spec §1, PeekDows-maximized tracking).
+                bool maximizedByPeekDows = _loneWindowMaximizePolicy.WasMaximizedByPeekDows(w.Hwnd);
+                if (w.IsMaximized && !_settings.AllowRepositionMaximizedWindows && !maximizedByPeekDows)
                 {
                     skippedMaximized.Add(w.Hwnd);
                     _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, title={w.Title}, isMaximized=true, allowRepositionMaximized=false, decision=skip maximized");
@@ -604,6 +661,19 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 
             var result = _placementService.ApplyPlacements(placements);
 
+            foreach (var p in result.SucceededHwnds)
+            {
+                var kind = placements.First(pl => pl.Hwnd == p).Kind;
+                if (kind == PlacementKind.Maximize)
+                {
+                    _loneWindowMaximizePolicy.NotifyMaximizedByPeekDows(p);
+                }
+                else if (kind == PlacementKind.RestoreAndReposition)
+                {
+                    _loneWindowMaximizePolicy.NotifyRestoredByPeekDows(p);
+                }
+            }
+
             var succeededPlacements = placements.Where(p => result.SucceededHwnds.Contains(p.Hwnd)).ToList();
             _directionalFocusRegistry.UpdateFromPlacements(succeededPlacements, _monitorService);
             _logger.Info($"DirectionalFocusRegistry updated from arrange placements (succeeded={succeededPlacements.Count} of {placements.Count})");
@@ -644,10 +714,12 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
     {
         if (disposing)
         {
+            try { _animationService.SnapAllToTarget(); } catch { }
             _pauseCheckTimer.Stop();
             _pauseCheckTimer.Dispose();
             _autoArrangeService.Dispose();
             _directionalFocusService.Dispose();
+            _animationService.Dispose();
             _hotkeyService.Dispose();
             _trayController.Dispose();
         }

@@ -496,4 +496,72 @@ public class DirectionalFocusServiceRebuildTests
 
         Assert.Null(hwnd);
     }
+
+    // --- IsAnimating exemption: a window mid-animation must be accepted even though its
+    // current rect is a transient interpolated rect that will not match the slot rect. ---
+
+    private sealed class FakeWindowAnimator : IWindowAnimator
+    {
+        public HashSet<IntPtr> Animating = new();
+        public bool Begin(IntPtr hwnd, Rect targetRect, PlacementKind kind, bool bringToFront = false) => true;
+        public bool IsAnimating(IntPtr hwnd) => Animating.Contains(hwnd);
+        public void SnapAllToTarget() { }
+    }
+
+    private static DirectionalFocusService CreateServiceWithAnimator(
+        DirectionalFocusRegistry registry,
+        DirectionalFocusLayoutSnapshotService snapshot,
+        IWindowAnimator animator,
+        Func<IReadOnlyList<IntPtr>> candidateSource)
+    {
+        return new DirectionalFocusService(
+            new DirectionalFocusGestureDetector(),
+            registry,
+            new FakeMonitorResolver(WorkArea),
+            new WindowActivationService(new AlwaysFailActivationApi()),
+            new AlwaysTrueVirtualDesktopService(),
+            snapshot,
+            candidateSource,
+            () => 80,
+            logger: null,
+            animator);
+    }
+
+    [Fact]
+    public void RegistryHit_Accepted_WhileWindowIsAnimating()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        registry.SetSlotsForMonitor(WorkArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)140
+        });
+
+        // Window 140 is mid-tween: its real rect does NOT match slot A. Without the
+        // exemption the strict rect validation would reject the registry hit.
+        var animator = new FakeWindowAnimator { Animating = { (IntPtr)140 } };
+        var snapshot = CreateSnapshot(_ => new Rect(500, 400, 800, 600));
+
+        var service = CreateServiceWithAnimator(registry, snapshot, animator, () => [(IntPtr)140]);
+
+        var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft);
+
+        Assert.Equal((IntPtr)140, hwnd);
+    }
+
+    [Fact]
+    public void RegistryHit_Rejected_WhenNotAnimatingAndRectMismatch()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        registry.SetSlotsForMonitor(WorkArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        {
+            [DirectionalFocusSlot.TopLeft] = (IntPtr)141
+        });
+
+        var animator = new FakeWindowAnimator();
+        var snapshot = CreateSnapshot(_ => new Rect(500, 400, 800, 600));
+
+        var service = CreateServiceWithAnimator(registry, snapshot, animator, () => [(IntPtr)141]);
+
+        Assert.Null(service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft));
+    }
 }

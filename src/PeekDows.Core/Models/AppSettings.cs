@@ -9,7 +9,7 @@ public sealed class AppSettings
     /// to apply one-time migrations. Bump when a breaking default change needs to be pushed
     /// to existing settings.json files.
     /// </summary>
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
     public bool Enabled { get; set; } = true;
     public bool AutoArrange { get; set; } = false;
     public bool ArrangeOnStartup { get; set; } = false;
@@ -17,9 +17,11 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; } = false;
     public bool ShowTrayNotifications { get; set; } = false;
     
-    public string SingleWindowMode { get; set; } = "FullWorkArea";
+    // B7: OverflowBehavior was never implemented — kept for compat but deprecated.
+    // New code must not read it; migration warns if set to non-default.
+    [Obsolete("OverflowBehavior is deprecated and has no effect. It will be removed in a future version.")]
     public string OverflowBehavior { get; set; } = "Ignore";
-    
+
     public int ManualMoveCooldownMs { get; set; } = 5000;
     public int NewWindowStabilizationDelayMs { get; set; } = 700;
     public int WindowDetectionIntervalMs { get; set; } = 1000;
@@ -37,6 +39,13 @@ public sealed class AppSettings
     /// always arrangeable.
     /// </summary>
     public bool AllowRepositionMaximizedWindows { get; set; } = false;
+
+    /// <summary>
+    /// When true (default), placements are animated (150ms ease-out tween; maximize uses
+    /// tween-then-snap). When false, placements apply instantly — the exact pre-animation
+    /// behavior. Toggleable from the tray menu.
+    /// </summary>
+    public bool AnimateWindowTransitions { get; set; } = true;
 
     public WindowSizePreset WindowSizePreset { get; set; } = WindowSizePreset.Small;
 

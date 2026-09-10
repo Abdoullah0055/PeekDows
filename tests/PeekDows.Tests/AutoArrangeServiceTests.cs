@@ -318,6 +318,7 @@ public class AutoArrangeServiceTests : IDisposable
         public bool IsAutoArrangeRunning => false;
         public bool IsStartWithWindowsEnabled => false;
         public bool IsDirectionalFocusEnabled => false;
+        public bool IsAnimateWindowTransitionsEnabled => true;
         public bool AllowRepositionMaximizedWindows => CurrentSettingsValue.AllowRepositionMaximizedWindows;
         public WindowSizePreset CurrentWindowSizePreset => WindowSizePreset.Small;
         public bool IsPaused => State == RuntimeState.Paused;
@@ -329,6 +330,7 @@ public class AutoArrangeServiceTests : IDisposable
         public event Action<bool>? AutoArrangeChanged;
         public event Action<bool>? StartWithWindowsChanged;
         public event Action<bool>? DirectionalFocusChanged;
+        public event Action<bool>? AnimateWindowTransitionsChanged;
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
 
@@ -340,6 +342,7 @@ public class AutoArrangeServiceTests : IDisposable
         public void ToggleAutoArrange() { }
         public void ToggleStartWithWindows() { }
         public void ToggleDirectionalFocus() { }
+        public void ToggleAnimateWindowTransitions() { }
         public void ToggleAllowRepositionMaximizedWindows() { }
         public void SetWindowSizePreset(WindowSizePreset preset) { }
         public void OpenSettings() { }

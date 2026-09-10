@@ -35,6 +35,7 @@ public sealed class DirectionalFocusService : IDisposable
     private readonly FileLogger? _logger;
     private readonly DirectionalFocusInputGate _inputGate;
     private readonly Func<DateTime> _nowProvider;
+    private readonly IWindowAnimator? _animator;
 
     private readonly System.Windows.Forms.Timer _timer;
 
@@ -56,9 +57,10 @@ public sealed class DirectionalFocusService : IDisposable
         DirectionalFocusLayoutSnapshotService snapshotService,
         Func<IReadOnlyList<IntPtr>> candidateWindowSource,
         Func<int> getThresholdPx,
-        FileLogger? logger = null)
+        FileLogger? logger = null,
+        IWindowAnimator? animator = null)
         : this(gestureDetector, registry, monitorResolver, activationService, virtualDesktopService,
-               snapshotService, candidateWindowSource, getThresholdPx, new DirectionalFocusInputGate(), () => DateTime.Now, logger)
+               snapshotService, candidateWindowSource, getThresholdPx, new DirectionalFocusInputGate(), () => DateTime.Now, logger, animator)
     {
     }
 
@@ -72,9 +74,10 @@ public sealed class DirectionalFocusService : IDisposable
         Func<IReadOnlyList<IntPtr>> candidateWindowSource,
         Func<int> getThresholdPx,
         DirectionalFocusInputGate inputGate,
-        FileLogger? logger = null)
+        FileLogger? logger = null,
+        IWindowAnimator? animator = null)
         : this(gestureDetector, registry, monitorResolver, activationService, virtualDesktopService,
-               snapshotService, candidateWindowSource, getThresholdPx, inputGate, () => DateTime.Now, logger)
+               snapshotService, candidateWindowSource, getThresholdPx, inputGate, () => DateTime.Now, logger, animator)
     {
     }
 
@@ -92,7 +95,8 @@ public sealed class DirectionalFocusService : IDisposable
         Func<int> getThresholdPx,
         DirectionalFocusInputGate inputGate,
         Func<DateTime> nowProvider,
-        FileLogger? logger = null)
+        FileLogger? logger = null,
+        IWindowAnimator? animator = null)
     {
         _gestureDetector = gestureDetector;
         _registry = registry;
@@ -105,6 +109,7 @@ public sealed class DirectionalFocusService : IDisposable
         _inputGate = inputGate;
         _nowProvider = nowProvider;
         _logger = logger;
+        _animator = animator;
 
         _timer = new System.Windows.Forms.Timer { Interval = TickIntervalMs };
         _timer.Tick += OnTimerTick;
@@ -261,7 +266,7 @@ public sealed class DirectionalFocusService : IDisposable
 
         if (hwnd != null && hwnd != IntPtr.Zero)
         {
-            if (_snapshotService.IsWindowStillInSlot(hwnd.Value, mouseWorkArea, slot))
+            if (IsWindowValidInSlot(hwnd.Value, mouseWorkArea, slot))
             {
                 _logger?.Info($"Directional focus registry hit: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}");
             }
@@ -285,7 +290,7 @@ public sealed class DirectionalFocusService : IDisposable
                 // window that has since drifted again, so re-check the rect.
                 if (hwnd != null && hwnd != IntPtr.Zero)
                 {
-                    if (_snapshotService.IsWindowStillInSlot(hwnd.Value, mouseWorkArea, slot))
+                    if (IsWindowValidInSlot(hwnd.Value, mouseWorkArea, slot))
                     {
                         _logger?.Info($"Directional focus rebuild result accepted: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}");
                     }
@@ -326,6 +331,21 @@ public sealed class DirectionalFocusService : IDisposable
     }
 
     /// <summary>
+    /// Slot validation with the animation exemption: a window mid-tween has a transient
+    /// interpolated rect that will not match the slot rect yet, so the strict check must
+    /// not reject it (spec §2, IsAnimating query).
+    /// </summary>
+    private bool IsWindowValidInSlot(IntPtr hwnd, Rect monitorWorkArea, DirectionalFocusSlot slot)
+    {
+        if (_animator is not null && _animator.IsAnimating(hwnd))
+        {
+            _logger?.Info($"Directional focus slot validation bypassed (window animating): hwnd={hwnd}, slot={slot}");
+            return true;
+        }
+        return _snapshotService.IsWindowStillInSlot(hwnd, monitorWorkArea, slot);
+    }
+
+    /// <summary>
     /// Fallback used when the exact requested slot is empty (e.g. only 6 windows, so the
     /// edge-centred slots are unpopulated). Picks the available slot whose screen position is
     /// most aligned with the gesture direction, so a "move right" still focuses a window on
@@ -349,7 +369,7 @@ public sealed class DirectionalFocusService : IDisposable
 
             // Skip the candidate if its window is no longer in its slot rect (same staleness
             // guard as the primary path) — a drifted window is not a reliable target.
-            if (!_snapshotService.IsWindowStillInSlot(candidateHwnd, mouseWorkArea, candidateSlot))
+            if (!IsWindowValidInSlot(candidateHwnd, mouseWorkArea, candidateSlot))
                 continue;
 
             var candidateDir = SlotDirection(candidateSlot);
@@ -542,15 +562,16 @@ public sealed class DirectionalFocusService : IDisposable
         }
     }
 
+    // C7 fix: deduplicated P/Invoke — use MonitorNativeMethods as single source of truth.
     private Rect MonitorFromPointNative(int x, int y)
     {
-        var point = new POINT { X = x, Y = y };
-        var hMonitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+        var point = new MonitorNativeMethods.POINT { X = x, Y = y };
+        var hMonitor = MonitorNativeMethods.MonitorFromPoint(point, MonitorNativeMethods.MONITOR_DEFAULTTONEAREST);
 
-        var mi = new MONITORINFOEX();
+        var mi = new MonitorNativeMethods.MONITORINFOEX();
         mi.cbSize = Marshal.SizeOf(mi);
 
-        if (GetMonitorInfo(hMonitor, ref mi))
+        if (MonitorNativeMethods.GetMonitorInfo(hMonitor, ref mi))
         {
             return new Rect(
                 mi.rcWork.left,
@@ -564,46 +585,11 @@ public sealed class DirectionalFocusService : IDisposable
         return primary.WorkArea;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct MONITORINFOEX
-    {
-        public int cbSize;
-        public RECT rcMonitor;
-        public RECT rcWork;
-        public uint dwFlags;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string szDevice;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RECT
-    {
-        public int left;
-        public int top;
-        public int right;
-        public int bottom;
-    }
-
-    private const uint MONITOR_DEFAULTTONEAREST = 2;
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
-
-    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true, CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
-
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        _timer.Tick -= OnTimerTick;
         _timer.Stop();
         _timer.Dispose();
     }

@@ -120,11 +120,13 @@ public sealed class Win32ActivationApi : IWindowActivationApi
     }
 }
 
-public sealed class WindowActivationService
+public sealed class WindowActivationService : IDisposable
 {
     private readonly IWindowActivationApi _api;
     private readonly FileLogger? _logger;
     private readonly UnstableWindowTracker? _tracker;
+    private readonly List<System.Windows.Forms.Timer> _pendingRecheckTimers = new();
+    private bool _disposed;
 
     /// <summary>
     /// Upper bound on the responsiveness probe. A responsive window answers WM_NULL in well
@@ -149,8 +151,8 @@ public sealed class WindowActivationService
     /// </summary>
     private const int HardFailureCooldownMs = 3000;
 
-    /// <summary>Delay before the deferred, non-blocking foreground recheck (Fix 3).</summary>
-    private const int ForegroundRecheckDelayMs = 100;
+    /// <summary>Delay before the deferred, non-blocking foreground recheck (C4: was 100ms too short on slow machines -> 200ms).</summary>
+    private const int ForegroundRecheckDelayMs = 200;
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, DateTime> _failedCooldownUntil = new();
     private readonly Func<DateTime> _nowProvider;
@@ -318,42 +320,46 @@ public sealed class WindowActivationService
     /// </summary>
     private void ScheduleForegroundRecheck(IntPtr hwnd)
     {
-        // Use a one-shot WinForms timer so the recheck runs on the UI thread (required for
-        // foreground APIs) without reentrancy hazards. Fire-and-forget by design.
+        if (_disposed) return;
         var timer = new System.Windows.Forms.Timer { Interval = ForegroundRecheckDelayMs };
-        timer.Tick += (_, _) =>
+        EventHandler? handler = null;
+        handler = (_, _) =>
         {
+            timer.Tick -= handler!;
             timer.Stop();
             timer.Dispose();
+            lock (_pendingRecheckTimers) _pendingRecheckTimers.Remove(timer);
             try
             {
-                if (!_api.IsWindow(hwnd)) return;
-
+                if (_disposed || !_api.IsWindow(hwnd)) return;
                 _api.TryUnlockForegroundWithAltPulse();
                 _api.SetForegroundWindow(hwnd);
                 uint flags = NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_ASYNCWINDOWPOS;
                 _api.SetWindowPos(hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0, flags);
-
                 bool ok = _api.GetForegroundWindow() == hwnd;
                 _logger?.Info($"Activation delayed recheck: success={ok}, foregroundHwnd={_api.GetForegroundWindow()}, expected={hwnd}");
-                if (ok)
-                {
-                    // It finally stuck — clear the short cooldown so the window is immediately
-                    // available again.
-                    _failedCooldownUntil.TryRemove(hwnd, out _);
-                }
-                else
-                {
-                    // Foreground genuinely denied — not a dangerous signal, so still no tracker.
-                    _logger?.Info($"Activation foreground denied: taskbar flash likely, hwnd={hwnd}");
-                }
+                if (ok) _failedCooldownUntil.TryRemove(hwnd, out _);
+                else _logger?.Info($"Activation foreground denied: taskbar flash likely, hwnd={hwnd}");
             }
-            catch (Exception ex)
-            {
-                _logger?.Warn($"Activation deferred recheck failed: hwnd={hwnd}, {ex.Message}");
-            }
+            catch (Exception ex) { _logger?.Warn($"Activation deferred recheck failed: hwnd={hwnd}, {ex.Message}"); }
         };
+        timer.Tick += handler;
+        lock (_pendingRecheckTimers) _pendingRecheckTimers.Add(timer);
         timer.Start();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        lock (_pendingRecheckTimers)
+        {
+            foreach (var t in _pendingRecheckTimers)
+            {
+                try { t.Stop(); t.Dispose(); } catch { }
+            }
+            _pendingRecheckTimers.Clear();
+        }
     }
 
     private string GetWindowTitle(IntPtr hwnd)

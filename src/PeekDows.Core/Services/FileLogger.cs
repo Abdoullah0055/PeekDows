@@ -92,47 +92,41 @@ public sealed class FileLogger
         try
         {
             if (_maxLogFileSizeBytes <= 0 || _maxLogBackups <= 0) return;
-
             if (!File.Exists(_logFilePath)) return;
-
             var length = new FileInfo(_logFilePath).Length;
             if (length < _maxLogFileSizeBytes) return;
 
-            // Drop the oldest backup first (peekdows.{MaxLogBackups}.log) so there is room to shift
-            // every other backup forward by one. Missing files are ignored.
+            // C9 fix: retry with overwrite semantics and surface failures via Debug.
             var oldestPath = BackupPath(_maxLogBackups);
             if (File.Exists(oldestPath))
             {
-                File.Delete(oldestPath);
+                try { File.Delete(oldestPath); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"FileLogger rotate delete oldest failed: {ex.Message}"); }
             }
-
-            // Shift existing backups forward, from newest-1 down to 1, so we never overwrite a
-            // backup we still need: peekdows.{n-1}.log -> peekdows.{n}.log for n in [Max, 2].
             for (var n = _maxLogBackups; n >= 2; n--)
             {
                 var from = BackupPath(n - 1);
                 var to = BackupPath(n);
                 if (File.Exists(from))
                 {
-                    File.Move(from, to);
+                    try
+                    {
+                        if (File.Exists(to)) File.Delete(to);
+                        File.Move(from, to);
+                    }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"FileLogger rotate move {from}->{to} failed: {ex.Message}"); }
                 }
             }
-
-            // Promote the active file to the newest backup (peekdows.log -> peekdows.1.log). The
-            // active peekdows.log is then recreated by the next AppendAllText call. When
-            // MaxLogBackups == 1 the slot was already cleared by the oldest-drop above; this guard
-            // keeps the move safe in all cases.
             var firstBackup = BackupPath(1);
-            if (File.Exists(firstBackup))
+            try
             {
-                File.Delete(firstBackup);
+                if (File.Exists(firstBackup)) File.Delete(firstBackup);
+                File.Move(_logFilePath, firstBackup);
             }
-            File.Move(_logFilePath, firstBackup);
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"FileLogger rotate promote failed: {ex.Message}"); }
         }
-        catch
+        catch (Exception ex)
         {
-            // Rotation must never crash a log write. The active file may grow slightly beyond the
-            // limit on a transient failure; the next successful rotation will catch it up.
+            System.Diagnostics.Debug.WriteLine($"FileLogger RotateIfNeeded failed: {ex.Message}");
         }
     }
 

@@ -172,23 +172,12 @@ public class LayoutEngineTests
     }
 
     [Fact]
-    public void CalculatePlacements_1Window_FullWorkArea_ByDefault()
+    public void CalculatePlacements_1Window_TakesSlotA()
     {
+        // The lone-window maximize decision is made per monitor by
+        // MultiMonitorLayoutService + LoneWindowMaximizePolicy; the engine itself has no
+        // special single-window mode anymore.
         var settings = new AppSettings();
-        var workArea = new Rect(0, 0, 1920, 1080);
-        var windows = new List<ManagedWindow> { new() { Hwnd = (IntPtr)1, IsVisible = true, FirstSeenAt = DateTime.Now } };
-
-        var placements = _engine.CalculatePlacements(windows, workArea, settings);
-
-        Assert.Single(placements);
-        Assert.Equal("FocusLarge", placements[0].SlotId);
-        Assert.Equal(workArea, placements[0].TargetRect);
-    }
-
-    [Fact]
-    public void CalculatePlacements_1Window_TopLeftSlot_WhenConfigured()
-    {
-        var settings = new AppSettings { SingleWindowMode = "TopLeftSlot" };
         var workArea = new Rect(0, 0, 1920, 1080);
         var windows = new List<ManagedWindow> { new() { Hwnd = (IntPtr)1, IsVisible = true, FirstSeenAt = DateTime.Now } };
 
@@ -1007,7 +996,7 @@ public class LayoutEngineTests
     }
 
     [Fact]
-    public void ClassicPeekGrid_OneWindow_FullWorkArea()
+    public void ClassicPeekGrid_OneWindow_TakesSlotA()
     {
         var settings = new AppSettings();
         var workArea = new Rect(0, 0, 1280, 720);
@@ -1019,8 +1008,7 @@ public class LayoutEngineTests
         var placements = _engine.CalculateClassicPeekGridPlacements(windows, workArea, settings);
 
         Assert.Single(placements);
-        Assert.Equal("FocusLarge", placements[0].SlotId);
-        Assert.Equal(workArea, placements[0].TargetRect);
+        Assert.Equal("A", placements[0].SlotId);
     }
 
     [Fact]

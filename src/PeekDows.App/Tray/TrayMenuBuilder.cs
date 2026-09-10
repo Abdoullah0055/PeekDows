@@ -98,6 +98,11 @@ public class TrayMenuBuilder
 
         menu.Items.Add(windowSizeMenu);
 
+        var animateTransitionsItem = NewItem("Animate window transitions", "animate-transitions");
+        animateTransitionsItem.Checked = _controller.IsAnimateWindowTransitionsEnabled;
+        animateTransitionsItem.Click += (s, e) => _controller.ToggleAnimateWindowTransitions();
+        menu.Items.Add(animateTransitionsItem);
+
         menu.Items.Add(new ToolStripSeparator());
 
         var autoArrangeItem = NewItem("Enable Auto Arrange", "auto-arrange");
@@ -139,7 +144,7 @@ public class TrayMenuBuilder
         exitItem.Click += (s, e) => _controller.Exit();
         menu.Items.Add(exitItem);
 
-        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, repositionMaximizedItem, startWithWindowsItem, directionalFocusItem, smallPresetItem, mediumPresetItem, largePresetItem);
+        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, repositionMaximizedItem, startWithWindowsItem, directionalFocusItem, animateTransitionsItem, smallPresetItem, mediumPresetItem, largePresetItem);
 
         return menu;
     }

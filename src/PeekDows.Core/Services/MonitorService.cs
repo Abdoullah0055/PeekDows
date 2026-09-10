@@ -62,8 +62,9 @@ public class MonitorService : IMonitorResolver
         }
 
         int win32Error = Marshal.GetLastWin32Error();
-        _logger?.Warn($"GetMonitorInfo failed: hMonitor={hMonitor}, win32Error={win32Error}, using fallback 1920x1080 (marked IsFallback; not usable for layout/focus decisions)");
+        _logger?.Error($"GetMonitorInfo failed: hMonitor={hMonitor}, win32Error={win32Error}, using fallback 1920x1080 (marked IsFallback; not usable for layout/focus decisions). Arrange will skip windows on this monitor — check display driver / RDP.");
 
+        // B5 fix: fallback is non-silent — caller (MultiMonitorLayoutService) already skips IsFallback windows and logs Warn per-window.
         // The fallback is kept for display/debug only. IsFallback=true lets the layout and
         // Directional Focus paths reject it instead of collapsing unrelated windows into one
         // synthetic 1920x1080 monitor bucket used for focus decisions.

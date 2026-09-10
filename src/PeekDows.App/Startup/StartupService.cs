@@ -151,19 +151,23 @@ public sealed class StartupService : IStartupService
                 return false;
             }
 
+            object? shortcut = null;
             try
             {
-                var shortcut = shell.CreateShortcut(shortcutPath);
-                shortcut.TargetPath = _executablePath;
-                shortcut.WorkingDirectory = _workingDirectory;
-                shortcut.Description = "PeekDows";
-                shortcut.IconLocation = $"{_executablePath},0";
-                shortcut.Save();
+                shortcut = shell.CreateShortcut(shortcutPath);
+                dynamic dyn = shortcut;
+                dyn.TargetPath = _executablePath;
+                dyn.WorkingDirectory = _workingDirectory;
+                dyn.Description = "PeekDows";
+                dyn.IconLocation = $"{_executablePath},0";
+                dyn.Save();
                 return true;
             }
             finally
             {
-                System.Runtime.InteropServices.Marshal.ReleaseComObject(shell);
+                if (shortcut != null)
+                    try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shortcut); } catch { }
+                try { System.Runtime.InteropServices.Marshal.ReleaseComObject(shell); } catch { }
             }
         }
         catch (Exception ex)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
 using Xunit;
@@ -397,5 +398,178 @@ public class WindowPlacementServiceTests
         Assert.True(tracker.IsUnstable((IntPtr)1));
         Assert.True(tracker.TryGetReason((IntPtr)1, out var reason));
         Assert.Contains("setwindowpos-failed", reason);
+    }
+
+    // --- Maximize kind + animator routing ---
+
+    private sealed class FakeWindowAnimator : IWindowAnimator
+    {
+        public List<(IntPtr Hwnd, Rect Target, PlacementKind Kind, bool BringToFront)> Begins = new();
+        public bool BeginResult = true;
+        public int SnapAllCalls;
+
+        public bool Begin(IntPtr hwnd, Rect targetRect, PlacementKind kind, bool bringToFront = false)
+        {
+            if (!BeginResult) return false;
+            Begins.Add((hwnd, targetRect, kind, bringToFront));
+            return true;
+        }
+
+        public bool IsAnimating(IntPtr hwnd) => Begins.Any(b => b.Hwnd == hwnd);
+        public void SnapAllToTarget() => SnapAllCalls++;
+    }
+
+    private static WindowPlacementService CreateAnimatedService(
+        FakeWindowPositioner fake,
+        FakeWindowAnimator animator,
+        bool animate = true,
+        Func<IntPtr, bool>? isMaximized = null)
+    {
+        return new WindowPlacementService(
+            fake,
+            _ => true,
+            isMaximized ?? (_ => false),
+            null,
+            null,
+            null,
+            null,
+            null,
+            animator,
+            () => animate);
+    }
+
+    [Fact]
+    public void MaximizeKind_NotMaximized_InstantPath_CallsMaximizeWindow()
+    {
+        var fake = new FakeWindowPositioner();
+        var service = CreateAnimatedService(fake, new FakeWindowAnimator(), animate: false);
+
+        var result = service.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "Maximize", TargetRect = new Rect(0, 0, 1920, 1080), Kind = PlacementKind.Maximize }
+        });
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Single(fake.MaximizeCalls);
+        Assert.Empty(fake.Calls); // never a SetWindowPos
+    }
+
+    [Fact]
+    public void MaximizeKind_AlreadyMaximized_NoOpSuccess()
+    {
+        var fake = new FakeWindowPositioner();
+        var service = CreateAnimatedService(fake, new FakeWindowAnimator(), animate: false, isMaximized: _ => true);
+
+        var result = service.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "Maximize", TargetRect = new Rect(0, 0, 1920, 1080), Kind = PlacementKind.Maximize }
+        });
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Empty(fake.MaximizeCalls);
+        Assert.Empty(fake.Calls);
+    }
+
+    [Fact]
+    public void MaximizeKind_DoesNotTriggerRestore()
+    {
+        // A Maximize placement must never run the SW_RESTORE path.
+        var fake = new FakeWindowPositioner();
+        var restoreChecks = new List<IntPtr>();
+        Func<IntPtr, bool> isMaximized = hwnd => { restoreChecks.Add(hwnd); return false; };
+        var service = CreateAnimatedService(fake, new FakeWindowAnimator(), animate: false, isMaximized: isMaximized);
+
+        service.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "Maximize", TargetRect = new Rect(0, 0, 1920, 1080), Kind = PlacementKind.Maximize }
+        });
+
+        Assert.Empty(fake.Calls);
+    }
+
+    [Fact]
+    public void AnimatedPlacement_RoutedToAnimator_NotPositioner()
+    {
+        var fake = new FakeWindowPositioner();
+        var animator = new FakeWindowAnimator();
+        var service = CreateAnimatedService(fake, animator, animate: true);
+
+        var result = service.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "A", TargetRect = new Rect(0, 0, 800, 600) }
+        });
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Single(animator.Begins);
+        Assert.Equal(new Rect(0, 0, 800, 600), animator.Begins[0].Target);
+        Assert.Equal(PlacementKind.Reposition, animator.Begins[0].Kind);
+        Assert.Empty(fake.Calls); // instant SetWindowPos bypassed
+    }
+
+    [Fact]
+    public void MaximizeKind_RoutedToAnimator_WithWorkAreaTarget()
+    {
+        var fake = new FakeWindowPositioner();
+        var animator = new FakeWindowAnimator();
+        var service = CreateAnimatedService(fake, animator, animate: true);
+
+        service.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "Maximize", TargetRect = new Rect(0, 0, 1920, 1080), Kind = PlacementKind.Maximize }
+        });
+
+        Assert.Single(animator.Begins);
+        Assert.Equal(PlacementKind.Maximize, animator.Begins[0].Kind);
+        Assert.Empty(fake.Calls);
+        Assert.Empty(fake.MaximizeCalls); // maximize lands on the animator's final frame
+    }
+
+    [Fact]
+    public void AnimationDeclined_FallsBackToInstantPlacement()
+    {
+        var fake = new FakeWindowPositioner();
+        var animator = new FakeWindowAnimator { BeginResult = false };
+        var service = CreateAnimatedService(fake, animator, animate: true);
+
+        var result = service.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "A", TargetRect = new Rect(0, 0, 800, 600) }
+        });
+
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Single(fake.Calls); // instant fallback ran
+    }
+
+    [Fact]
+    public void AnimateDisabled_GoesStraightToInstantPlacement()
+    {
+        var fake = new FakeWindowPositioner();
+        var animator = new FakeWindowAnimator();
+        var service = CreateAnimatedService(fake, animator, animate: false);
+
+        service.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "A", TargetRect = new Rect(0, 0, 800, 600) }
+        });
+
+        Assert.Empty(animator.Begins);
+        Assert.Single(fake.Calls);
+    }
+
+ [Fact]
+    public void RestoreAndRepositionKind_RoutedToAnimator()
+    {
+        var fake = new FakeWindowPositioner();
+        var animator = new FakeWindowAnimator();
+        var service = CreateAnimatedService(fake, animator, animate: true);
+
+        service.ApplyPlacements(new List<WindowPlacement>
+        {
+            new() { Hwnd = (IntPtr)1, SlotId = "B", TargetRect = new Rect(128, 72, 1152, 648), Kind = PlacementKind.RestoreAndReposition }
+        });
+
+        Assert.Single(animator.Begins);
+        Assert.Equal(PlacementKind.RestoreAndReposition, animator.Begins[0].Kind);
+        Assert.Empty(fake.Calls);
     }
 }

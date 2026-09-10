@@ -124,7 +124,7 @@ public class SettingsServiceTests : IDisposable
         var settings = new AppSettings { Version = 1, DirectionalFocusThresholdPx = 80 };
         var migrated = _settingsService.MigrateIfNeeded(settings);
         Assert.Equal(50, migrated.DirectionalFocusThresholdPx);
-        Assert.Equal(2, migrated.Version);
+        Assert.Equal(3, migrated.Version);
     }
 
     [Fact]
@@ -134,7 +134,7 @@ public class SettingsServiceTests : IDisposable
         var settings = new AppSettings { Version = 1, DirectionalFocusThresholdPx = 70 };
         var migrated = _settingsService.MigrateIfNeeded(settings);
         Assert.Equal(70, migrated.DirectionalFocusThresholdPx);
-        Assert.Equal(2, migrated.Version);
+        Assert.Equal(3, migrated.Version);
     }
 
     [Fact]
@@ -229,6 +229,58 @@ public class SettingsServiceTests : IDisposable
         var settings = _settingsService.Load();
 
         Assert.Equal(WindowSizePreset.Small, settings.WindowSizePreset);
+    }
+
+    [Fact]
+    public void AppSettings_DefaultAnimateWindowTransitions_IsTrue()
+    {
+        var settings = new AppSettings();
+        Assert.True(settings.AnimateWindowTransitions);
+    }
+
+    [Fact]
+    public void Save_And_Load_PreservesAnimateWindowTransitions()
+    {
+        var settings = _settingsService.Load();
+        settings.AnimateWindowTransitions = false;
+        _settingsService.Save(settings);
+
+        var loadedSettings = _settingsService.Load();
+
+        Assert.False(loadedSettings.AnimateWindowTransitions);
+    }
+
+    [Fact]
+    public void Load_MissingAnimateWindowTransitions_DefaultsToTrue()
+    {
+        File.WriteAllText(_testSettingsPath, "{\"AutoArrange\":true}");
+
+        var settings = _settingsService.Load();
+
+        Assert.True(settings.AnimateWindowTransitions);
+    }
+
+    [Fact]
+    public void MigrateIfNeeded_BumpsVersion2_ToVersion3()
+    {
+        var settings = new AppSettings { Version = 2 };
+        var migrated = _settingsService.MigrateIfNeeded(settings);
+        Assert.Equal(3, migrated.Version);
+    }
+
+    [Fact]
+    public void MigrateIfNeeded_LegacySingleWindowMode_IsDropped()
+    {
+        // A v2 file carrying SingleWindowMode must deserialize cleanly, and a re-save must
+        // not write the retired field back.
+        File.WriteAllText(_testSettingsPath, "{\"Version\":2,\"SingleWindowMode\":\"TopLeftSlot\",\"AutoArrange\":true}");
+
+        var settings = _settingsService.Load();
+        Assert.True(settings.AutoArrange);
+
+        _settingsService.Save(settings);
+        var json = File.ReadAllText(_testSettingsPath);
+        Assert.DoesNotContain("SingleWindowMode", json);
     }
 
     public void Dispose()

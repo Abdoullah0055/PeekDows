@@ -19,6 +19,8 @@ public sealed class WindowPlacementService
     private readonly Func<IntPtr, int, bool> _showWindowAsync;
     private readonly UnstableWindowTracker? _tracker;
     private readonly Func<DateTime> _nowProvider;
+    private readonly IWindowAnimator? _animator;
+    private readonly Func<bool>? _shouldAnimate;
 
     public WindowPlacementService() : this(new Win32WindowPositioner(), hwnd => NativeMethods.IsWindow(hwnd), hwnd => NativeMethods.IsZoomed(hwnd), null) { }
 
@@ -27,6 +29,12 @@ public sealed class WindowPlacementService
     public WindowPlacementService(FileLogger logger, UnstableWindowTracker tracker)
         : this(new Win32WindowPositioner(), hwnd => NativeMethods.IsWindow(hwnd), hwnd => NativeMethods.IsZoomed(hwnd),
                logger, tracker, hwnd => IsResponsiveProbe(hwnd), null)
+    {
+    }
+
+    public WindowPlacementService(FileLogger logger, UnstableWindowTracker tracker, IWindowAnimator animator, Func<bool> shouldAnimate)
+        : this(new Win32WindowPositioner(), hwnd => NativeMethods.IsWindow(hwnd), hwnd => NativeMethods.IsZoomed(hwnd),
+               logger, tracker, hwnd => IsResponsiveProbe(hwnd), null, null, animator, shouldAnimate)
     {
     }
 
@@ -54,7 +62,9 @@ public sealed class WindowPlacementService
         UnstableWindowTracker? tracker,
         Func<IntPtr, bool>? isResponsive,
         Func<IntPtr, int, bool>? showWindowAsync,
-        Func<DateTime>? nowProvider = null)
+        Func<DateTime>? nowProvider = null,
+        IWindowAnimator? animator = null,
+        Func<bool>? shouldAnimate = null)
     {
         _positioner = positioner;
         _isWindowValid = isWindowValid;
@@ -64,6 +74,8 @@ public sealed class WindowPlacementService
         _isResponsive = isResponsive;
         _showWindowAsync = showWindowAsync ?? ((hwnd, cmd) => NativeMethods.ShowWindowAsync(hwnd, cmd));
         _nowProvider = nowProvider ?? (() => DateTime.Now);
+        _animator = animator;
+        _shouldAnimate = shouldAnimate;
     }
 
     /// <summary>
@@ -158,7 +170,20 @@ public sealed class WindowPlacementService
                 return false;
             }
 
-            if (_isWindowMaximized(placement.Hwnd))
+            if (placement.Kind == PlacementKind.Maximize)
+            {
+                if (_isWindowMaximized(placement.Hwnd))
+                {
+                    // Steady state: the lone window is already maximized by us. Nothing to do.
+                    _logger?.Info($"Placement skipped (already maximized): hwnd={placement.Hwnd}, slot={placement.SlotId}");
+                    succeeded++;
+                    succeededHwnds.Add(placement.Hwnd);
+                    return true;
+                }
+                // Not maximized yet: fall through — the maximize is issued by the animator
+                // (final frame) or the instant path below. Never run the restore path here.
+            }
+            else if (_isWindowMaximized(placement.Hwnd))
             {
                 _logger?.Info($"Maximized window detected: hwnd={placement.Hwnd}, slot={placement.SlotId}");
                 _logger?.Info($"Restoring maximized window before placement: hwnd={placement.Hwnd}, slot={placement.SlotId}");
@@ -195,9 +220,46 @@ public sealed class WindowPlacementService
                 return false;
             }
 
+            // Animated path: hand the placement to the animator when enabled. The animator
+            // returns false only when it cannot start (window gone, rect unreadable) — then
+            // we fall through to the instant path so the window is never left unplaced.
+            if (_shouldAnimate?.Invoke() == true && _animator is not null)
+            {
+                bool began = _animator.Begin(placement.Hwnd, placement.TargetRect, placement.Kind, placement.BringToFront);
+                if (began)
+                {
+                    succeeded++;
+                    succeededHwnds.Add(placement.Hwnd);
+                    _logger?.Info($"Placement animated: hwnd={placement.Hwnd}, slot={placement.SlotId}, kind={placement.Kind}, target={placement.TargetRect}, bringToFront={placement.BringToFront}");
+                    return true;
+                }
+
+                _logger?.Info($"Animation declined for hwnd={placement.Hwnd}, falling back to instant placement");
+            }
+
+            if (placement.Kind == PlacementKind.Maximize)
+            {
+                _logger?.Info($"MaximizeWindow called: hwnd={placement.Hwnd}");
+                var (maxResult, maxWin32Error) = _positioner.MaximizeWindow(placement.Hwnd);
+                if (maxResult)
+                {
+                    succeeded++;
+                    succeededHwnds.Add(placement.Hwnd);
+                    _logger?.Info($"MaximizeWindow succeeded: hwnd={placement.Hwnd}");
+                }
+                else
+                {
+                    failed++;
+                    var maxMsg = $"MaximizeWindow failed: hwnd={placement.Hwnd}, win32Error={maxWin32Error}";
+                    errors.Add(maxMsg);
+                    _logger?.Error(maxMsg);
+                }
+                return maxResult;
+            }
+
             _logger?.Info($"SetWindowPos called: hwnd={placement.Hwnd}, bringToFront={placement.BringToFront}");
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            bool result = _positioner.SetWindowPosition(placement.Hwnd, placement.TargetRect, placement.BringToFront);
+            var (result, win32Error) = _positioner.SetWindowPosition(placement.Hwnd, placement.TargetRect, placement.BringToFront);
             sw.Stop();
 
             if (result)
@@ -205,9 +267,6 @@ public sealed class WindowPlacementService
                 succeeded++;
                 succeededHwnds.Add(placement.Hwnd);
                 _logger?.Info($"SetWindowPos succeeded: hwnd={placement.Hwnd}, slot={placement.SlotId}, durationMs={sw.ElapsedMilliseconds}");
-                // Even though SWP_ASYNCWINDOWPOS makes the call return fast, a surprisingly long
-                // duration signals a struggling target — mark it unstable so it is skipped until
-                // it settles, preventing repeated slow operations.
                 if (sw.ElapsedMilliseconds >= SlowWin32CallThresholdMs)
                 {
                     _tracker?.MarkUnstable(placement.Hwnd, now, $"slow-setwindowpos-{sw.ElapsedMilliseconds}ms");
@@ -217,10 +276,6 @@ public sealed class WindowPlacementService
             else
             {
                 failed++;
-                int win32Error = Marshal.GetLastWin32Error();
-                // A failed SetWindowPos often signals an uncooperative/struggling target; mark
-                // it unstable so the next ArrangeNow / Directional Focus activation skips it
-                // instead of piling another call on the same window.
                 _tracker?.MarkUnstable(placement.Hwnd, now, $"setwindowpos-failed-{win32Error}");
                 var msg = $"SetWindowPos failed: hwnd={placement.Hwnd}, slot={placement.SlotId}, win32Error={win32Error}";
                 errors.Add(msg);

@@ -118,6 +118,7 @@ public class RepositionMaximizedWindowsToggleTests
         public bool IsAutoArrangeRunning => false;
         public bool IsStartWithWindowsEnabled => false;
         public bool IsDirectionalFocusEnabled => false;
+        public bool IsAnimateWindowTransitionsEnabled => CurrentSettings.AnimateWindowTransitions;
         public bool AllowRepositionMaximizedWindows => CurrentSettings.AllowRepositionMaximizedWindows;
         public WindowSizePreset CurrentWindowSizePreset => WindowSizePreset.Small;
         public bool IsPaused => false;
@@ -128,6 +129,7 @@ public class RepositionMaximizedWindowsToggleTests
         public event Action<bool>? AutoArrangeChanged;
         public event Action<bool>? StartWithWindowsChanged;
         public event Action<bool>? DirectionalFocusChanged;
+        public event Action<bool>? AnimateWindowTransitionsChanged;
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
 
@@ -139,6 +141,7 @@ public class RepositionMaximizedWindowsToggleTests
         public void ToggleAutoArrange() { }
         public void ToggleStartWithWindows() { }
         public void ToggleDirectionalFocus() { }
+        public void ToggleAnimateWindowTransitions() { }
 
         public void ToggleAllowRepositionMaximizedWindows()
         {

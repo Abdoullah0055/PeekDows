@@ -593,25 +593,27 @@ public class WindowClassifierTests
         Assert.False(_classifier.IsEligible(window));
     }
 
+    // B4: title-only checks removed — only XamlExplorerHostIslandWindow class is a reliable signal.
+    // These windows are now correctly NOT treated as system windows by title alone.
     [Fact]
-    public void TaskSwitchingTitle_IsSystemWindow()
+    public void TaskSwitchingTitle_IsNotSystemWindow_ByTitleAlone()
     {
         var window = MakeWindow(title: "Changement de tâche");
-        Assert.True(_classifier.IsSystemWindow(window));
+        Assert.False(_classifier.IsSystemWindow(window));
     }
 
     [Fact]
-    public void TaskSwitchingEnglishTitle_IsSystemWindow()
+    public void TaskSwitchingEnglishTitle_IsNotSystemWindow_ByTitleAlone()
     {
         var window = MakeWindow(title: "Task Switching");
-        Assert.True(_classifier.IsSystemWindow(window));
+        Assert.False(_classifier.IsSystemWindow(window));
     }
 
     [Fact]
-    public void TaskViewTitle_IsSystemWindow()
+    public void TaskViewTitle_IsNotSystemWindow_ByTitleAlone()
     {
         var window = MakeWindow(title: "Task View");
-        Assert.True(_classifier.IsSystemWindow(window));
+        Assert.False(_classifier.IsSystemWindow(window));
     }
 
     [Fact]

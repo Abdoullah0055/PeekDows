@@ -12,6 +12,7 @@ public interface IPeekDowsController
     bool IsAutoArrangeRunning { get; }
     bool IsStartWithWindowsEnabled { get; }
     bool IsDirectionalFocusEnabled { get; }
+    bool IsAnimateWindowTransitionsEnabled { get; }
     bool AllowRepositionMaximizedWindows { get; }
     WindowSizePreset CurrentWindowSizePreset { get; }
     bool IsPaused { get; }
@@ -25,6 +26,7 @@ public interface IPeekDowsController
     void ToggleAutoArrange();
     void ToggleStartWithWindows();
     void ToggleDirectionalFocus();
+    void ToggleAnimateWindowTransitions();
     void ToggleAllowRepositionMaximizedWindows();
     void SetWindowSizePreset(WindowSizePreset preset);
     void OpenSettings();
@@ -36,6 +38,7 @@ public interface IPeekDowsController
     event Action<bool>? AutoArrangeChanged;
     event Action<bool>? StartWithWindowsChanged;
     event Action<bool>? DirectionalFocusChanged;
+    event Action<bool>? AnimateWindowTransitionsChanged;
     event Action<bool>? AllowRepositionMaximizedWindowsChanged;
     event Action<WindowSizePreset>? WindowSizePresetChanged;
 }

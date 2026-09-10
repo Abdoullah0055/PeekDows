@@ -35,6 +35,8 @@ internal static class ModernTrayIcons
         { "start-windows",       0xE782 },
         // E7B0 = "Arrange" (directional layout)
         { "directional-focus",   0xE7B0 },
+        // E768 = "Play" (motion/animation)
+        { "animate-transitions", 0xE768 },
         // E713 = "Setting" (the canonical Win11 gear)
         { "settings",            0xE713 },
         // E8A5 = "Document"

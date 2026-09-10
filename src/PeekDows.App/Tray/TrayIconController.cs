@@ -25,6 +25,7 @@ public class TrayIconController : IDisposable
     private ToolStripMenuItem? _repositionMaximizedItem;
     private ToolStripMenuItem? _startWithWindowsItem;
     private ToolStripMenuItem? _directionalFocusItem;
+    private ToolStripMenuItem? _animateTransitionsItem;
     private ToolStripMenuItem? _smallPresetItem;
     private ToolStripMenuItem? _mediumPresetItem;
     private ToolStripMenuItem? _largePresetItem;
@@ -57,6 +58,7 @@ public class TrayIconController : IDisposable
         _controller.AutoArrangeChanged += OnAutoArrangeChanged;
         _controller.StartWithWindowsChanged += OnStartWithWindowsChanged;
         _controller.DirectionalFocusChanged += OnDirectionalFocusChanged;
+        _controller.AnimateWindowTransitionsChanged += OnAnimateTransitionsChanged;
         _controller.AllowRepositionMaximizedWindowsChanged += OnAllowRepositionMaximizedWindowsChanged;
         _controller.WindowSizePresetChanged += OnWindowSizePresetChanged;
 
@@ -64,10 +66,11 @@ public class TrayIconController : IDisposable
         UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
         UpdateStartWithWindowsMenu(_controller.CurrentSettings?.StartWithWindows ?? false);
         UpdateDirectionalFocusMenu(_controller.CurrentSettings?.DirectionalFocusEnabled ?? false);
+        UpdateAnimateTransitionsMenu(_controller.CurrentSettings?.AnimateWindowTransitions ?? true);
         UpdateRepositionMaximizedMenu(_controller.CurrentSettings?.AllowRepositionMaximizedWindows ?? false);
     }
 
-    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem, ToolStripMenuItem autoArrangeItem, ToolStripMenuItem repositionMaximizedItem, ToolStripMenuItem startWithWindowsItem, ToolStripMenuItem directionalFocusItem, ToolStripMenuItem smallPresetItem, ToolStripMenuItem mediumPresetItem, ToolStripMenuItem largePresetItem)
+    internal void InitializeMenuReferences(ToolStripMenuItem statusItem, ToolStripMenuItem pauseResumeItem, ToolStripMenuItem autoArrangeItem, ToolStripMenuItem repositionMaximizedItem, ToolStripMenuItem startWithWindowsItem, ToolStripMenuItem directionalFocusItem, ToolStripMenuItem animateTransitionsItem, ToolStripMenuItem smallPresetItem, ToolStripMenuItem mediumPresetItem, ToolStripMenuItem largePresetItem)
     {
         _statusItem = statusItem;
         _pauseResumeItem = pauseResumeItem;
@@ -75,6 +78,7 @@ public class TrayIconController : IDisposable
         _repositionMaximizedItem = repositionMaximizedItem;
         _startWithWindowsItem = startWithWindowsItem;
         _directionalFocusItem = directionalFocusItem;
+        _animateTransitionsItem = animateTransitionsItem;
         _smallPresetItem = smallPresetItem;
         _mediumPresetItem = mediumPresetItem;
         _largePresetItem = largePresetItem;
@@ -82,6 +86,7 @@ public class TrayIconController : IDisposable
         UpdateAutoArrangeMenu(_controller.CurrentSettings?.AutoArrange ?? false);
         UpdateStartWithWindowsMenu(_controller.CurrentSettings?.StartWithWindows ?? false);
         UpdateDirectionalFocusMenu(_controller.CurrentSettings?.DirectionalFocusEnabled ?? false);
+        UpdateAnimateTransitionsMenu(_controller.CurrentSettings?.AnimateWindowTransitions ?? true);
         UpdateRepositionMaximizedMenu(_controller.CurrentSettings?.AllowRepositionMaximizedWindows ?? false);
         UpdateWindowSizePresetMenu(_controller.CurrentSettings?.WindowSizePreset ?? WindowSizePreset.Small);
     }
@@ -150,6 +155,11 @@ public class TrayIconController : IDisposable
     private void OnDirectionalFocusChanged(bool isEnabled)
     {
         UpdateDirectionalFocusMenu(isEnabled);
+    }
+
+    private void OnAnimateTransitionsChanged(bool isEnabled)
+    {
+        UpdateAnimateTransitionsMenu(isEnabled);
     }
 
     private void OnAllowRepositionMaximizedWindowsChanged(bool isEnabled)
@@ -228,6 +238,14 @@ public class TrayIconController : IDisposable
         }
     }
 
+    private void UpdateAnimateTransitionsMenu(bool isEnabled)
+    {
+        if (_animateTransitionsItem != null)
+        {
+            _animateTransitionsItem.Checked = isEnabled;
+        }
+    }
+
     private void UpdateRepositionMaximizedMenu(bool isEnabled)
     {
         if (_repositionMaximizedItem != null)
@@ -253,6 +271,14 @@ public class TrayIconController : IDisposable
 
     public void Dispose()
     {
+        // C6 fix: unsubscribe events so controller doesn't keep us alive (hot reload / tests).
+        try { _controller.StateChanged -= OnStateChanged; } catch { }
+        try { _controller.AutoArrangeChanged -= OnAutoArrangeChanged; } catch { }
+        try { _controller.StartWithWindowsChanged -= OnStartWithWindowsChanged; } catch { }
+        try { _controller.DirectionalFocusChanged -= OnDirectionalFocusChanged; } catch { }
+        try { _controller.AnimateWindowTransitionsChanged -= OnAnimateTransitionsChanged; } catch { }
+        try { _controller.AllowRepositionMaximizedWindowsChanged -= OnAllowRepositionMaximizedWindowsChanged; } catch { }
+        try { _controller.WindowSizePresetChanged -= OnWindowSizePresetChanged; } catch { }
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         if (_ownsTrayIcon)

@@ -28,33 +28,6 @@ public class LayoutEngine
         var ratio = GetPresetRatio(settings.WindowSizePreset);
         var slotRects = CalculateClassicPeekGridSlotRects(workArea, ratio);
 
-        if (priorityWindows.Count == 1)
-        {
-            Rect targetRect;
-            string slotId;
-
-            if (settings.SingleWindowMode != "TopLeftSlot")
-            {
-                targetRect = workArea;
-                slotId = "FocusLarge";
-            }
-            else
-            {
-                targetRect = slotRects["A"];
-                slotId = "A";
-            }
-
-            result.Add(new WindowPlacement
-            {
-                Hwnd = priorityWindows[0].Hwnd,
-                SlotId = slotId,
-                TargetRect = targetRect,
-                BringToFront = false
-            });
-
-            return result;
-        }
-
         string[] slotOrder = { "A", "B", "C", "D", "E", "F", "G", "H" };
 
         for (int i = 0; i < priorityWindows.Count; i++)
@@ -161,35 +134,6 @@ public class LayoutEngine
             workArea.Height - verticalPeek - bottomPeek
         );
 
-        if (priorityWindows.Count == 1)
-        {
-            Rect targetRect;
-            string slotId;
-
-            if (settings.SingleWindowMode != "TopLeftSlot")
-            {
-                targetRect = focusRect;
-                slotId = "Focus";
-            }
-            else
-            {
-                var grid = CreateDefaultGrid(workArea);
-                var slots = CreateDefaultSlots(grid);
-                targetRect = CalculateSlotRect(slots.First(s => s.Id == "A"), grid);
-                slotId = "A";
-            }
-
-            result.Add(new WindowPlacement
-            {
-                Hwnd = priorityWindows[0].Hwnd,
-                SlotId = slotId,
-                TargetRect = targetRect,
-                BringToFront = true
-            });
-
-            return result;
-        }
-
         var focusWindow = priorityWindows[0];
         var peekWindows = priorityWindows.Skip(1).Take(4).ToList();
 
@@ -278,35 +222,6 @@ public class LayoutEngine
             workArea.Width - (focusMarginH * 2),
             workArea.Height - (focusMarginV * 2)
         );
-
-        if (priorityWindows.Count == 1)
-        {
-            Rect targetRect;
-            string slotId;
-
-            if (settings.SingleWindowMode != "TopLeftSlot")
-            {
-                targetRect = focusRect;
-                slotId = "Focus";
-            }
-            else
-            {
-                var grid = CreateDefaultGrid(workArea);
-                var slots = CreateDefaultSlots(grid);
-                targetRect = CalculateSlotRect(slots.First(s => s.Id == "A"), grid);
-                slotId = "A";
-            }
-
-            result.Add(new WindowPlacement
-            {
-                Hwnd = priorityWindows[0].Hwnd,
-                SlotId = slotId,
-                TargetRect = targetRect,
-                BringToFront = true
-            });
-
-            return result;
-        }
 
         var focusWindow = priorityWindows[0];
         var secondaryWindows = priorityWindows.Skip(1).Take(3).ToList();
@@ -413,28 +328,6 @@ public class LayoutEngine
 
         var grid = CreateDefaultGrid(workArea);
         var slots = CreateDefaultSlots(grid);
-
-        if (priorityWindows.Count == 1)
-        {
-            Rect targetRect;
-            if (settings.SingleWindowMode == "TopLeftSlot")
-            {
-                targetRect = CalculateSlotRect(slots.First(s => s.Id == "A"), grid);
-            }
-            else
-            {
-                targetRect = workArea;
-            }
-            
-            result.Add(new WindowPlacement
-            {
-                Hwnd = priorityWindows[0].Hwnd,
-                SlotId = settings.SingleWindowMode == "TopLeftSlot" ? "A" : "FocusLarge",
-                TargetRect = targetRect,
-                Activate = false
-            });
-            return result;
-        }
 
         string[] slotIds = { "A", "B", "C", "D" };
 

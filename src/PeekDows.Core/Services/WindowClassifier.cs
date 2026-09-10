@@ -53,7 +53,12 @@ public class WindowClassifier
         if (window.IsCloaked) return false;
         if (string.IsNullOrWhiteSpace(window.Title)) return false;
         if (window.CurrentRect.Width < 250 || window.CurrentRect.Height < 180) return false;
+        // C2 fix: self-filter via ProcessId OR tray host class/title so "dotnet run"
+        // (parent is dotnet.exe) and double-instance cases still exclude our own windows.
         if (window.ProcessId == Environment.ProcessId) return false;
+        if (string.Equals(window.ClassName, "PeekDowsTray", StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.Equals(window.Title, "PeekDows", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(window.ClassName, "WindowsForms10.Window", StringComparison.OrdinalIgnoreCase)) return false;
         if (IsIgnoredProcess(window.ProcessName)) return false;
         if (IsIgnoredClass(window.ClassName)) return false;
         if (IsSystemWindow(window)) return false;
@@ -99,19 +104,9 @@ public class WindowClassifier
 
         if (string.Equals(window.ClassName, "ApplicationFrameWindow", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(window.Title)) return true;
 
-        // Windows 11 Task View / Alt-Tab overlays. Match defensively on BOTH class name
-        // (XamlExplorerHostIslandWindow, also caught by AlwaysIgnoredClassNames) and the
-        // localised title, because the title is what shows in the logs and the class can vary
-        // across Windows builds. These are never real arrange/focus targets.
+        // B4 fix: Task View / Alt-Tab overlays — class is the stable signal (localised
+        // titles vary per OS language / build and must NOT drive filtering).
         if (string.Equals(window.ClassName, "XamlExplorerHostIslandWindow", StringComparison.OrdinalIgnoreCase)) return true;
-
-        if (!string.IsNullOrWhiteSpace(window.Title))
-        {
-            var title = window.Title.Trim();
-            if (string.Equals(title, "Changement de tâche", StringComparison.OrdinalIgnoreCase)) return true;
-            if (string.Equals(title, "Task Switching", StringComparison.OrdinalIgnoreCase)) return true;
-            if (string.Equals(title, "Task View", StringComparison.OrdinalIgnoreCase)) return true;
-        }
 
         return false;
     }

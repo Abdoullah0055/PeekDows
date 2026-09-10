@@ -28,4 +28,6 @@ public sealed class WindowPlacement
     public bool Activate { get; init; }
     public bool PreserveZOrder { get; init; }
     public bool BringToFront { get; init; }
+    /// <summary>Kind of placement. Reposition = normal slot, Maximize = lone-window native maximize (TargetRect is the monitor WorkArea), RestoreAndReposition = maximized→slot (anim from WorkArea).</summary>
+    public PlacementKind Kind { get; init; } = PlacementKind.Reposition;
 }

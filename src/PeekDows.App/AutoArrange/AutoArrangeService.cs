@@ -163,27 +163,32 @@ public sealed class AutoArrangeService : IDisposable
         }
 
         _logger.Info($"AutoArrange scheduling arrange after stabilization delay={delayMs}");
-        _pendingDelayTimer = new System.Windows.Forms.Timer { Interval = delayMs };
-        _pendingDelayTimer.Tick += (s, e) =>
+        var timer = new System.Windows.Forms.Timer { Interval = delayMs };
+        EventHandler? handler = null;
+        handler = (s, e) =>
         {
-            _pendingDelayTimer.Stop();
-            _pendingDelayTimer.Dispose();
-            _pendingDelayTimer = null;
-
+            // C5 fix: unsubscribe before dispose so no tick fires after Dispose.
+            timer.Tick -= handler!;
+            timer.Stop();
+            timer.Dispose();
+            lock (_lock)
+            {
+                if (_pendingDelayTimer == timer) _pendingDelayTimer = null;
+            }
             lock (_lock)
             {
                 if (!IsRunning) return;
-
                 var settings = _controller.CurrentSettings;
                 if (settings == null) return;
                 if (!settings.Enabled || !settings.AutoArrange || _controller.State == RuntimeState.Paused)
                     return;
-
                 _logger.Info("AutoArrange triggering ArrangeNow (after stabilization)");
                 TriggerArrangeNow();
             }
         };
-        _pendingDelayTimer.Start();
+        timer.Tick += handler;
+        _pendingDelayTimer = timer;
+        timer.Start();
     }
 
     private void TriggerArrangeNow()
@@ -205,8 +210,16 @@ public sealed class AutoArrangeService : IDisposable
         if (_disposed) return;
         _disposed = true;
         Stop();
+        _timer.Tick -= OnTimerTick;
         _timer.Dispose();
-        _pendingDelayTimer?.Dispose();
-        _pendingDelayTimer = null;
+        lock (_lock)
+        {
+            if (_pendingDelayTimer != null)
+            {
+                var t = _pendingDelayTimer;
+                _pendingDelayTimer = null;
+                try { t.Stop(); t.Dispose(); } catch { }
+            }
+        }
     }
 }

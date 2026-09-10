@@ -39,20 +39,31 @@ public class WindowDiscoveryService
 
             if (previousSnapshot.TryGetValue(raw.Hwnd, out var existing))
             {
-                existing.Title = raw.Title;
-                existing.CurrentRect = raw.CurrentRect;
-                existing.IsVisible = raw.IsVisible;
-                existing.IsMinimized = raw.IsMinimized;
-                existing.IsMaximized = raw.IsMaximized;
-                existing.IsForeground = raw.IsForeground;
-                existing.LastSeenAt = now;
-
-                if (existing.IsForeground)
+                // C1 fix: HWND reuse — if process changed, treat as a brand new window
+                // so stale FirstSeenAt/Pinned/AssignedSlot don't carry over.
+                if (existing.ProcessId != raw.ProcessId)
                 {
-                    existing.LastFocusedAt = now;
+                    var fresh = ManagedWindow.FromRaw(raw, now);
+                    if (fresh.IsForeground) fresh.LastFocusedAt = now;
+                    currentEligible.Add(fresh);
                 }
+                else
+                {
+                    existing.Title = raw.Title;
+                    existing.CurrentRect = raw.CurrentRect;
+                    existing.IsVisible = raw.IsVisible;
+                    existing.IsMinimized = raw.IsMinimized;
+                    existing.IsMaximized = raw.IsMaximized;
+                    existing.IsForeground = raw.IsForeground;
+                    existing.LastSeenAt = now;
 
-                currentEligible.Add(existing);
+                    if (existing.IsForeground)
+                    {
+                        existing.LastFocusedAt = now;
+                    }
+
+                    currentEligible.Add(existing);
+                }
             }
             else
             {

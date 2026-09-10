@@ -76,10 +76,15 @@ Settings are stored at `%APPDATA%\PeekDows\settings.json`.
 | `AutoArrange` | bool | false | Arrange continuously on timer |
 | `ArrangeOnStartup` | bool | false | Arrange once on launch |
 | `StartWithWindows` | bool | false | Create Startup folder shortcut |
-| `SingleWindowMode` | bool | false | Single window per slot |
 | `IgnoredProcesses` | string[] | built-in list | Process names to skip |
 | `IgnoredClasses` | string[] | built-in list | Window class names to skip |
-| `Hotkeys` | dict | `{}` | Custom hotkey mappings |
+| `AnimateWindowTransitions` | bool | true | Animate window moves (150ms) with tween-then-snap maximize |
+| `Hotkeys` | dict | `{}` | Custom hotkey mappings (configurable, not yet editable via UI) |
+
+> **Note on `Hotkeys` / `OverflowBehavior`**: `Hotkeys` is persisted but not yet editable via the settings UI; `OverflowBehavior` is deprecated and has no effect — both are kept for backward compatibility.
+
+A monitor with exactly **one** arrangeable window gets that window **natively maximized** (instead of a 90% slot). If you manually restore a window PeekDows had maximized, it is left alone until a window opens or closes on that monitor.
+
 
 ## Logs
 
