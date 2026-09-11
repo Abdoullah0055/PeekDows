@@ -208,6 +208,91 @@ public class SettingsBridgeTests : IDisposable
         Assert.Equal(1, _controller.OnSettingsChangedCount);   // plain-field Save happens once
     }
 
+    // ---------- error handling + auxiliary messages ----------
+
+    [Fact]
+    public void HandleMessage_MalformedJson_ReturnsErrorAndDoesNotThrow()
+    {
+        var response = _bridge.HandleMessage("{not json");
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.Equal("error", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("malformed-json", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public void HandleMessage_MissingType_ReturnsError()
+    {
+        var response = _bridge.HandleMessage("""{"data":{}}""");
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.Equal("missing-type", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public void HandleMessage_UnknownType_ReturnsErrorAndIgnores()
+    {
+        var response = _bridge.HandleMessage("""{"type":"selfDestruct"}""");
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.Equal("unknown-type:selfDestruct", doc.RootElement.GetProperty("code").GetString());
+        Assert.Empty(_controller.Calls);
+    }
+
+    [Fact]
+    public void HandleMessage_ApplyWithoutData_ReturnsError()
+    {
+        var response = _bridge.HandleMessage("""{"type":"apply"}""");
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.Equal("apply-without-data", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public void HandleMessage_RequestSnapshot_ReturnsSnapshot()
+    {
+        var response = _bridge.HandleMessage("""{"type":"requestSnapshot"}""");
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.Equal("settings", doc.RootElement.GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public void HandleMessage_OpenLogFile_CallsController()
+    {
+        Assert.Null(_bridge.HandleMessage("""{"type":"openLogFile"}"""));
+        Assert.Contains("OpenLogFile", _controller.Calls);
+    }
+
+    [Fact]
+    public void HandleMessage_OpenLogsFolder_CallsController()
+    {
+        Assert.Null(_bridge.HandleMessage("""{"type":"openLogsFolder"}"""));
+        Assert.Contains("OpenLogsFolder", _controller.Calls);
+    }
+
+    [Fact]
+    public void HandleMessage_OpenSettingsFolder_InvokesInjectedAction()
+    {
+        int called = 0;
+        var bridge = new SettingsBridge(_controller, _settingsService, openSettingsFolder: () => called++);
+
+        Assert.Null(bridge.HandleMessage("""{"type":"openSettingsFolder"}"""));
+        Assert.Equal(1, called);
+    }
+
+    [Fact]
+    public void HandleMessage_DirtyChanged_RaisesDirtyChangedEvent()
+    {
+        var events = new List<bool>();
+        _bridge.DirtyChanged += events.Add;
+
+        _bridge.HandleMessage("""{"type":"dirtyChanged","value":true}""");
+        _bridge.HandleMessage("""{"type":"dirtyChanged","value":false}""");
+
+        Assert.Equal(new[] { true, false }, events);
+    }
+
     /// <summary>
     /// Mirrors PeekDowsAppContext semantics: mutate the shared instance, persist via
     /// SettingsService, raise the Changed event. Records call names + counts.
