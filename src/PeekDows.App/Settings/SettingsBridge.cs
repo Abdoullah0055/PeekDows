@@ -151,8 +151,75 @@ public sealed class SettingsBridge
 
     private string ApplyDraft(JsonElement data)
     {
-        // Implemented in Task 3; the apply tests drive it.
-        throw new NotImplementedException("apply lands in Task 3");
+        SettingsDraft? draft;
+        try
+        {
+            draft = data.Deserialize<SettingsDraft>(ReadOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger?.Warn($"SettingsBridge: malformed apply payload dropped: {ex.Message}");
+            return Applied(ok: false, error: "malformed-draft");
+        }
+        if (draft is null)
+        {
+            _logger?.Warn("SettingsBridge: apply payload deserialized to null");
+            return Applied(ok: false, error: "empty-draft");
+        }
+
+        var settings = _controller.CurrentSettings;
+        _logger?.Info("SettingsBridge: applying draft from settings UI");
+
+        // 1. Toggle-backed keys — only when the value differs. Each controller toggle
+        //    persists and raises its *Changed event so the tray menu stays in sync.
+        if (draft.AutoArrange is { } av && settings.AutoArrange != av)
+            _controller.ToggleAutoArrange();
+        if (draft.Animate is { } nv && settings.AnimateWindowTransitions != nv)
+            _controller.ToggleAnimateWindowTransitions();
+        if (draft.DirectionalFocus is { } dv && settings.DirectionalFocusEnabled != dv)
+            _controller.ToggleDirectionalFocus();
+        if (draft.StartWithWindows is { } sv && settings.StartWithWindows != sv)
+            _controller.ToggleStartWithWindows();
+        if (draft.AllowRepositionMaximized is { } rv && settings.AllowRepositionMaximizedWindows != rv)
+            _controller.ToggleAllowRepositionMaximizedWindows();
+
+        // 2. Preset — SetWindowSizePreset persists AND triggers a re-arrange, so the
+        //    on-screen layout matches the preview immediately.
+        if (draft.Preset is { } presetName
+            && TryParsePreset(presetName, out var preset)
+            && _controller.CurrentWindowSizePreset != preset)
+        {
+            _controller.SetWindowSizePreset(preset);
+        }
+
+        // 3. Plain fields — mutate the shared instance, then ONE Save + OnSettingsChanged.
+        bool plainChanged = false;
+        if (draft.Enabled is { } ev && settings.Enabled != ev) { settings.Enabled = ev; plainChanged = true; }
+        if (draft.ArrangeOnStartup is { } ov && settings.ArrangeOnStartup != ov) { settings.ArrangeOnStartup = ov; plainChanged = true; }
+        if (draft.ShowTrayNotifications is { } tv && settings.ShowTrayNotifications != tv) { settings.ShowTrayNotifications = tv; plainChanged = true; }
+        if (draft.ThresholdPx is { } th && th > 0 && settings.DirectionalFocusThresholdPx != th) { settings.DirectionalFocusThresholdPx = th; plainChanged = true; }
+
+        if (plainChanged)
+        {
+            _settingsService.Save(settings);
+            _controller.OnSettingsChanged();
+        }
+
+        return Applied(ok: true, error: null);
+    }
+
+    private static bool TryParsePreset(string name, out WindowSizePreset preset)
+        => Enum.TryParse(name, ignoreCase: true, out preset) && Enum.IsDefined(preset);
+
+    private string Applied(bool ok, string? error)
+    {
+        // On success the fresh live snapshot rides along as the new source of truth —
+        // this also absorbs controller-side corrections (e.g. StartWithWindows reverting
+        // when the Startup shortcut could not be created).
+        return JsonSerializer.Serialize(
+            ok ? (object)new { type = "applied", ok, data = SnapshotData() }
+               : new { type = "applied", ok, error },
+            WriteOptions);
     }
 
     private static string Error(string code)

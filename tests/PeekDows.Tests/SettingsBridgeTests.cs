@@ -83,6 +83,131 @@ public class SettingsBridgeTests : IDisposable
         Assert.Equal(50, doc.RootElement.GetProperty("data").GetProperty("thresholdPx").GetInt32());
     }
 
+    // ---------- apply: toggle-backed keys ----------
+
+    [Fact]
+    public void Apply_AutoArrangeDiffers_CallsToggleOnce_AndPersists()
+    {
+        var response = _bridge.HandleMessage("""{"type":"apply","data":{"autoArrange":true}}""");
+
+        Assert.Contains("ToggleAutoArrange", _controller.Calls);
+        Assert.DoesNotContain("ToggleStartWithWindows", _controller.Calls);
+        Assert.True(_settings.AutoArrange);
+        Assert.True(_settingsService.Load().AutoArrange);            // persisted to disk
+        Assert.Equal(new[] { true }, _controller.AutoArrangeEvents); // tray stays in sync
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.Equal("applied", doc.RootElement.GetProperty("type").GetString());
+        Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.True(doc.RootElement.GetProperty("data").GetProperty("autoArrange").GetBoolean());
+    }
+
+    [Fact]
+    public void Apply_SameValue_DoesNotCallToggle()
+    {
+        _settings.AutoArrange = false;
+
+        _bridge.HandleMessage("""{"type":"apply","data":{"autoArrange":false}}""");
+
+        Assert.DoesNotContain("ToggleAutoArrange", _controller.Calls);
+    }
+
+    [Fact]
+    public void Apply_AllFiveToggles_OnlyWhenDiffering()
+    {
+        _settings.AnimateWindowTransitions = true;
+        _settings.DirectionalFocusEnabled = true;
+        _settings.StartWithWindows = false;
+        _settings.AllowRepositionMaximizedWindows = false;
+
+        var draft = """
+            {"type":"apply","data":{
+                "autoArrange":true, "animate":false, "directionalFocus":false,
+                "startWithWindows":true, "allowRepositionMaximized":true}}
+            """;
+        _bridge.HandleMessage(draft);
+
+        Assert.Contains("ToggleAutoArrange", _controller.Calls);
+        Assert.Contains("ToggleAnimateWindowTransitions", _controller.Calls);
+        Assert.Contains("ToggleDirectionalFocus", _controller.Calls);
+        Assert.Contains("ToggleStartWithWindows", _controller.Calls);
+        Assert.Contains("ToggleAllowRepositionMaximizedWindows", _controller.Calls);
+        Assert.Equal(new[] { true }, _controller.StartWithWindowsEvents);
+    }
+
+    // ---------- apply: preset ----------
+
+    [Fact]
+    public void Apply_PresetChange_CallsSetWindowSizePreset()
+    {
+        _bridge.HandleMessage("""{"type":"apply","data":{"preset":"Medium"}}""");
+
+        Assert.Contains("SetWindowSizePreset:Medium", _controller.Calls);
+        Assert.Equal(WindowSizePreset.Medium, _settings.WindowSizePreset);
+    }
+
+    [Fact]
+    public void Apply_SamePreset_DoesNotRearrange()
+    {
+        // Plain concatenation: a raw interpolated string ($$") would collide with the
+        // literal "}}" that closes the JSON object.
+        var json = "{\"type\":\"apply\",\"data\":{\"preset\":\"" + _settings.WindowSizePreset + "\"}}";
+        _bridge.HandleMessage(json);
+
+        Assert.DoesNotContain(_controller.Calls, c => c.StartsWith("SetWindowSizePreset"));
+    }
+
+    [Fact]
+    public void Apply_UnknownPreset_Ignored()
+    {
+        _bridge.HandleMessage("""{"type":"apply","data":{"preset":"Huge"}}""");
+
+        Assert.DoesNotContain(_controller.Calls, c => c.StartsWith("SetWindowSizePreset"));
+        Assert.Equal(WindowSizePreset.Small, _settings.WindowSizePreset);
+    }
+
+    // ---------- apply: plain fields ----------
+
+    [Fact]
+    public void Apply_PlainFields_MutatesSavesOnceAndRaisesOnSettingsChanged()
+    {
+        var response = _bridge.HandleMessage(
+            """{"type":"apply","data":{"enabled":false,"arrangeOnStartup":true,"showTrayNotifications":true,"thresholdPx":80}}""");
+
+        Assert.False(_settings.Enabled);
+        Assert.True(_settings.ArrangeOnStartup);
+        Assert.True(_settings.ShowTrayNotifications);
+        Assert.Equal(80, _settings.DirectionalFocusThresholdPx);
+        Assert.Equal(1, _controller.OnSettingsChangedCount);
+
+        var reloaded = _settingsService.Load();                      // exactly one Save
+        Assert.False(reloaded.Enabled);
+        Assert.True(reloaded.ArrangeOnStartup);
+        Assert.Equal(80, reloaded.DirectionalFocusThresholdPx);
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public void Apply_NonPositiveThreshold_Ignored()
+    {
+        _bridge.HandleMessage("""{"type":"apply","data":{"thresholdPx":0}}""");
+
+        Assert.Equal(50, _settings.DirectionalFocusThresholdPx);
+        Assert.Equal(0, _controller.OnSettingsChangedCount);
+    }
+
+    [Fact]
+    public void Apply_MixedDraft_TogglesPlusPlainFields_AppliesBoth()
+    {
+        _bridge.HandleMessage("""{"type":"apply","data":{"autoArrange":true,"thresholdPx":60}}""");
+
+        Assert.True(_settings.AutoArrange);
+        Assert.Equal(60, _settings.DirectionalFocusThresholdPx);
+        Assert.Equal(1, _controller.OnSettingsChangedCount);   // plain-field Save happens once
+    }
+
     /// <summary>
     /// Mirrors PeekDowsAppContext semantics: mutate the shared instance, persist via
     /// SettingsService, raise the Changed event. Records call names + counts.
