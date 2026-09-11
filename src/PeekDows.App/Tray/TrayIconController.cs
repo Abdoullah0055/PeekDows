@@ -17,7 +17,7 @@ public class TrayIconController : IDisposable
     private readonly Icon _trayIcon;
     private readonly bool _ownsTrayIcon;
     private readonly SettingsService? _settingsService;
-    private SettingsLegacyWindow? _settingsWindow;
+    private Form? _settingsWindow;
 
     private ToolStripMenuItem? _statusItem;
     private ToolStripMenuItem? _pauseResumeItem;
@@ -104,11 +104,27 @@ public class TrayIconController : IDisposable
         if (_settingsWindow == null || _settingsWindow.IsDisposed)
         {
             var settings = _controller.CurrentSettings;
-            var settingsWindow = _settingsService != null
-                ? new SettingsLegacyWindow(settings, _settingsService)
-                : new SettingsLegacyWindow(settings, new SettingsService());
-            settingsWindow.SettingsSaved += () => _controller.OnSettingsChanged();
-            _settingsWindow = settingsWindow;
+            var settingsService = _settingsService ?? new SettingsService();
+
+            // Modern WebView2 UI first; fall back to the legacy window when the runtime
+            // is unavailable so settings access is never lost.
+            Form? host = null;
+            try
+            {
+                host = SettingsHostForm.TryCreate(_controller, settingsService, _logger, out var reason);
+                if (host == null)
+                    _logger?.Warn($"Settings window: WebView2 unavailable ({reason}), using legacy window");
+            }
+            catch (Exception ex)
+            {
+                _logger?.Warn($"Settings window: WebView2 host creation failed ({ex.Message}), using legacy window");
+            }
+
+            var window = host ?? new SettingsLegacyWindow(settings, settingsService);
+            if (window is SettingsLegacyWindow legacy)
+                legacy.SettingsSaved += () => _controller.OnSettingsChanged();
+
+            _settingsWindow = window;
             _settingsWindow.Show();
         }
         else
