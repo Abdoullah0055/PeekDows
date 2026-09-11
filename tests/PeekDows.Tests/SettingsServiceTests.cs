@@ -30,6 +30,12 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void SettingsFilePath_ReturnsConstructorPath()
+    {
+        Assert.Equal(_testSettingsPath, _settingsService.SettingsFilePath);
+    }
+
+    [Fact]
     public void Save_And_Load_PersistsValues()
     {
         var settings = _settingsService.Load();

@@ -17,7 +17,7 @@ public class TrayIconController : IDisposable
     private readonly Icon _trayIcon;
     private readonly bool _ownsTrayIcon;
     private readonly SettingsService? _settingsService;
-    private SettingsWindow? _settingsWindow;
+    private SettingsLegacyWindow? _settingsWindow;
 
     private ToolStripMenuItem? _statusItem;
     private ToolStripMenuItem? _pauseResumeItem;
@@ -105,8 +105,8 @@ public class TrayIconController : IDisposable
         {
             var settings = _controller.CurrentSettings;
             var settingsWindow = _settingsService != null
-                ? new SettingsWindow(settings, _settingsService)
-                : new SettingsWindow(settings, new SettingsService());
+                ? new SettingsLegacyWindow(settings, _settingsService)
+                : new SettingsLegacyWindow(settings, new SettingsService());
             settingsWindow.SettingsSaved += () => _controller.OnSettingsChanged();
             _settingsWindow = settingsWindow;
             _settingsWindow.Show();

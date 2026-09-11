@@ -6,7 +6,11 @@ using PeekDows.Core.Services;
 
 namespace PeekDows.App.Settings;
 
-public class SettingsWindow : Form
+/// <summary>
+/// Legacy minimal settings window (ignore lists only). Kept as a fallback for machines
+/// where the WebView2 runtime is unavailable. The modern UI is SettingsHostForm.
+/// </summary>
+public class SettingsLegacyWindow : Form
 {
     private readonly AppSettings _settings;
     private readonly SettingsService _settingsService;
@@ -15,7 +19,7 @@ public class SettingsWindow : Form
 
     public event Action? SettingsSaved;
 
-    public SettingsWindow(AppSettings settings, SettingsService settingsService)
+    public SettingsLegacyWindow(AppSettings settings, SettingsService settingsService)
     {
         _settings = settings;
         _settingsService = settingsService;

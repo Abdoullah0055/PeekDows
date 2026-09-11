@@ -10,6 +10,9 @@ public class SettingsService
     private readonly string _settingsFilePath;
     private readonly string _settingsDirectory;
 
+    /// <summary>Full path of the settings.json file managed by this instance.</summary>
+    public string SettingsFilePath => _settingsFilePath;
+
     public SettingsService()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
