@@ -553,9 +553,27 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return;
             }
 
-            foreach (var w in eligibleWindows)
+            // P-B5: batch eligible window logs into one IO (was N AppendAllText before async).
+            if (eligibleWindows.Count > 0)
             {
-                _logger.Info($"Eligible window: hwnd={w.Hwnd}, title={w.Title}, process={w.ProcessName}, class={w.ClassName}, rect={w.CurrentRect}, foreground={w.IsForeground}");
+                var sb = new System.Text.StringBuilder(eligibleWindows.Count * 96);
+                sb.AppendLine($"Eligible windows ({eligibleWindows.Count}):");
+                foreach (var w in eligibleWindows)
+                    sb.AppendLine($"  hwnd={w.Hwnd}, title={w.Title}, process={w.ProcessName}, class={w.ClassName}, rect={w.CurrentRect}, fg={w.IsForeground}");
+                _logger.Info(sb.ToString().TrimEnd());
+            }
+
+            // P-B3 fix: cache MonitorInfo per hwnd for this arrange — avoids 2× GetMonitorForWindow
+            // per window (IsNearFullscreen check + NotifyUserRestored + foreground lookup all share it).
+            var monitorCache = new Dictionary<IntPtr, MonitorInfo>(eligibleWindows.Count);
+            MonitorInfo GetCachedMonitor(IntPtr hwnd)
+            {
+                if (!monitorCache.TryGetValue(hwnd, out var mi))
+                {
+                    mi = _monitorService.GetMonitorForWindow(hwnd);
+                    monitorCache[hwnd] = mi;
+                }
+                return mi;
             }
 
             // LoneWindowMaximizePolicy bookkeeping: prune hwnds that no longer exist, then
@@ -570,7 +588,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             {
                 if (_loneWindowMaximizePolicy.WasMaximizedByPeekDows(w.Hwnd) && !w.IsMaximized)
                 {
-                    var restoredMonitor = _monitorService.GetMonitorForWindow(w.Hwnd);
+                    var restoredMonitor = GetCachedMonitor(w.Hwnd);
                     // Prefer handle-aware call so policy keys by stable handle.
                     _loneWindowMaximizePolicy.NotifyUserRestored(w.Hwnd, restoredMonitor.Handle, restoredMonitor.WorkArea);
                 }
@@ -582,7 +600,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
             if (foregroundWindow != null)
             {
                 _logger.Info($"Foreground eligible window found: hwnd={foregroundWindow.Hwnd}");
-                var monitorInfo = _monitorService.GetMonitorForWindow(foregroundWindow.Hwnd);
+                var monitorInfo = GetCachedMonitor(foregroundWindow.Hwnd);
                 primaryWorkArea = _monitorService.GetWorkArea(monitorInfo);
             }
             else
@@ -621,7 +639,7 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                         _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, title={w.Title}, isMaximized=true, allowRepositionMaximized=true, decision=arrange");
                         _logger.Info($"Maximized window will be restored and arranged: hwnd={w.Hwnd}, title={w.Title}");
                     }
-                    else if (IsNearFullscreenWorkArea(w.CurrentRect, _monitorService.GetWorkArea(_monitorService.GetMonitorForWindow(w.Hwnd))))
+                    else if (IsNearFullscreenWorkArea(w.CurrentRect, _monitorService.GetWorkArea(GetCachedMonitor(w.Hwnd))))
                     {
                         _logger.Info($"Near-fullscreen non-maximized window will be arranged: hwnd={w.Hwnd}, title={w.Title}, rect={w.CurrentRect}");
                     }
@@ -653,10 +671,20 @@ public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
                 return;
             }
 
-            foreach (var p in placements)
+            // P-B5: batch placements log
+            if (placements.Count > 0)
             {
-                var window = arrangeable.FirstOrDefault(w => w.Hwnd == p.Hwnd);
-                _logger.Info($"Placement {p.SlotId}: hwnd={p.Hwnd}, title={window?.Title ?? "unknown"}, rect={p.TargetRect}, bringToFront={p.BringToFront}");
+                var sb2 = new System.Text.StringBuilder(placements.Count * 64);
+                sb2.AppendLine($"Placements ({placements.Count}):");
+                // avoid LINQ FirstOrDefault per placement — build hwnd→title map once
+                var titleMap = new System.Collections.Generic.Dictionary<IntPtr, string>(arrangeable.Count);
+                foreach (var w in arrangeable) titleMap[w.Hwnd] = w.Title;
+                foreach (var p in placements)
+                {
+                    titleMap.TryGetValue(p.Hwnd, out var t);
+                    sb2.AppendLine($"  {p.SlotId}: hwnd={p.Hwnd}, title={t ?? "unknown"}, rect={p.TargetRect}, bringToFront={p.BringToFront}");
+                }
+                _logger.Info(sb2.ToString().TrimEnd());
             }
 
             var result = _placementService.ApplyPlacements(placements);

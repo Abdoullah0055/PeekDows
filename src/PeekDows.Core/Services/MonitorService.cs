@@ -7,6 +7,9 @@ namespace PeekDows.Core.Services;
 
 public class MonitorService : IMonitorResolver
 {
+    // P-C3 fix: avoid Marshal.SizeOf reflection per BuildMonitorInfo call.
+    private static readonly int MonitorInfoExSize = Marshal.SizeOf<MonitorNativeMethods.MONITORINFOEX>();
+
     private readonly FileLogger? _logger;
 
     public MonitorService() { }
@@ -36,7 +39,7 @@ public class MonitorService : IMonitorResolver
     private MonitorInfo BuildMonitorInfo(IntPtr hMonitor, bool assumePrimary)
     {
         var mi = new MonitorNativeMethods.MONITORINFOEX();
-        mi.cbSize = Marshal.SizeOf(mi);
+        mi.cbSize = MonitorInfoExSize;
 
         if (MonitorNativeMethods.GetMonitorInfo(hMonitor, ref mi))
         {

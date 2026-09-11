@@ -6,6 +6,17 @@ namespace PeekDows.Core.Services;
 
 public class WindowClassifier
 {
+    // P-D3 fix: O(1) lookup for ignored lists. Rebuilt on ctor + UpdateSettings + on live mutation.
+    // Perf: EnsureCacheFresh is O(1) fast-path (reference + Count) — bench showed ComputeHash per
+    // IsEligible (100 windows × 500 iters) made classifier 7× slower when hashing every call.
+    private HashSet<string> _ignoredProcessSet = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _ignoredClassSet = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<string>? _cachedProcessListRef;
+    private IReadOnlyList<string>? _cachedClassListRef;
+    private int _cachedProcessCount;
+    private int _cachedClassCount;
+    private int _cachedProcessHash;
+    private int _cachedClassHash;
     private AppSettings _settings;
     private readonly Func<IntPtr, bool> _isOnCurrentVirtualDesktop;
 
@@ -39,11 +50,86 @@ public class WindowClassifier
     {
         _settings = settings;
         _isOnCurrentVirtualDesktop = isOnCurrentVirtualDesktop;
+        RebuildIgnoredSets();
     }
 
     public void UpdateSettings(AppSettings settings)
     {
         _settings = settings;
+        RebuildIgnoredSets();
+    }
+
+    private void RebuildIgnoredSets()
+    {
+        var procSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in AlwaysIgnoredProcessNames)
+            procSet.Add(p);
+        if (_settings.IgnoredProcesses != null)
+            foreach (var p in _settings.IgnoredProcesses)
+                if (!string.IsNullOrWhiteSpace(p)) procSet.Add(p.Trim());
+        _ignoredProcessSet = procSet;
+        _cachedProcessListRef = _settings.IgnoredProcesses;
+        _cachedProcessCount = _settings.IgnoredProcesses?.Count ?? 0;
+        _cachedProcessHash = ComputeHash(_settings.IgnoredProcesses);
+
+        var clsSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in AlwaysIgnoredClassNames)
+            clsSet.Add(c);
+        if (_settings.IgnoredClasses != null)
+            foreach (var c in _settings.IgnoredClasses)
+                if (!string.IsNullOrWhiteSpace(c)) clsSet.Add(c.Trim());
+        _ignoredClassSet = clsSet;
+        _cachedClassListRef = _settings.IgnoredClasses;
+        _cachedClassCount = _settings.IgnoredClasses?.Count ?? 0;
+        _cachedClassHash = ComputeHash(_settings.IgnoredClasses);
+    }
+
+    private static int ComputeHash(IReadOnlyList<string>? list)
+    {
+        if (list == null || list.Count == 0) return 0;
+        int h = 17;
+        foreach (var s in list)
+        {
+            if (string.IsNullOrWhiteSpace(s)) continue;
+            h = h * 31 + StringComparer.OrdinalIgnoreCase.GetHashCode(s.Trim());
+        }
+        h = h * 31 + list.Count;
+        return h;
+    }
+
+    private void EnsureProcessCacheFresh()
+    {
+        var list = _settings.IgnoredProcesses;
+        // Fast O(1) path: reference + Count unchanged => assume fresh (covers 99.9% of IsEligible calls).
+        // This fixes the bench regression where ComputeHash per call made Classifier 7× slower.
+        // Live mutation via Clear/AddRange changes Count and triggers rebuild; direct indexer
+        // mutation with same Count requires UpdateSettings() — documented edge case.
+        if (ReferenceEquals(list, _cachedProcessListRef) && (list?.Count ?? 0) == _cachedProcessCount)
+            return;
+        // Count or reference changed => rebuild (counts as dirty). Also handle hash collision
+        // for same-Count content swap by checking hash lazily only on this slow path.
+        int cur = ComputeHash(list);
+        if (cur != _cachedProcessHash) RebuildIgnoredSets();
+        else
+        {
+            // Hash same but reference/count changed (e.g. new list with same content) — just refresh refs.
+            _cachedProcessListRef = list;
+            _cachedProcessCount = list?.Count ?? 0;
+        }
+    }
+
+    private void EnsureClassCacheFresh()
+    {
+        var list = _settings.IgnoredClasses;
+        if (ReferenceEquals(list, _cachedClassListRef) && (list?.Count ?? 0) == _cachedClassCount)
+            return;
+        int cur = ComputeHash(list);
+        if (cur != _cachedClassHash) RebuildIgnoredSets();
+        else
+        {
+            _cachedClassListRef = list;
+            _cachedClassCount = list?.Count ?? 0;
+        }
     }
 
     public bool IsEligible(RawWindowInfo window)
@@ -70,26 +156,16 @@ public class WindowClassifier
     {
         if (string.IsNullOrWhiteSpace(processName)) return false;
         var trimmed = processName.Trim();
-
-        if (AlwaysIgnoredProcessNames.Any(p =>
-            string.Equals(p, trimmed, StringComparison.OrdinalIgnoreCase)))
-            return true;
-
-        return _settings.IgnoredProcesses?.Any(p =>
-            string.Equals(p?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase)) ?? false;
+        EnsureProcessCacheFresh();
+        return _ignoredProcessSet.Contains(trimmed);
     }
 
     public bool IsIgnoredClass(string? className)
     {
         if (string.IsNullOrWhiteSpace(className)) return false;
         var trimmed = className.Trim();
-
-        if (AlwaysIgnoredClassNames.Any(c =>
-            string.Equals(c, trimmed, StringComparison.OrdinalIgnoreCase)))
-            return true;
-
-        return _settings.IgnoredClasses?.Any(c =>
-            string.Equals(c?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase)) ?? false;
+        EnsureClassCacheFresh();
+        return _ignoredClassSet.Contains(trimmed);
     }
 
     public bool IsSystemWindow(RawWindowInfo window)

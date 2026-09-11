@@ -73,7 +73,7 @@ public sealed class WindowPlacementService
         _tracker = tracker;
         _isResponsive = isResponsive;
         _showWindowAsync = showWindowAsync ?? ((hwnd, cmd) => NativeMethods.ShowWindowAsync(hwnd, cmd));
-        _nowProvider = nowProvider ?? (() => DateTime.Now);
+        _nowProvider = nowProvider ?? (() => DateTime.UtcNow);
         _animator = animator;
         _shouldAnimate = shouldAnimate;
     }
@@ -112,14 +112,14 @@ public sealed class WindowPlacementService
         var errors = new List<string>();
         var succeededHwnds = new List<IntPtr>();
 
-        var peeks = placements.Where(p => !p.BringToFront).ToList();
-        var focus = placements.FirstOrDefault(p => p.BringToFront);
-
-        foreach (var placement in peeks)
+        // P-B6 fix: avoid LINQ alloc (Where+ToList+FirstOrDefault) for ≤8 items.
+        WindowPlacement? focus = null;
+        foreach (var p in placements) if (p.BringToFront) { focus = p; break; }
+        foreach (var placement in placements)
         {
-            if (TryApplyPlacement(placement, ref succeeded, ref failed, errors, succeededHwnds)) { }
+            if (placement.BringToFront) continue;
+            TryApplyPlacement(placement, ref succeeded, ref failed, errors, succeededHwnds);
         }
-
         if (focus != null)
         {
             TryApplyPlacement(focus, ref succeeded, ref failed, errors, succeededHwnds);
@@ -258,19 +258,19 @@ public sealed class WindowPlacementService
             }
 
             _logger?.Info($"SetWindowPos called: hwnd={placement.Hwnd}, bringToFront={placement.BringToFront}");
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             var (result, win32Error) = _positioner.SetWindowPosition(placement.Hwnd, placement.TargetRect, placement.BringToFront);
-            sw.Stop();
+            long elapsedMs = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000 / System.Diagnostics.Stopwatch.Frequency;
 
             if (result)
             {
                 succeeded++;
                 succeededHwnds.Add(placement.Hwnd);
-                _logger?.Info($"SetWindowPos succeeded: hwnd={placement.Hwnd}, slot={placement.SlotId}, durationMs={sw.ElapsedMilliseconds}");
-                if (sw.ElapsedMilliseconds >= SlowWin32CallThresholdMs)
+                _logger?.Info($"SetWindowPos succeeded: hwnd={placement.Hwnd}, slot={placement.SlotId}, durationMs={elapsedMs}");
+                if (elapsedMs >= SlowWin32CallThresholdMs)
                 {
-                    _tracker?.MarkUnstable(placement.Hwnd, now, $"slow-setwindowpos-{sw.ElapsedMilliseconds}ms");
-                    _logger?.Warn($"Placement warning: SetWindowPos took {sw.ElapsedMilliseconds}ms, hwnd={placement.Hwnd}, slot={placement.SlotId}");
+                    _tracker?.MarkUnstable(placement.Hwnd, now, $"slow-setwindowpos-{elapsedMs}ms");
+                    _logger?.Warn($"Placement warning: SetWindowPos took {elapsedMs}ms, hwnd={placement.Hwnd}, slot={placement.SlotId}");
                 }
             }
             else

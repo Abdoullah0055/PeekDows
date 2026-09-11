@@ -159,7 +159,7 @@ public sealed class WindowAnimationService : IWindowAnimator, IDisposable
     private bool _disposed;
 
     public WindowAnimationService(IWindowAnimationApi api, UnstableWindowTracker? tracker = null, FileLogger? logger = null)
-        : this(api, () => DateTime.Now, tracker, logger)
+        : this(api, () => DateTime.UtcNow, tracker, logger)
     {
     }
 
@@ -291,13 +291,13 @@ public sealed class WindowAnimationService : IWindowAnimator, IDisposable
                 }
             }
 
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             bool ok = _api.SetWindowPos(hwnd, expected, tween.BringToFront);
-            sw.Stop();
-            if (sw.ElapsedMilliseconds >= SlowWin32CallThresholdMs)
+            long elapsedMs = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000 / System.Diagnostics.Stopwatch.Frequency;
+            if (elapsedMs >= SlowWin32CallThresholdMs)
             {
-                _logger?.Warn($"Animated SetWindowPos slow ({sw.ElapsedMilliseconds}ms), marking unstable: hwnd={hwnd}");
-                _tracker?.MarkUnstable(hwnd, now, $"slow-animated-setwindowpos-{sw.ElapsedMilliseconds}ms");
+                _logger?.Warn($"Animated SetWindowPos slow ({elapsedMs}ms), marking unstable: hwnd={hwnd}");
+                _tracker?.MarkUnstable(hwnd, now, $"slow-animated-setwindowpos-{elapsedMs}ms");
                 finished.Add(hwnd);
                 continue;
             }

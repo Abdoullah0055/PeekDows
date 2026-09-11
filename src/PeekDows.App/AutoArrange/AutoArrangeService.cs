@@ -118,7 +118,7 @@ public sealed class AutoArrangeService : IDisposable
                 return;
             }
 
-            if ((DateTime.Now - _lastArrangeTime).TotalMilliseconds < AutoArrangeCooldownMs)
+            if ((DateTime.UtcNow - _lastArrangeTime).TotalMilliseconds < AutoArrangeCooldownMs)
             {
                 _logger.Info("AutoArrange skipped: cooldown active");
                 return;
@@ -201,7 +201,7 @@ public sealed class AutoArrangeService : IDisposable
         finally
         {
             _isArranging = false;
-            _lastArrangeTime = DateTime.Now;
+            _lastArrangeTime = DateTime.UtcNow;
         }
     }
 

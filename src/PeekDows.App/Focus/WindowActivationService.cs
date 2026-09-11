@@ -158,12 +158,12 @@ public sealed class WindowActivationService : IDisposable
     private readonly Func<DateTime> _nowProvider;
 
     public WindowActivationService(IWindowActivationApi api, FileLogger? logger = null)
-        : this(api, () => DateTime.Now, logger, null)
+        : this(api, () => DateTime.UtcNow, logger, null)
     {
     }
 
     public WindowActivationService(IWindowActivationApi api, FileLogger? logger, UnstableWindowTracker? tracker)
-        : this(api, () => DateTime.Now, logger, tracker)
+        : this(api, () => DateTime.UtcNow, logger, tracker)
     {
     }
 

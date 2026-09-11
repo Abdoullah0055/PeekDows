@@ -7,6 +7,10 @@ namespace PeekDows.Core.Services;
 
 public class LayoutEngine
 {
+    // P-B2 fix: cache slot rects (pure function of workArea+ratio). One dict allocation per
+    // distinct monitor WorkArea/ratio tuple instead of per arrange / per IsWindowStillInSlot call.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Rect WorkArea, double Ratio), IReadOnlyDictionary<string, Rect>> _slotRectsCache = new();
+
     public static double GetPresetRatio(WindowSizePreset preset) => preset switch
     {
         WindowSizePreset.Small => 0.90,
@@ -74,6 +78,11 @@ public class LayoutEngine
         => CalculateClassicPeekGridSlotRects(workArea, GetPresetRatio(WindowSizePreset.Small));
 
     public IReadOnlyDictionary<string, Rect> CalculateClassicPeekGridSlotRects(Rect workArea, double ratio)
+    {
+        return _slotRectsCache.GetOrAdd((workArea, ratio), key => CreateSlotRectsUncached(key.WorkArea, key.Ratio));
+    }
+
+    private static IReadOnlyDictionary<string, Rect> CreateSlotRectsUncached(Rect workArea, double ratio)
     {
         int spanW = (int)Math.Round(workArea.Width * ratio);
         int spanH = (int)Math.Round(workArea.Height * ratio);

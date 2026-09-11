@@ -26,7 +26,7 @@ public class WindowDiscoveryService
     public WindowDiff Refresh(WindowClassifier classifier)
     {
         var rawWindows = _windowSource();
-        var now = DateTime.Now;
+        var now = DateTime.UtcNow;
 
         var previousSnapshot = new Dictionary<IntPtr, ManagedWindow>(_knownWindows);
 
@@ -98,55 +98,67 @@ public class WindowDiscoveryService
     private static IReadOnlyList<RawWindowInfo> DefaultWindowSource()
     {
         var windows = new List<RawWindowInfo>();
-
+        // P-C2 fix: cache foreground once instead of per-window.
+        IntPtr fgHwnd = NativeMethods.GetForegroundWindow();
+        var pidNameCache = new Dictionary<uint, string>();
+        // P-B1/P-C1 optimization: reuse StringBuilders and defer GetWindowText/GetClassName/DWM until fast filters pass.
+        // We still need rect/pid for that decision, so fetch cheap Win32 first.
         NativeMethods.EnumWindows((hwnd, lParam) =>
         {
             bool isVisible = NativeMethods.IsWindowVisible(hwnd);
+            if (!isVisible) return true;
             bool isMinimized = NativeMethods.IsIconic(hwnd);
-            bool isMaximized = NativeMethods.IsZoomed(hwnd);
+            if (isMinimized) return true;
 
-            var sbTitle = new System.Text.StringBuilder(256);
-            NativeMethods.GetWindowText(hwnd, sbTitle, sbTitle.Capacity);
-
-            var sbClass = new System.Text.StringBuilder(256);
-            NativeMethods.GetClassName(hwnd, sbClass, sbClass.Capacity);
-
-            NativeMethods.GetWindowRect(hwnd, out var nativeRect);
-            var rect = new Rect(nativeRect.left, nativeRect.top, nativeRect.right - nativeRect.left, nativeRect.bottom - nativeRect.top);
-
-            NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
-            string processName = "";
-            try
-            {
-                using var process = System.Diagnostics.Process.GetProcessById((int)pid);
-                processName = process.ProcessName + ".exe";
-            }
-            catch
-            {
-                processName = "unknown.exe";
-            }
-
+            // P-C1: fast DWM check deferred — but still needed for IsEligible. Call here to avoid title/class alloc for cloaked.
             bool isCloaked = false;
             if (MonitorNativeMethods.DwmGetWindowAttribute(hwnd, MonitorNativeMethods.DWMWA_CLOAKED, out int cloakedVal, sizeof(int)) == 0)
             {
                 isCloaked = cloakedVal != 0;
+                if (isCloaked) return true;
             }
 
-            bool isForeground = NativeMethods.GetForegroundWindow() == hwnd;
+            var sbTitle = new System.Text.StringBuilder(256);
+            NativeMethods.GetWindowText(hwnd, sbTitle, sbTitle.Capacity);
+            string title = sbTitle.ToString();
+            if (string.IsNullOrWhiteSpace(title)) return true;
+
+            NativeMethods.GetWindowRect(hwnd, out var nativeRect);
+            var rect = new Rect(nativeRect.left, nativeRect.top, nativeRect.right - nativeRect.left, nativeRect.bottom - nativeRect.top);
+            if (rect.Width < 250 || rect.Height < 180) return true;
+
+            var sbClass = new System.Text.StringBuilder(256);
+            NativeMethods.GetClassName(hwnd, sbClass, sbClass.Capacity);
+            string className = sbClass.ToString();
+
+            NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+            if (!pidNameCache.TryGetValue(pid, out string? processName))
+            {
+                try
+                {
+                    using var process = System.Diagnostics.Process.GetProcessById((int)pid);
+                    processName = process.ProcessName + ".exe";
+                }
+                catch { processName = "unknown.exe"; }
+                pidNameCache[pid] = processName;
+            }
+
+            bool isMaximized = NativeMethods.IsZoomed(hwnd);
+            bool isForeground = fgHwnd == hwnd;
 
             windows.Add(new RawWindowInfo
             {
                 Hwnd = hwnd,
-                Title = sbTitle.ToString(),
-                ClassName = sbClass.ToString(),
+                Title = title,
+                ClassName = className,
                 ProcessId = (int)pid,
                 ProcessName = processName,
                 CurrentRect = rect,
-                IsVisible = isVisible,
-                IsMinimized = isMinimized,
+                IsVisible = true,
+                IsMinimized = false,
                 IsMaximized = isMaximized,
                 IsForeground = isForeground,
-                IsCloaked = isCloaked
+                IsCloaked = false
             });
 
             return true;

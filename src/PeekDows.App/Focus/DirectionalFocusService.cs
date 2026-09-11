@@ -11,7 +11,9 @@ namespace PeekDows.App.Focus;
 
 public sealed class DirectionalFocusService : IDisposable
 {
-    private const int TickIntervalMs = 40;
+    // P-A5: adaptive polling — 40ms during gesture (responsive), 100ms idle (CPU ÷2.5)
+    private const int TickIntervalMsActive = 40;
+    private const int TickIntervalMsIdle = 100;
 
     /// <summary>
     /// Minimum gap between two activations while a Ctrl+Shift gesture is held. This is the
@@ -60,7 +62,7 @@ public sealed class DirectionalFocusService : IDisposable
         FileLogger? logger = null,
         IWindowAnimator? animator = null)
         : this(gestureDetector, registry, monitorResolver, activationService, virtualDesktopService,
-               snapshotService, candidateWindowSource, getThresholdPx, new DirectionalFocusInputGate(), () => DateTime.Now, logger, animator)
+               snapshotService, candidateWindowSource, getThresholdPx, new DirectionalFocusInputGate(), () => DateTime.UtcNow, logger, animator)
     {
     }
 
@@ -77,7 +79,7 @@ public sealed class DirectionalFocusService : IDisposable
         FileLogger? logger = null,
         IWindowAnimator? animator = null)
         : this(gestureDetector, registry, monitorResolver, activationService, virtualDesktopService,
-               snapshotService, candidateWindowSource, getThresholdPx, inputGate, () => DateTime.Now, logger, animator)
+               snapshotService, candidateWindowSource, getThresholdPx, inputGate, () => DateTime.UtcNow, logger, animator)
     {
     }
 
@@ -111,7 +113,7 @@ public sealed class DirectionalFocusService : IDisposable
         _logger = logger;
         _animator = animator;
 
-        _timer = new System.Windows.Forms.Timer { Interval = TickIntervalMs };
+        _timer = new System.Windows.Forms.Timer { Interval = TickIntervalMsIdle };
         _timer.Tick += OnTimerTick;
     }
 
@@ -161,6 +163,7 @@ public sealed class DirectionalFocusService : IDisposable
             {
                 ResetState();
                 _gestureWasActive = false;
+                _timer.Interval = TickIntervalMsIdle;
             }
             return;
         }
@@ -173,6 +176,7 @@ public sealed class DirectionalFocusService : IDisposable
             {
                 ResetState();
                 _gestureWasActive = false;
+                _timer.Interval = TickIntervalMsIdle;
             }
             return;
         }
@@ -180,6 +184,7 @@ public sealed class DirectionalFocusService : IDisposable
         if (!_gestureWasActive)
         {
             _gestureWasActive = true;
+            _timer.Interval = TickIntervalMsActive;
             _anchor = Cursor.Position;
             // Pin the monitor at gesture START. For the whole Ctrl+Shift hold we resolve
             // slots against THIS monitor, so a big horizontal move that drifts across a
@@ -484,7 +489,7 @@ public sealed class DirectionalFocusService : IDisposable
     /// </summary>
     private bool TryRebuildRegistryForCurrentDesktop(Rect mouseWorkArea)
     {
-        var now = DateTime.Now;
+        var now = _nowProvider();
         if ((now - _lastRegistryRebuildAttempt).TotalMilliseconds < RebuildCooldownMs)
         {
             _logger?.Info($"Directional focus rebuild skipped: rate-limited (cooldown={RebuildCooldownMs}ms)");

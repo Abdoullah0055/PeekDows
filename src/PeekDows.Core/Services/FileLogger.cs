@@ -1,19 +1,29 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
 
 namespace PeekDows.Core.Services;
 
-public sealed class FileLogger
+public sealed class FileLogger : IDisposable
 {
     private const long DefaultMaxLogFileSizeBytes = 5 * 1024 * 1024; // 5 MB
     private const int DefaultMaxLogBackups = 5;
+    // P-A2 fix: async batch queue — Write() enqueues, background thread does IO.
+    // Batching still gives the major win (1 AppendAllText per 64 lines vs per line).
+    // Rotation check stays per batch (not per 16) so tiny-limit tests remain correct.
+    private const int BatchSize = 64;
+
 
     private readonly string _logDirectory;
     private readonly string _logFilePath;
     private readonly long _maxLogFileSizeBytes;
     private readonly int _maxLogBackups;
-    private readonly object _lock = new();
+    private readonly BlockingCollection<string> _queue = new(new ConcurrentQueue<string>());
+    private readonly Thread _writerThread;
+    private readonly object _fileLock = new();
+    private int _pendingWrites;
+    private bool _disposed;
 
     public string LogFilePath => _logFilePath;
 
@@ -41,6 +51,32 @@ public sealed class FileLogger
         _logFilePath = Path.Combine(_logDirectory, "peekdows.log");
         _maxLogFileSizeBytes = maxLogFileSizeBytes ?? DefaultMaxLogFileSizeBytes;
         _maxLogBackups = maxLogBackups ?? DefaultMaxLogBackups;
+        _writerThread = new Thread(WriterLoop) { IsBackground = true, Name = "PeekDows FileLogger" };
+        _writerThread.Start();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        Flush();
+        try { _queue.CompleteAdding(); } catch { }
+        try { if (!_writerThread.Join(1500)) { } } catch { }
+        _queue.Dispose();
+    }
+
+    public void Flush()
+    {
+        for (int i = 0; i < 120; i++)
+        {
+            if (_queue.Count == 0 && Volatile.Read(ref _pendingWrites) == 0)
+            {
+                lock (_fileLock) { }
+                if (_queue.Count == 0 && Volatile.Read(ref _pendingWrites) == 0) break;
+            }
+            Thread.Sleep(10);
+        }
+        lock (_fileLock) { }
     }
 
     public void Info(string message) => Write("INFO", message);
@@ -58,26 +94,52 @@ public sealed class FileLogger
     {
         try
         {
-            Monitor.Enter(_lock);
-            try
+            var line = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z [{level}] {message}{Environment.NewLine}";
+            if (!_queue.IsAddingCompleted)
             {
-                if (!Directory.Exists(_logDirectory))
-                {
-                    Directory.CreateDirectory(_logDirectory);
-                }
-
-                RotateIfNeeded();
-                var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
-                File.AppendAllText(_logFilePath, line);
-            }
-            finally
-            {
-                Monitor.Exit(_lock);
+                Interlocked.Increment(ref _pendingWrites);
+                bool added = _queue.TryAdd(line);
+                if (!added) Interlocked.Decrement(ref _pendingWrites);
             }
         }
         catch
         {
-            // Logging must never crash the app. If writing or rotation fails, swallow it.
+            // Logging must never crash the app.
+        }
+    }
+
+    private void WriterLoop()
+    {
+        var batch = new List<string>(BatchSize);
+        try
+        {
+            foreach (var line in _queue.GetConsumingEnumerable())
+            {
+                batch.Add(line);
+                while (batch.Count < BatchSize && _queue.TryTake(out var extra))
+                    batch.Add(extra);
+                WriteBatch(batch);
+                Interlocked.Add(ref _pendingWrites, -batch.Count);
+                batch.Clear();
+            }
+            while (_queue.TryTake(out var rem)) batch.Add(rem);
+            if (batch.Count > 0) { WriteBatch(batch); Interlocked.Add(ref _pendingWrites, -batch.Count); }
+        }
+        catch { }
+    }
+
+    private void WriteBatch(List<string> batch)
+    {
+        lock (_fileLock)
+        {
+            try
+            {
+                if (!Directory.Exists(_logDirectory))
+                    Directory.CreateDirectory(_logDirectory);
+                RotateIfNeeded();
+                File.AppendAllText(_logFilePath, string.Concat(batch));
+            }
+            catch { }
         }
     }
 

@@ -87,7 +87,7 @@ public static class NativeMethods
     /// thread's queue without waiting for it to be processed. Used for restoring minimised
     /// windows before placement/activation so a hung target cannot block the caller.
     /// </summary>
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 

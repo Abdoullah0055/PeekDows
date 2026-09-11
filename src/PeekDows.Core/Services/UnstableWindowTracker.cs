@@ -27,9 +27,9 @@ public sealed class UnstableWindowTracker
     private readonly Func<DateTime> _nowProvider;
     private readonly FileLogger? _logger;
 
-    public UnstableWindowTracker() : this(() => DateTime.Now, null) { }
+    public UnstableWindowTracker() : this(() => DateTime.UtcNow, null) { }
 
-    public UnstableWindowTracker(FileLogger? logger) : this(() => DateTime.Now, logger) { }
+    public UnstableWindowTracker(FileLogger? logger) : this(() => DateTime.UtcNow, logger) { }
 
     /// <summary>Internal ctor that accepts a clock for deterministic cooldown tests.</summary>
     internal UnstableWindowTracker(Func<DateTime> nowProvider, FileLogger? logger = null)

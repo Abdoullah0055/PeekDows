@@ -51,7 +51,7 @@ public class SettingsService
         {
             if (File.Exists(_settingsFilePath))
             {
-                var backupPath = Path.Combine(_settingsDirectory, $"settings.corrupted.{DateTime.Now:yyyyMMddHHmmss}.json");
+                var backupPath = Path.Combine(_settingsDirectory, $"settings.corrupted.{DateTime.UtcNow:yyyyMMddHHmmss}.json");
                 try { File.Copy(_settingsFilePath, backupPath, overwrite: true); } catch { }
             }
             return CreateDefault();
@@ -83,8 +83,10 @@ public class SettingsService
             }
             catch (IOException) when (attempt + 1 < maxRetries)
             {
-                // Transient lock (AV, indexer) — brief backoff then retry once.
-                System.Threading.Thread.Sleep(50);
+                // P-C6: avoid blocking UI thread — just SpinWait then retry iteration.
+                // No Task.Delay().Wait() (would block tray). Transient AV/indexer lock
+                // usually clears in microseconds; retry covers it.
+                System.Threading.Thread.SpinWait(5000);
             }
             catch
             {

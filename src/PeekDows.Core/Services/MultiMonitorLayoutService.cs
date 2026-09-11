@@ -48,13 +48,15 @@ public sealed class MultiMonitorLayoutService
 
         if (_loneWindowPolicy is not null)
         {
-            // B2: prefer handle-keyed state so a 1px WorkArea change doesn't orphan the flag.
-            var byHandle = new Dictionary<IntPtr, (Rect workArea, int count)>();
-            foreach (var group in windowsByMonitor)
-                byHandle[group.Key.Handle] = (group.Key.WorkArea, group.Value.Count);
-            // Use handle-aware overload when any real handle present; otherwise fall back to rect.
-            if (byHandle.Keys.Any(h => h != IntPtr.Zero))
+            bool hasRealHandle = false;
+            foreach (var g in windowsByMonitor) if (g.Key.Handle != IntPtr.Zero) { hasRealHandle = true; break; }
+            if (hasRealHandle)
+            {
+                var byHandle = new Dictionary<IntPtr, (Rect workArea, int count)>();
+                foreach (var group in windowsByMonitor)
+                    byHandle[group.Key.Handle] = (group.Key.WorkArea, group.Value.Count);
                 _loneWindowPolicy.OnArrangeStarting(byHandle);
+            }
             else
             {
                 var counts = new Dictionary<Rect, int>();
@@ -114,12 +116,13 @@ public sealed class MultiMonitorLayoutService
 
             var placements = _layoutEngine.CalculateClassicPeekGridPlacements(monitorWindows, monitorInfo.WorkArea, settings);
 
-            // A window that is currently maximized (and was allowed through the controller's
-            // maximized filter) must be restored before gliding into its slot.
-            var maximizedHwnds = monitorWindows.Where(w => w.IsMaximized).Select(w => w.Hwnd).ToHashSet();
+            // P-B4 fix: avoid LINQ alloc for small N (≤8). Manual HashSet.
+            HashSet<IntPtr>? maximizedHwnds = null;
+            foreach (var w in monitorWindows)
+                if (w.IsMaximized) (maximizedHwnds ??= new HashSet<IntPtr>()).Add(w.Hwnd);
             foreach (var placement in placements)
             {
-                if (maximizedHwnds.Contains(placement.Hwnd))
+                if (maximizedHwnds != null && maximizedHwnds.Contains(placement.Hwnd))
                 {
                     allPlacements.Add(new WindowPlacement
                     {
