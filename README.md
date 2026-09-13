@@ -83,6 +83,8 @@ Settings are stored at `%APPDATA%\PeekDows\settings.json`.
 
 > **Note on `Hotkeys` / `OverflowBehavior`**: `Hotkeys` is persisted but not yet editable via the settings UI; `OverflowBehavior` is deprecated and has no effect — both are kept for backward compatibility.
 
+The modern settings window (tray → Settings or double-click the tray icon) runs on WebView2 and covers General / Layout (with a live slot preview) / About. It uses an explicit Save button: changes are drafted locally and applied on Save, keeping tray toggles in sync. On machines without the WebView2 runtime, a legacy fallback window still edits the ignore lists.
+
 A monitor with exactly **one** arrangeable window gets that window **natively maximized** (instead of a 90% slot). If you manually restore a window PeekDows had maximized, it is left alone until a window opens or closes on that monitor.
 
 

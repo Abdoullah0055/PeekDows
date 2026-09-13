@@ -104,3 +104,21 @@
 - [ ] Closing a window that was just arranged → next arrange cycle handles gracefully
 - [ ] No eligible windows → app runs normally, no crash
 - [ ] Corrupt settings.json → app creates backup, loads defaults, continues normally
+
+## Settings App v2 (WebView2)
+
+Prerequisite: `dotnet run --project src/PeekDows.App`.
+
+- [ ] Tray → Settings opens the dark WebView2 window; sidebar shows General / Layout / About active and Windows / Hotkeys / Ignored apps disabled with "v2" chips.
+- [ ] Every switch renders with the current settings values (compare with `%APPDATA%\PeekDows\settings.json`).
+- [ ] Editing any control shows "● Unsaved changes" and enables Save; reverting the edit hides it again (dirty tracking flips off).
+- [ ] Save applies and the tray reflects it: Auto Arrange label flips, Start with Windows checkbox follows, Window size preset radio moves.
+- [ ] Layout preset Small/Medium/Large animates the live preview; after Save the actual windows re-arrange at the new ratio.
+- [ ] Directional focus threshold slider updates the px chip while dragging; persisted after Save (check settings.json).
+- [ ] About tab: version line matches the app version; "Open" buttons open the log file, the logs folder and the settings folder respectively.
+- [ ] Close with unsaved changes → confirmation dialog; "No" keeps the window open.
+- [ ] While the window is open and the draft is clean, toggling from the tray updates the UI silently.
+- [ ] While the draft is dirty, a tray toggle shows the amber "changed from the tray" banner instead of clobbering.
+- [ ] Cancel closes the window without applying anything (verify settings.json untouched).
+- [ ] DPI: repeat opening at 100%, 125% and 150% scaling — the window stays crisp and usable.
+- [ ] Fallback: temporarily break WebView2 (e.g. set env var `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to an invalid path), reopen Settings → legacy window opens and the log warns.
