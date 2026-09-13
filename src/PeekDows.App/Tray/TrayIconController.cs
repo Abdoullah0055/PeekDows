@@ -121,8 +121,15 @@ public class TrayIconController : IDisposable
             }
 
             var window = host ?? new SettingsLegacyWindow(settings, settingsService);
-            if (window is SettingsLegacyWindow legacy)
+            if (host is SettingsHostForm hostForm)
+            {
+                hostForm.InitializationFailed += reason =>
+                    ReplaceFailedSettingsHost(hostForm, settings, settingsService, reason);
+            }
+            else if (window is SettingsLegacyWindow legacy)
+            {
                 legacy.SettingsSaved += () => _controller.OnSettingsChanged();
+            }
 
             _settingsWindow = window;
             _settingsWindow.Show();
@@ -135,6 +142,23 @@ public class TrayIconController : IDisposable
             }
             _settingsWindow.BringToFront();
         }
+    }
+
+    private void ReplaceFailedSettingsHost(
+        SettingsHostForm host,
+        AppSettings settings,
+        SettingsService settingsService,
+        string reason)
+    {
+        _logger?.Warn($"Settings window: WebView2 initialization failed ({reason}), using legacy window");
+
+        if (!ReferenceEquals(_settingsWindow, host))
+            return;
+
+        var legacy = new SettingsLegacyWindow(settings, settingsService);
+        legacy.SettingsSaved += () => _controller.OnSettingsChanged();
+        _settingsWindow = legacy;
+        legacy.Show();
     }
 
     private void OnStateChanged(RuntimeState state)

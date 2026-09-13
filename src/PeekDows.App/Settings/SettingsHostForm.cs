@@ -27,6 +27,9 @@ public sealed class SettingsHostForm : Form
     private WebView2? _webView;
     private bool _isDirty;
 
+    /// <summary>Raised when WebView2 fails after the host form was created.</summary>
+    public event Action<string>? InitializationFailed;
+
     /// <summary>
     /// Returns a ready-to-show host form, or null when the WebView2 runtime is missing
     /// (caller falls back to the legacy window). Never throws.
@@ -96,8 +99,7 @@ public sealed class SettingsHostForm : Form
         catch (Exception ex)
         {
             _logger?.Error("SettingsHostForm: WebView2 initialization failed", ex);
-            MessageBox.Show(this, $"Failed to initialize the settings UI: {ex.Message}",
-                "PeekDows", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            InitializationFailed?.Invoke(ex.Message);
             Close();
         }
     }
@@ -144,6 +146,7 @@ public sealed class SettingsHostForm : Form
         _controller.WindowSizePresetChanged -= OnExternalPresetChange;
         _controller.StateChanged -= OnExternalStateChange;
         _bridge.DirtyChanged -= OnDirtyChanged;
+        InitializationFailed = null;
     }
 
     private void OnExternalChange(bool _) => PostExternalChange();
