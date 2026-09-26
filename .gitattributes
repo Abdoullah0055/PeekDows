@@ -1,0 +1,7 @@
+*.exe binary
+*.msi binary
+*.msix binary
+*.msp binary
+*.ico binary
+*.png binary
+*.pdb binary
