@@ -104,4 +104,9 @@ tests/
 
 ## License
 
-All rights reserved.
+MIT — see [LICENSE](LICENSE).
+
+This project depends on the Microsoft Edge WebView2 runtime for its
+settings window. Building from source restores the `Microsoft.Web.WebView2`
+NuGet package, which is distributed under Microsoft's own WebView2 terms
+(see [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES.md)).
