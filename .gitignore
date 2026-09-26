@@ -485,3 +485,6 @@ $RECYCLE.BIN/
 # Keep PeekDows Win32 interop source files tracked
 !src/PeekDows.Core/Win32/
 !src/PeekDows.Core/Win32/**
+
+# Local pre-publication audit (private data, never commit)
+2026-09-26-OPENSOURCE-AUDIT.md
