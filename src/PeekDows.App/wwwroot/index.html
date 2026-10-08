@@ -23,17 +23,17 @@
           About
         </button>
         <div class="navsep"></div>
-        <button class="navitem disabled" disabled title="Coming in v2">
+        <button class="navitem" data-page="windows">
           <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M7 21h10"/></svg>
-          Windows <span class="chip">v2</span>
+          Windows
         </button>
-        <button class="navitem disabled" disabled title="Coming in v2">
+        <button class="navitem" data-page="hotkeys">
           <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M9 14h6"/></svg>
-          Hotkeys <span class="chip">v2</span>
+          Hotkeys
         </button>
-        <button class="navitem disabled" disabled title="Coming in v2">
+        <button class="navitem" data-page="ignored">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>
-          Ignored apps <span class="chip">v2</span>
+          Ignored apps
         </button>
         <div class="foot" id="statusFoot"><span class="dot"></span>Running</div>
       </nav>
@@ -132,6 +132,54 @@
             <div class="row"><div class="txt"><div class="t">Logs folder</div><div class="d">Browse all rotated log files.</div></div><button class="btn" id="openLogsFolder">Open</button></div>
             <div class="row"><div class="txt"><div class="t">Settings folder</div><div class="d">%APPDATA%\PeekDows\settings.json</div></div><button class="btn" id="openSettingsFolder">Open</button></div>
           </div>
+        </section>
+
+        <!-- WINDOWS (read-only snapshot) -->
+        <section class="page" id="page-windows">
+          <h2>Windows</h2>
+          <p class="sub">Read-only snapshot. Refresh to reload.</p>
+          <div class="row">
+            <input id="windowsFilter" type="text" placeholder="Filter by title or process…" />
+            <button id="windowsRefresh" class="btn">Refresh</button>
+          </div>
+          <div class="card">
+            <table class="table" id="windowsTable">
+              <thead>
+                <tr><th>Title</th><th>Process</th><th>Eligible</th><th></th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- HOTKEYS -->
+        <section class="page" id="page-hotkeys">
+          <h2>Hotkeys</h2>
+          <p class="sub">Click a combo, press the new keys, then Save.</p>
+          <div class="card">
+            <div class="row"><span>Arrange now</span><button class="btn capture" data-hotkey="arrangeNow">Ctrl+Alt+Space</button></div>
+            <div class="row"><span>Pause / resume</span><button class="btn capture" data-hotkey="pauseResume">Ctrl+Alt+P</button></div>
+            <div class="row"><button class="btn" id="hotkeysReset">Reset defaults</button></div>
+          </div>
+        </section>
+
+        <!-- IGNORED APPS -->
+        <section class="page" id="page-ignored">
+          <h2>Ignored apps</h2>
+          <p class="sub">One entry per line. Applied on Save.</p>
+          <div class="card">
+            <div class="row" style="display:block">
+              <div class="txt"><div class="t">Ignored processes</div></div>
+              <textarea id="ignoredProcesses" class="textarea" rows="6" spellcheck="false"></textarea>
+            </div>
+          </div>
+          <div class="card">
+            <div class="row" style="display:block">
+              <div class="txt"><div class="t">Ignored window classes</div></div>
+              <textarea id="ignoredClasses" class="textarea" rows="6" spellcheck="false"></textarea>
+            </div>
+          </div>
+          <div class="card"><div class="row"><div class="txt"><div class="t">Always ignored (built-in)</div><div class="d">SearchHost.exe, StartMenuExperienceHost.exe, Shell_TrayWnd, Progman… (read-only)</div></div></div>
         </section>
       </main>
     </div>

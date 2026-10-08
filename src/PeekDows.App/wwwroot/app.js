@@ -5,9 +5,13 @@ const EDITABLE_KEYS = [
   "enabled", "autoArrange", "animate", "directionalFocus", "startWithWindows",
   "allowRepositionMaximized", "preset", "arrangeOnStartup",
   "showTrayNotifications", "thresholdPx",
+  "ignoredProcesses", "ignoredClasses", "hotkeys",
 ];
 
 const state = { snapshot: null, draft: null, dirty: false };
+
+// Read-only Windows snapshot rows (filled on Refresh, never part of the draft).
+let windowsRows = [];
 
 const $ = (id) => document.getElementById(id);
 const post = (msg) => {
@@ -16,7 +20,12 @@ const post = (msg) => {
 
 function pick(snapshot) {
   const out = {};
-  for (const k of EDITABLE_KEYS) out[k] = snapshot[k];
+  for (const k of EDITABLE_KEYS) {
+    const v = snapshot[k];
+    if (Array.isArray(v)) out[k] = [...v];
+    else if (v !== null && typeof v === "object") out[k] = { ...v };
+    else out[k] = v;
+  }
   return out;
 }
 
@@ -28,11 +37,15 @@ window.chrome?.webview?.addEventListener("message", (event) => {
   if (msg.type === "settings") adoptSnapshot(msg.data);
   else if (msg.type === "externalChange") onExternalChange(msg.data);
   else if (msg.type === "applied") onApplied(msg);
+  else if (msg.type === "windows") { windowsRows = msg.data ?? []; renderWindowsRows(); }
 });
 
 function adoptSnapshot(data) {
   state.snapshot = data;
   state.draft = pick(data);
+  state.draft.ignoredProcesses ??= [];
+  state.draft.ignoredClasses ??= [];
+  state.draft.hotkeys ??= {};
   setControlsFrom(data);
   markClean();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;
@@ -69,6 +82,16 @@ function setControlsFrom(data) {
     el.checked = !!data[el.dataset.key];
   }
   $("threshold").value = data.thresholdPx;
+  const ip = $("ignoredProcesses");
+  if (ip) ip.value = (data.ignoredProcesses ?? []).join("\n");
+  const ic = $("ignoredClasses");
+  if (ic) ic.value = (data.ignoredClasses ?? []).join("\n");
+  const hk = data.hotkeys ?? {};
+  for (const btn of document.querySelectorAll("button[data-hotkey]")) {
+    const name = btn.dataset.hotkey;
+    if (hk[name]) btn.textContent = hk[name];
+  }
+  // Windows table stays empty until Refresh — never filled from snapshot.
 }
 
 // ---------- dirty tracking ----------
@@ -103,6 +126,114 @@ threshold.addEventListener("input", () => {
   $("thresholdValue").textContent = `${threshold.value} px`;
   syncDirty();
 });
+
+// ---------- ignored lists (one entry per line, cleaned C#-side on Save) ----------
+for (const id of ["ignoredProcesses", "ignoredClasses"]) {
+  const ta = $(id);
+  if (!ta) continue;
+  ta.addEventListener("input", () => {
+    if (!state.draft) return;
+    state.draft[id] = ta.value.split("\n");
+    syncDirty();
+  });
+}
+
+// ---------- hotkeys (capture next keydown as "Ctrl+Alt+X") ----------
+function buildGesture(e) {
+  const parts = [];
+  if (e.ctrlKey) parts.push("Ctrl");
+  if (e.altKey) parts.push("Alt");
+  if (e.shiftKey) parts.push("Shift");
+  if (e.metaKey) parts.push("Win");
+  const k = e.key;
+  if (k === "Control" || k === "Alt" || k === "Shift" || k === "Meta") return null;
+  let last;
+  if (k === " " || k === "Spacebar") last = "Space";
+  else if (typeof k === "string" && k.length === 1) last = k.toUpperCase();
+  else if (typeof k === "string" && /^F\d{1,2}$/i.test(k)) last = k.toUpperCase();
+  else last = k;
+  if (parts.length === 0) return null;
+  parts.push(last);
+  return parts.join("+");
+}
+
+for (const btn of document.querySelectorAll("button[data-hotkey]")) {
+  btn.addEventListener("click", () => {
+    if (!state.draft) return;
+    const name = btn.dataset.hotkey;
+    const prev = btn.textContent;
+    btn.textContent = "Press keys…";
+    const onKey = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const gesture = buildGesture(e);
+      if (gesture) {
+        state.draft.hotkeys ??= {};
+        state.draft.hotkeys[name] = gesture;
+        btn.textContent = gesture;
+        syncDirty();
+      } else {
+        btn.textContent = prev;
+      }
+    };
+    window.addEventListener("keydown", onKey, { once: true, capture: true });
+  });
+}
+
+const hotkeysReset = $("hotkeysReset");
+if (hotkeysReset) {
+  hotkeysReset.addEventListener("click", () => {
+    if (!state.draft) return;
+    state.draft.hotkeys ??= {};
+    state.draft.hotkeys.arrangeNow = "Ctrl+Alt+Space";
+    state.draft.hotkeys.pauseResume = "Ctrl+Alt+P";
+    for (const btn of document.querySelectorAll("button[data-hotkey]")) {
+      const v = state.draft.hotkeys[btn.dataset.hotkey];
+      if (v) btn.textContent = v;
+    }
+    syncDirty();
+  });
+}
+
+// ---------- windows snapshot (read-only + "copy process to draft") ----------
+function renderWindowsRows() {
+  const filterEl = $("windowsFilter");
+  const q = ((filterEl && filterEl.value) || "").toLowerCase();
+  const tb = document.querySelector("#windowsTable tbody");
+  if (!tb) return;
+  tb.innerHTML = "";
+  for (const w of windowsRows) {
+    if (q && !((w.title + " " + w.process).toLowerCase().includes(q))) continue;
+    const tr = document.createElement("tr");
+    const tdT = document.createElement("td"); tdT.textContent = w.title;
+    const tdP = document.createElement("td"); tdP.textContent = w.process;
+    const tdE = document.createElement("td"); tdE.textContent = w.eligible ? "yes" : (w.reason || "no");
+    const tdB = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = "Ignorer ce process";
+    btn.addEventListener("click", () => {
+      // Copies into the ignored-processes draft textarea, no save — user presses Save.
+      const ta = $("ignoredProcesses");
+      if (!ta || !state.draft) return;
+      const lines = ta.value.split("\n").map((s) => s.trim()).filter(Boolean);
+      if (!lines.some((l) => l.toLowerCase() === String(w.process).toLowerCase())) {
+        lines.push(w.process);
+        ta.value = lines.join("\n");
+        state.draft.ignoredProcesses = lines;
+        syncDirty();
+      }
+    });
+    tdB.appendChild(btn);
+    tr.append(tdT, tdP, tdE, tdB);
+    tb.appendChild(tr);
+  }
+}
+
+const windowsRefresh = $("windowsRefresh");
+if (windowsRefresh) windowsRefresh.addEventListener("click", () => post({ type: "requestWindows" }));
+const windowsFilter = $("windowsFilter");
+if (windowsFilter) windowsFilter.addEventListener("input", renderWindowsRows);
 
 for (const btn of document.querySelectorAll("#preset .seg")) {
   btn.addEventListener("click", () => {

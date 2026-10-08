@@ -60,6 +60,8 @@ public sealed class SettingsHostForm : Form
         _settingsService = settingsService;
         _logger = logger;
         _bridge = new SettingsBridge(controller, settingsService, logger, openSettingsFolder: OpenSettingsFolder);
+        _bridge.SetWindowsProvider(() => _controller.GetWindowsSnapshot());
+        _bridge.SetWindowsMessageHandler((type, root) => WindowsMessageHandler.TryHandle(type, root, () => _controller.GetWindowsSnapshot(), WindowsMessageHandler.CamelCase));
         _bridge.DirtyChanged += OnDirtyChanged;
 
         Text = "PeekDows Settings";
