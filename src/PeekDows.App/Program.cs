@@ -24,8 +24,12 @@ static class Program
             return;
         }
 
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
+        // ApplicationConfiguration applies the csproj settings (notably
+        // ApplicationHighDpiMode=PerMonitorV2): without it the process stays
+        // DPI-unaware and Windows bitmap-scales the whole window on scaled
+        // displays (>100%), making the UI look blurry. It also enables visual
+        // styles, so the two legacy calls below are no longer needed.
+        ApplicationConfiguration.Initialize();
 
         using (var context = new PeekDowsAppContext())
         {
