@@ -6,7 +6,7 @@ using PeekDows.Core.Win32;
 
 namespace PeekDows.App.Hotkeys;
 
-public sealed class HotkeyService : IDisposable
+public sealed partial class HotkeyService : IDisposable
 {
     private const int HOTKEY_ARRANGE_ID = 1;
     private const int HOTKEY_PAUSE_ID = 2;

@@ -14,7 +14,7 @@ using PeekDows.Core.Win32;
 
 namespace PeekDows.App;
 
-public class PeekDowsAppContext : ApplicationContext, IPeekDowsController
+public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsController
 {
     private readonly SettingsService _settingsService;
     private readonly WindowDiscoveryService _discoveryService;

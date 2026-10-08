@@ -7,24 +7,6 @@ using PeekDows.Core.Services;
 namespace PeekDows.App.Settings;
 
 /// <summary>
-/// Editable draft payload sent by the settings UI on Save. Nullable keys are "untouched".
-/// JSON is camelCase; PropertyNameCaseInsensitive accepts either casing.
-/// </summary>
-public sealed class SettingsDraft
-{
-    public bool? Enabled { get; set; }
-    public bool? AutoArrange { get; set; }
-    public bool? Animate { get; set; }
-    public bool? DirectionalFocus { get; set; }
-    public bool? StartWithWindows { get; set; }
-    public bool? AllowRepositionMaximized { get; set; }
-    public string? Preset { get; set; }
-    public bool? ArrangeOnStartup { get; set; }
-    public bool? ShowTrayNotifications { get; set; }
-    public int? ThresholdPx { get; set; }
-}
-
-/// <summary>
 /// Pure JSON message protocol between the WebView2 settings UI and the live app.
 /// Knows nothing about WebView2 or WinForms: HandleMessage takes a JSON string and
 /// returns the JSON response to post back, or null when no response is expected.
@@ -34,7 +16,7 @@ public sealed class SettingsDraft
 ///             openSettingsFolder, dirtyChanged{value}
 ///   app → UI: settings{data}, externalChange{data}, applied{ok, data|error}, error{code}
 /// </summary>
-public sealed class SettingsBridge
+public sealed partial class SettingsBridge
 {
     private static readonly JsonSerializerOptions ReadOptions = new() { PropertyNameCaseInsensitive = true };
     private static readonly JsonSerializerOptions WriteOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -44,6 +26,7 @@ public sealed class SettingsBridge
     private readonly FileLogger? _logger;
     private readonly Func<string> _appVersionProvider;
     private readonly Action? _openSettingsFolder;
+    private Func<System.Collections.Generic.IReadOnlyList<WindowRow>>? _windowsProvider;
 
     /// <summary>Raised when the UI reports its dirty state flipped (Save/Cancel footer).</summary>
     public event Action<bool>? DirtyChanged;
@@ -53,14 +36,38 @@ public sealed class SettingsBridge
         SettingsService settingsService,
         FileLogger? logger = null,
         Func<string>? appVersionProvider = null,
-        Action? openSettingsFolder = null)
+        Action? openSettingsFolder = null,
+        Func<System.Collections.Generic.IReadOnlyList<WindowRow>>? windowsProvider = null)
     {
         _controller = controller;
         _settingsService = settingsService;
         _logger = logger;
         _appVersionProvider = appVersionProvider ?? DefaultAppVersion;
         _openSettingsFolder = openSettingsFolder;
+        _windowsProvider = windowsProvider;
     }
+
+    /// <summary>Injection alternative du provider Windows (utilisée par SettingsHostForm).</summary>
+    public void SetWindowsProvider(Func<System.Collections.Generic.IReadOnlyList<WindowRow>> provider)
+        => _windowsProvider = provider;
+
+    // ----- hooks v2 (implémentés dans des fichiers partiels exclusifs) -----
+    // Note: les hooks void sans implémentation sont des no-ops (pas d'erreur build).
+    // Pour Windows on utilise un handler injectable (un partial non-void exigerait
+    // une implémentation immédiate et casserait le build avant l'arrivée de l'Agent C).
+    partial void AugmentSnapshotIgnored(System.Collections.Generic.Dictionary<string, object?> data);
+    partial void AugmentSnapshotHotkeys(System.Collections.Generic.Dictionary<string, object?> data);
+    partial void ApplyIgnoredDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool plainChanged);
+    partial void ApplyHotkeysDraft(SettingsDraft draft, ref string? hotkeyError);
+
+    private Func<string, JsonElement, string?>? _windowsMessageHandler;
+
+    /// <summary>Enregistre le handler du message requestWindows (fourni par l'Agent C, wiré par D).</summary>
+    public void SetWindowsMessageHandler(Func<string, JsonElement, string?> handler)
+        => _windowsMessageHandler = handler;
+
+    private string? TryHandleWindowsMessage(string type, JsonElement root)
+        => _windowsMessageHandler?.Invoke(type, root);
 
     private static string DefaultAppVersion()
         => System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
@@ -76,21 +83,24 @@ public sealed class SettingsBridge
     private object SnapshotData()
     {
         var s = _controller.CurrentSettings;
-        return new
+        var data = new System.Collections.Generic.Dictionary<string, object?>(System.StringComparer.Ordinal)
         {
-            enabled = s.Enabled,
-            autoArrange = s.AutoArrange,
-            animate = s.AnimateWindowTransitions,
-            directionalFocus = s.DirectionalFocusEnabled,
-            startWithWindows = s.StartWithWindows,
-            allowRepositionMaximized = s.AllowRepositionMaximizedWindows,
-            preset = s.WindowSizePreset.ToString(),
-            arrangeOnStartup = s.ArrangeOnStartup,
-            showTrayNotifications = s.ShowTrayNotifications,
-            thresholdPx = s.DirectionalFocusThresholdPx,
-            version = s.Version,
-            appVersion = _appVersionProvider()
+            ["enabled"] = s.Enabled,
+            ["autoArrange"] = s.AutoArrange,
+            ["animate"] = s.AnimateWindowTransitions,
+            ["directionalFocus"] = s.DirectionalFocusEnabled,
+            ["startWithWindows"] = s.StartWithWindows,
+            ["allowRepositionMaximized"] = s.AllowRepositionMaximizedWindows,
+            ["preset"] = s.WindowSizePreset.ToString(),
+            ["arrangeOnStartup"] = s.ArrangeOnStartup,
+            ["showTrayNotifications"] = s.ShowTrayNotifications,
+            ["thresholdPx"] = s.DirectionalFocusThresholdPx,
+            ["version"] = s.Version,
+            ["appVersion"] = _appVersionProvider(),
         };
+        AugmentSnapshotIgnored(data);
+        AugmentSnapshotHotkeys(data);
+        return data;
     }
 
     /// <summary>
@@ -142,7 +152,13 @@ public sealed class SettingsBridge
                     bool dirty = root.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.True;
                     DirtyChanged?.Invoke(dirty);
                     return null;
+                case "requestWindows":
+                    var windowsResponse = TryHandleWindowsMessage(type, root);
+                    if (windowsResponse is not null) return windowsResponse;
+                    return Error("windows-provider-missing");
                 default:
+                    var ext = TryHandleWindowsMessage(type, root);
+                    if (ext is not null) return ext;
                     _logger?.Info($"SettingsBridge: unknown message type '{type}' ignored");
                     return Error($"unknown-type:{type}");
             }
@@ -198,6 +214,12 @@ public sealed class SettingsBridge
         if (draft.ArrangeOnStartup is { } ov && settings.ArrangeOnStartup != ov) { settings.ArrangeOnStartup = ov; plainChanged = true; }
         if (draft.ShowTrayNotifications is { } tv && settings.ShowTrayNotifications != tv) { settings.ShowTrayNotifications = tv; plainChanged = true; }
         if (draft.ThresholdPx is { } th && th > 0 && settings.DirectionalFocusThresholdPx != th) { settings.DirectionalFocusThresholdPx = th; plainChanged = true; }
+
+        ApplyIgnoredDraft(draft, settings, ref plainChanged);
+        string? hotkeyError = null;
+        ApplyHotkeysDraft(draft, ref hotkeyError);
+        if (hotkeyError is not null)
+            return Applied(ok: false, error: hotkeyError);
 
         if (plainChanged)
         {

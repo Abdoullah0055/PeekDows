@@ -34,6 +34,13 @@ public interface IPeekDowsController
     void OpenLogsFolder();
     void OnSettingsChanged();
     void Exit();
+    bool TryUpdateHotkey(string name, string gesture, out string error)
+    {
+        error = "not-implemented";
+        return false;
+    }
+    System.Collections.Generic.IReadOnlyList<Settings.WindowRow> GetWindowsSnapshot()
+        => System.Array.Empty<Settings.WindowRow>();
     event Action<RuntimeState>? StateChanged;
     event Action<bool>? AutoArrangeChanged;
     event Action<bool>? StartWithWindowsChanged;
