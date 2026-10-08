@@ -163,18 +163,52 @@ body {
   font-family: "Segoe UI", monospace; font-size: 12.5px; line-height: 1.5;
 }
 .textarea:focus { outline: none; border-color: var(--accent); }
-#windowsFilter {
+#windowsFilter, #ignoredSearch {
   flex: 1; padding: 8px 12px;
   background: var(--bg-deep); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px;
   font-family: inherit; font-size: 12.5px;
 }
-#windowsFilter:focus { outline: none; border-color: var(--accent); }
+#ignoredSearch { width: 100%; margin-top: 10px; }
+#windowsFilter:focus, #ignoredSearch:focus { outline: none; border-color: var(--accent); }
 .table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .table th, .table td { text-align: left; padding: 9px 12px; border-top: 1px solid var(--border); }
 .table thead th { border-top: none; color: var(--muted); font-weight: 600; font-size: 11.5px; }
 .table td .btn { padding: 4px 12px; font-size: 12px; }
 .capture { min-width: 150px; font-family: "Segoe UI", monospace; }
+
+/* Ignored apps: search results + persistent list share the checkrow look */
+.checkrow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 4px; font-size: 12.5px; cursor: pointer;
+  border-top: 1px solid var(--border);
+}
+.checkrow:first-child { border-top: none; }
+.checkrow input[type="checkbox"] { width: 15px; height: 15px; flex: none; accent-color: var(--accent); cursor: pointer; }
+.checkrow .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkrow .sub { color: var(--muted); font-size: 11.5px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { padding: 10px 4px; color: var(--muted); font-size: 12px; }
+details.advanced summary { padding: 13px 16px; cursor: pointer; font-size: 13.5px; list-style: none; }
+details.advanced summary::-webkit-details-marker { display: none; }
+details.advanced summary::before { content: "▸ "; color: var(--muted); }
+details.advanced[open] summary::before { content: "▾ "; }
+
+/* Un-ignore confirm modal */
+.modalback {
+  position: absolute; inset: 0; z-index: 20;
+  background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center;
+}
+.modalback[hidden] { display: none; }
+.modal {
+  width: 340px; max-width: calc(100% - 48px);
+  background: var(--bg-deep); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px;
+}
+.modal .t { font-size: 14px; font-weight: 600; }
+.modal .t span { color: var(--accent); }
+.modal .d { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+.modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 
 ::-webkit-scrollbar { width: 10px; }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 5px; border: 2px solid var(--bg); }

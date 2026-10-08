@@ -166,20 +166,37 @@
         <!-- IGNORED APPS -->
         <section class="page" id="page-ignored">
           <h2>Ignored apps</h2>
-          <p class="sub">One entry per line. Applied on Save.</p>
+          <p class="sub">Search a running app and check it to ignore it. The list below is persistent — entries stay even when the app or PeekDows is closed. Applied on Save.</p>
           <div class="card">
             <div class="row" style="display:block">
-              <div class="txt"><div class="t">Ignored processes</div></div>
-              <textarea id="ignoredProcesses" class="textarea" rows="6" spellcheck="false"></textarea>
+              <div class="txt"><div class="t">Find an app</div><div class="d">Searches windows currently open.</div></div>
+              <input id="ignoredSearch" type="text" placeholder="Type an app or process name…" autocomplete="off" spellcheck="false" />
+              <div id="ignoredSearchResults"></div>
             </div>
           </div>
           <div class="card">
             <div class="row" style="display:block">
-              <div class="txt"><div class="t">Ignored window classes</div></div>
+              <div class="txt"><div class="t">Ignored apps</div><div class="d">Uncheck an app to stop ignoring it (confirmation required).</div></div>
+              <div id="ignoredList"></div>
+            </div>
+          </div>
+          <details class="card advanced">
+            <summary>Advanced: window classes</summary>
+            <div class="row" style="display:block">
               <textarea id="ignoredClasses" class="textarea" rows="6" spellcheck="false"></textarea>
             </div>
-          </div>
+          </details>
           <div class="card"><div class="row"><div class="txt"><div class="t">Always ignored (built-in)</div><div class="d">SearchHost.exe, StartMenuExperienceHost.exe, Shell_TrayWnd, Progman… (read-only)</div></div></div>
+          <div class="modalback" id="unignoreModalBack" hidden>
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="unignoreTitle">
+              <div class="t" id="unignoreTitle">Stop ignoring <span id="unignoreName"></span>?</div>
+              <div class="d">Its windows will be arranged again after Save.</div>
+              <div class="actions">
+                <button class="btn" id="unignoreCancel">Keep ignoring</button>
+                <button class="btn primary" id="unignoreConfirm">Stop ignoring</button>
+              </div>
+            </div>
+          </div>
         </section>
       </main>
     </div>

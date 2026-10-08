@@ -82,8 +82,8 @@ function setControlsFrom(data) {
     el.checked = !!data[el.dataset.key];
   }
   $("threshold").value = data.thresholdPx;
-  const ip = $("ignoredProcesses");
-  if (ip) ip.value = (data.ignoredProcesses ?? []).join("\n");
+  renderIgnoredList();
+  renderIgnoredSearch();
   const ic = $("ignoredClasses");
   if (ic) ic.value = (data.ignoredClasses ?? []).join("\n");
   const hk = data.hotkeys ?? {};
@@ -127,8 +127,8 @@ threshold.addEventListener("input", () => {
   syncDirty();
 });
 
-// ---------- ignored lists (one entry per line, cleaned C#-side on Save) ----------
-for (const id of ["ignoredProcesses", "ignoredClasses"]) {
+// ---------- ignored classes (one entry per line, cleaned C#-side on Save) ----------
+for (const id of ["ignoredClasses"]) {
   const ta = $(id);
   if (!ta) continue;
   ta.addEventListener("input", () => {
@@ -137,6 +137,145 @@ for (const id of ["ignoredProcesses", "ignoredClasses"]) {
     syncDirty();
   });
 }
+
+// ---------- ignored apps (search + check to ignore, uncheck asks to confirm) ----------
+// Source of truth is state.draft.ignoredProcesses (persisted to settings.json on
+// Save), independent from the transient windowsRows cache: entries survive app
+// and PeekDows restarts. Arrays are always REPLACED (never mutated in place) so
+// pick()'s copies keep dirty tracking exact.
+const BUILTIN_PROCESSES = new Set([
+  "searchhost.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe",
+  "textinputhost.exe", "lockapp.exe",
+]);
+
+const sameProc = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+
+function isIgnored(proc) {
+  return (state.draft?.ignoredProcesses ?? []).some((p) => sameProc(p, proc));
+}
+
+function addIgnored(proc) {
+  if (!state.draft || !proc || isIgnored(proc)) return;
+  state.draft.ignoredProcesses = [...(state.draft.ignoredProcesses ?? []), proc];
+  syncDirty();
+  renderIgnoredList();
+  renderIgnoredSearch();
+}
+
+let pendingUnignore = null; // { proc } while the confirm modal is open
+
+function askUnignore(proc) {
+  pendingUnignore = { proc };
+  $("unignoreName").textContent = proc;
+  $("unignoreModalBack").hidden = false;
+}
+
+function closeUnignoreModal() {
+  pendingUnignore = null;
+  $("unignoreModalBack").hidden = true;
+  // Re-render: the unchecked box returns to checked since the draft never changed.
+  renderIgnoredList();
+  renderIgnoredSearch();
+}
+
+function onIgnoredCheck(proc, checkbox) {
+  if (!state.draft) return;
+  if (checkbox.checked) addIgnored(proc);
+  else {
+    // Keep the box visually unchecked under the modal; Cancel re-renders it checked.
+    askUnignore(proc);
+  }
+}
+
+function checkRow(proc, sub, checked) {
+  const row = document.createElement("label");
+  row.className = "checkrow";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = checked;
+  box.addEventListener("change", () => onIgnoredCheck(proc, box));
+  const txt = document.createElement("span");
+  txt.className = "txt";
+  txt.textContent = proc;
+  row.append(box, txt);
+  if (sub) {
+    const s = document.createElement("span");
+    s.className = "sub";
+    s.textContent = sub;
+    row.append(s);
+  }
+  return row;
+}
+
+function renderIgnoredList() {
+  const box = $("ignoredList");
+  if (!box || !state.draft) return;
+  box.innerHTML = "";
+  const list = state.draft.ignoredProcesses ?? [];
+  if (list.length === 0) {
+    box.innerHTML = '<div class="empty">No ignored apps yet. Search above to add one.</div>';
+    return;
+  }
+  for (const name of [...list].sort((a, b) => String(a).localeCompare(String(b)))) {
+    box.append(checkRow(name, null, true));
+  }
+}
+
+function renderIgnoredSearch() {
+  const input = $("ignoredSearch");
+  const box = $("ignoredSearchResults");
+  if (!input || !box) return;
+  box.innerHTML = "";
+  const q = input.value.trim().toLowerCase();
+  if (!q) return;
+  if (windowsRows.length === 0) {
+    post({ type: "requestWindows" });
+    box.innerHTML = '<div class="empty">Loading open windows… type again in a moment.</div>';
+    return;
+  }
+  const seen = new Set();
+  const matches = [];
+  for (const w of windowsRows) {
+    const proc = String(w.process ?? "");
+    const key = proc.toLowerCase();
+    if (!proc || seen.has(key) || BUILTIN_PROCESSES.has(key)) continue;
+    if (!key.includes(q) && !String(w.title ?? "").toLowerCase().includes(q)) continue;
+    seen.add(key);
+    matches.push({ process: proc, title: w.title });
+  }
+  if (matches.length === 0) {
+    box.innerHTML = '<div class="empty">No running app matches — it will be searchable once open.</div>';
+    return;
+  }
+  for (const m of matches.slice(0, 30)) {
+    box.append(checkRow(m.process, m.title, isIgnored(m.process)));
+  }
+}
+
+const ignoredSearch = $("ignoredSearch");
+if (ignoredSearch) {
+  ignoredSearch.addEventListener("input", renderIgnoredSearch);
+  ignoredSearch.addEventListener("focus", () => {
+    if (windowsRows.length === 0) post({ type: "requestWindows" });
+  });
+}
+
+const unignoreConfirm = $("unignoreConfirm");
+if (unignoreConfirm) unignoreConfirm.addEventListener("click", () => {
+  if (pendingUnignore && state.draft) {
+    const proc = pendingUnignore.proc;
+    state.draft.ignoredProcesses =
+      (state.draft.ignoredProcesses ?? []).filter((p) => !sameProc(p, proc));
+    syncDirty();
+  }
+  closeUnignoreModal();
+});
+const unignoreCancel = $("unignoreCancel");
+if (unignoreCancel) unignoreCancel.addEventListener("click", closeUnignoreModal);
+const unignoreBack = $("unignoreModalBack");
+if (unignoreBack) unignoreBack.addEventListener("click", (e) => {
+  if (e.target === unignoreBack) closeUnignoreModal();
+});
 
 // ---------- hotkeys (capture next keydown as "Ctrl+Alt+X") ----------
 function buildGesture(e) {
@@ -213,16 +352,9 @@ function renderWindowsRows() {
     btn.className = "btn";
     btn.textContent = "Ignorer ce process";
     btn.addEventListener("click", () => {
-      // Copies into the ignored-processes draft textarea, no save — user presses Save.
-      const ta = $("ignoredProcesses");
-      if (!ta || !state.draft) return;
-      const lines = ta.value.split("\n").map((s) => s.trim()).filter(Boolean);
-      if (!lines.some((l) => l.toLowerCase() === String(w.process).toLowerCase())) {
-        lines.push(w.process);
-        ta.value = lines.join("\n");
-        state.draft.ignoredProcesses = lines;
-        syncDirty();
-      }
+      // Adds to the ignored-apps draft (persistent on Save) and refreshes that
+      // page if visible — user presses Save to apply.
+      addIgnored(w.process);
     });
     tdB.appendChild(btn);
     tr.append(tdT, tdP, tdE, tdB);

@@ -122,6 +122,8 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Cancel closes the window without applying anything (verify settings.json untouched).
 - [ ] DPI: repeat opening at 100%, 125% and 150% scaling — the window stays crisp and usable.
 - [ ] Fallback: temporarily break WebView2 (e.g. set env var `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to an invalid path), reopen Settings → legacy window opens and the log warns.
-- [ ] Ignored apps round-trip: on the Ignored apps page add `notepad.exe` to ignored processes, Save, verify it appears in `%APPDATA%\PeekDows\settings.json`, reopen Settings → the entry is still listed.
+- [ ] Ignored apps search-and-check: open a test app (e.g. Notepad), on the Ignored apps page type its name → it appears with a checkbox → check it → Save → it is in `%APPDATA%\PeekDows\settings.json`; close the app and PeekDows, reopen both → the entry is still listed (persistence).
 - [ ] Hotkeys: change Pause / resume from `Ctrl+Alt+P` to `Ctrl+Alt+O`, Save → the new combo toggles pause; then try a conflicting combo, Save → an error is shown and the previous combo still works.
-- [ ] Windows: open the Windows page, Refresh → rows are listed (title, process, eligibility); click "Ignorer ce process" on a row → the process is copied into the Ignored apps draft (Save still required to apply).
+- [ ] Windows: open the Windows page, Refresh → rows are listed (title, process, eligibility); click "Ignorer ce process" on a row → the process appears checked in the Ignored apps list (Save still required to apply).
+- [ ] Un-ignore confirm: on the Ignored apps page uncheck an entry → a dark confirm modal names the app → "Keep ignoring" leaves it checked and untouched; "Stop ignoring" + Save removes it from `settings.json`.
+- [ ] Ignored classes stay collapsed under "Advanced: window classes" and still save one-entry-per-line.
