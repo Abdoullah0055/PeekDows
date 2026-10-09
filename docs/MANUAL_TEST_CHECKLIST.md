@@ -128,30 +128,20 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Un-ignore confirm: on the Ignored apps page uncheck an entry → a dark confirm modal names the app → "Keep ignoring" leaves it checked and untouched; "Stop ignoring" + Save removes it from `settings.json`.
 - [ ] Ignored classes stay collapsed under "Advanced: window classes" and still save one-entry-per-line.
 
-## Beta — Direction hints (arrows-only overlay)
+## Beta — Direction hints (arrows-only overlay, double-tap Ctrl)
 - [ ] Tray → Direction hints ▸ Off/Overlay : radio suit le mode, `settings.json:focusHintMode` suit après clic.
-- [ ] `Ctrl+Shift` tenu → seules les flèches vers les slots occupés s'affichent (2 apps en diagonale → 2 flèches, 4 → 4, 8 → 8), sans aucun fond ; slot actif en blanc.
-- [ ] Aucun slot occupé → rien ne s'affiche ; relâche `Ctrl/Shift` ou `Win` → disparition aussitôt, sans focus volé.
-- [ ] Settings → Beta : segmented Off/Overlay, Save → tray suit ; tray → Beta suit sans Save (bannière si draft dirty) — régression du bug sync : vérifier dans les deux sens.
-- [ ] Vieux `settings.json` (`Both`/`Spotlight`/`spotlightOpacity`) → migré au chargement (`Both`→Overlay, `Spotlight`→Off), app démarre.
+- [ ] Double-tap `Ctrl` → overlay avec flèches vers les slots occupés (2 apps en diagonale → 2 flèches, 4 → 4, 8 → 8) + arc de compte à rebours ; slot actif en blanc.
+- [ ] Tap `Ctrl` simple → rien ; `Ctrl` tenu → rien ; `Ctrl+X` entre deux taps → pas d'armement.
+- [ ] Annulations : timeout ~2s, `Esc`, clic souris, frappe clavier, re-tap `Ctrl` → overlay disparaît.
+- [ ] Spam de gestes : jamais de flip de langue, jamais de majuscules fantômes (plus rien n'est avalé — `grep "return (IntPtr)1"` vide côté code).
+- [ ] `AltGr` + `@€#` → jamais d'overlay ; `Ctrl+Alt+Suppr` → écran sécurité normal.
+- [ ] Settings → Beta : segmented Off/Overlay, Save → tray suit ; tray → Beta suit sans Save (bannière si draft dirty).
 - [ ] Overlay n'est jamais arrangé (classifier : titre `PeekDowsHintOverlay` exclu).
-- [ ] Overlay : halo gris à peine visible, flèches grises semi-transparentes, active blanche + glow ; aucun flash de fond (mauve) à l'apparition, fade ~140ms.
+- [ ] Overlay : halo gris à peine visible, flèches grises semi-transparentes, active blanche + glow ; aucun flash à l'apparition, fade ~140ms.
 - [ ] Fonds clairs + sombres : pas de franges autour des flèches ; 125%/150% DPI : flèches nettes et bien dimensionnées.
 - [ ] Log après un geste : `HintOverlay: ULW ok=True ... populated=N` (si `ok=False`, le fallback keyed affiche quand même les flèches — signaler).
-- [ ] Garde clavier : layout FR, 5 gestes `Ctrl+Shift` tenu + souris → toujours FR ; `Ctrl+Shift+Esc` → Gestionnaire des tâches ; taper `aaa` après un geste → minuscules (pas de Shift fantôme) ; Beta → décoche la garde → le layout rebascule (comportement Windows natif).
 
 ## Diagnostic langue clavier / Task Manager (logs `%APPDATA%\PeekDows\logs\peekdows.log`)
-- [ ] Démarrage : lignes `KB_TOGGLE_KEYS cu=... def=...` (present/absent explicite) + `KB_LAYOUTS fr-CA,...` présentes.
-- [ ] Geste tenu + souris : `GESTURE_HKL_START/END` avec le même HKL (hwnd/tid inclus), pas de `KB_LAYOUT_FLIP` pendant.
-- [ ] Flip réel : `KB_LAYOUT_FLIP fr-FR -> en-US hwnd=0x... tid=... sameHwnd=... hook=ok ...` → lecture :
-  - `ALT_SHIFT_CHORD` juste avant = accord Alt+Shift (autre toggle OS) ;
-  - `sameHwnd=False` ou tid différent = restore par fenêtre/onglet ;
-  - `inj=True` = outil tiers qui injecte ;
-  - `hook=gone` = retrait silencieux du hook ;
-  - même hwnd+tid + rien = TSF/IME profond.
-- [ ] `Esc` pendant un geste : `CHORD_THIRD_KEY vk=Esc` puis `TASKMGR_OPEN ... hint=(Esc-pendant-geste => accord OS Ctrl+Shift+Esc)` — cause exacte prouvée.
-
-## Diagnostic majuscules fantômes + trigger DOWN vs UP
-- [ ] Démarrage : `KB_OS_STATE sticky=... caps=...` présent (exclut StickyKeys/CapsLock).
-- [ ] Geste + frappe `aaa` juste après release : minuscules ; log `ShiftResync applied` (ou `skipped (modifiers physically held)` si tu re-tenais Shift — normal).
-- [ ] Flip : lire `edges=[...]` — downs seuls avant le flip = trigger DOWN (pivot nécessaire) ; flip après UP non-avalé = chemin hors-messages.
+- [ ] Démarrage : lignes `KB_TOGGLE_KEYS` + `KB_LAYOUTS fr-CA,...` présentes.
+- [ ] Gestes répétés : `GESTURE_HKL_START/END` avec le même HKL, pas de `KB_LAYOUT_FLIP` lié au geste (aucune touche tenue → rien à avaler).
+- [ ] Conflit connu assumé : JetBrains (double-`Ctrl` = Run Anything) déclenche les deux — `Esc` annule les deux.
