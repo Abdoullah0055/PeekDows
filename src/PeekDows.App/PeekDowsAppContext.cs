@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows.Forms;
 using PeekDows.App.AutoArrange;
 using PeekDows.App.Animation;
+using PeekDows.App.Diagnostics;
 using PeekDows.App.Focus;
 using PeekDows.App.Hotkeys;
 using PeekDows.App.Startup;
@@ -32,6 +33,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private readonly System.Windows.Forms.Timer _pauseCheckTimer;
     private readonly DirectionalFocusService _directionalFocusService;
     private readonly KeyboardLayoutGuardService _layoutGuardService;
+    private readonly ForegroundWatchService _kbWatchService;
     private readonly DirectionalFocusRegistry _directionalFocusRegistry;
     private readonly DirectionalFocusLayoutSnapshotService _directionalFocusSnapshotService;
     private readonly IVirtualDesktopService _virtualDesktopService;
@@ -192,6 +194,11 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             _directionalFocusService.Start();
             _layoutGuardService.Start();
         }
+
+        // Layout/flip + Taskmgr tracer: always active, even when Directional
+        // Focus is off, so layout flips stay explainable in all configurations.
+        _kbWatchService = new ForegroundWatchService(_layoutGuardService, _logger);
+        _kbWatchService.Start();
 
         if (_settings.ArrangeOnStartup)
         {
@@ -489,6 +496,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         try { _animationService.SnapAllToTarget(); } catch { }
         HideFocusHints();
         try { _layoutGuardService.Dispose(); } catch { }
+        try { _kbWatchService.Dispose(); } catch { }
         _pauseCheckTimer.Stop();
         _pauseCheckTimer.Dispose();
         _autoArrangeService.Dispose();
@@ -562,6 +570,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             EnsureHintForms();
             // First paint: arrows for populated slots (no active slot yet).
             OnFocusHintGestureUpdated(null, _settings.DirectionalFocusThresholdPx, 0);
+            _kbWatchService.OnGestureStarted();
         }
         catch (Exception ex)
         {
@@ -607,6 +616,14 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
     private void OnFocusHintGestureEnded()
     {
+        try
+        {
+            _kbWatchService.OnGestureEnded();
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Focus hint gesture-end trace failed: {ex.Message}");
+        }
         HideFocusHints();
     }
 
@@ -896,6 +913,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             HideFocusHints();
             try { _hintOverlay?.Dispose(); } catch { }
             try { _layoutGuardService.Dispose(); } catch { }
+            try { _kbWatchService.Dispose(); } catch { }
             _pauseCheckTimer.Stop();
             _pauseCheckTimer.Dispose();
             _autoArrangeService.Dispose();

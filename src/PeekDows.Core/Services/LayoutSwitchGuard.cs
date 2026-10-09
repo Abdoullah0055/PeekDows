@@ -153,6 +153,14 @@ public sealed class LayoutSwitchGuard
         return GuardDecision.Pass;
     }
 
+    /// <summary>
+    /// Returns the <see cref="ShouldSwallow"/> condition without consuming any
+    /// event: true when a pure Ctrl+Shift chord is currently held (latch set,
+    /// no Alt/Win, no other key) and both flags are on. Side-effect-free.
+    /// </summary>
+    public bool IsChordArmed(bool directionalFocusEnabled, bool guardEnabled)
+        => ShouldSwallow(directionalFocusEnabled, guardEnabled);
+
     private bool ShouldSwallow(bool directionalFocusEnabled, bool guardEnabled)
         => _pureChordSeen
            && !AltDown

@@ -169,4 +169,67 @@ public sealed class LayoutSwitchGuardTests
         Assert.Equal(GuardDecision.Swallow, g.Feed(VkControl, keyDown: false, directionalFocusEnabled: true, guardEnabled: true));
         Assert.Equal(GuardDecision.Swallow, g.Feed(VkShift, keyDown: false, directionalFocusEnabled: true, guardEnabled: true));
     }
+
+    [Fact]
+    public void IsChordArmed_PureChordHeld_ReturnsTrue()
+    {
+        var g = new LayoutSwitchGuard();
+
+        Assert.False(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+        g.Feed(VkControl, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        Assert.False(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+        g.Feed(VkShift, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        Assert.True(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+    }
+
+    [Fact]
+    public void IsChordArmed_AfterOtherKey_ReturnsFalse()
+    {
+        var g = new LayoutSwitchGuard();
+
+        g.Feed(VkControl, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        g.Feed(VkShift, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        Assert.True(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+        g.Feed(VkA, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        Assert.False(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+    }
+
+    [Fact]
+    public void IsChordArmed_AfterAlt_ReturnsFalse()
+    {
+        var g = new LayoutSwitchGuard();
+
+        g.Feed(VkControl, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        g.Feed(VkShift, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        Assert.True(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+        g.Feed(VkMenu, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        Assert.False(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+    }
+
+    [Fact]
+    public void IsChordArmed_FlagsOff_ReturnsFalse()
+    {
+        var g = new LayoutSwitchGuard();
+
+        g.Feed(VkControl, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        g.Feed(VkShift, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        Assert.True(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+        Assert.False(g.IsChordArmed(directionalFocusEnabled: false, guardEnabled: true));
+        Assert.False(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: false));
+        Assert.False(g.IsChordArmed(directionalFocusEnabled: false, guardEnabled: false));
+    }
+
+    [Fact]
+    public void IsChordArmed_DoesNotConsumeEvent()
+    {
+        var g = new LayoutSwitchGuard();
+
+        g.Feed(VkControl, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        g.Feed(VkShift, keyDown: true, directionalFocusEnabled: true, guardEnabled: true);
+        Assert.True(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+        // Probing must not consume: the chord releases are still swallowed.
+        Assert.True(g.IsChordArmed(directionalFocusEnabled: true, guardEnabled: true));
+        Assert.Equal(GuardDecision.Swallow, g.Feed(VkControl, keyDown: false, directionalFocusEnabled: true, guardEnabled: true));
+        Assert.Equal(GuardDecision.Swallow, g.Feed(VkShift, keyDown: false, directionalFocusEnabled: true, guardEnabled: true));
+    }
 }

@@ -30,6 +30,14 @@ public sealed class KeyboardLayoutGuardService : IDisposable
     private long _swallowedCount;
     private bool _disposed;
 
+    // Last non-modifier key-DOWN seen while the OS chord was armed (diagnostic
+    // only: consumed by ForegroundWatchService to explain flips/Taskmgr opens).
+    // Never logged here — the hook proc stays allocation- and IO-free.
+    private readonly object _thirdKeyLock = new();
+    private int _thirdKeyVk;
+    private DateTime _thirdKeyAtUtc;
+    private bool _hasThirdKey;
+
     /// <summary>
     /// Spec shorthand "ctor(FileLogger? logger=null, Func&lt;bool&gt; isEnabled)"
     /// cannot compile as written (required param after optional), so both
@@ -49,6 +57,21 @@ public sealed class KeyboardLayoutGuardService : IDisposable
 
     /// <summary>Number of key-UPs swallowed since Start (diagnostic counter).</summary>
     public long SwallowedCount => Interlocked.Read(ref _swallowedCount);
+
+    /// <summary>
+    /// Returns and clears the last stored third-key key-DOWN (vk + UTC time),
+    /// or null when none was recorded since the previous call. Thread-safe.
+    /// </summary>
+    public (int Vk, DateTime AtUtc)? TakeThirdKeyDown()
+    {
+        lock (_thirdKeyLock)
+        {
+            if (!_hasThirdKey)
+                return null;
+            _hasThirdKey = false;
+            return (_thirdKeyVk, _thirdKeyAtUtc);
+        }
+    }
 
     /// <summary>
     /// Installs the low-level keyboard hook on the calling thread (call from the
@@ -104,6 +127,27 @@ public sealed class KeyboardLayoutGuardService : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// True for Ctrl/Shift/Alt/Win keys (generic + left/right variants).
+    /// Codes mirror LayoutSwitchGuard's VK table.
+    /// </summary>
+    private static bool IsModifierVk(int vk) => vk switch
+    {
+        0x10 or // VK_SHIFT
+        0x11 or // VK_CONTROL
+        0x12 or // VK_MENU (Alt)
+        0x5B or // VK_LWIN
+        0x5C or // VK_RWIN
+        0xA0 or // VK_LSHIFT
+        0xA1 or // VK_RSHIFT
+        0xA2 or // VK_LCONTROL
+        0xA3 or // VK_RCONTROL
+        0xA4 or // VK_LMENU
+        0xA5    // VK_RMENU
+            => true,
+        _ => false,
+    };
+
     private IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
         try
@@ -131,6 +175,28 @@ public sealed class KeyboardLayoutGuardService : IDisposable
             }
 
             var decision = _guard.Feed(info.vkCode, isDown, directionalFocusEnabled, guardEnabled);
+            if (isDown && !IsModifierVk(info.vkCode))
+            {
+                // Memorize the "third key" pressed while the OS chord is armed
+                // so the foreground watcher can log the cause of a flip or a
+                // Taskmgr open. Storage only — never log from the hook proc.
+                try
+                {
+                    if (_guard.IsChordArmed(directionalFocusEnabled, guardEnabled))
+                    {
+                        lock (_thirdKeyLock)
+                        {
+                            _thirdKeyVk = info.vkCode;
+                            _thirdKeyAtUtc = DateTime.UtcNow;
+                            _hasThirdKey = true;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Diagnostics must never disturb the hook: ignore.
+                }
+            }
             if (!isDown && decision == GuardDecision.Swallow)
             {
                 Interlocked.Increment(ref _swallowedCount);
