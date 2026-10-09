@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -12,7 +13,7 @@ namespace PeekDows.App.Diagnostics;
 /// <summary>
 /// UI-thread foreground watcher that traces every keyboard-layout flip and
 /// every Task Manager open with its exact cause into peekdows.log. Polls the
-/// foreground window + its thread's HKL every 500ms, consumes the guard's
+/// foreground window + its thread's HKL every 250ms, consumes the guard's
 /// third-key diagnostic, and correlates everything with the Directional Focus
 /// gesture bounds. Never throws (every tick path is guarded), never logs
 /// keystroke contents — only layout names, process names, window titles and
@@ -21,7 +22,7 @@ namespace PeekDows.App.Diagnostics;
 /// </summary>
 public sealed class ForegroundWatchService : IDisposable
 {
-    private const int PollIntervalMs = 500;
+    private const int PollIntervalMs = 250;
     private const int MaxTitleChars = 40;
 
     private readonly KeyboardLayoutGuardService _guard;
@@ -54,7 +55,7 @@ public sealed class ForegroundWatchService : IDisposable
 
     /// <summary>
     /// Logs the OS toggle-hotkey registry state, samples the initial layout
-    /// (no flip logged for it), then starts the 500ms poll timer.
+    /// (no flip logged for it), then starts the 250ms poll timer.
     /// </summary>
     public void Start()
     {
@@ -63,22 +64,64 @@ public sealed class ForegroundWatchService : IDisposable
 
         try
         {
-            string languageHotKey = "?";
-            string layoutHotKey = "?";
+            string cuState = "absent";
+            string cuLang = "absent";
+            string cuLay = "absent";
             try
             {
                 using var key = Registry.CurrentUser.OpenSubKey(@"Keyboard Layout\Toggle");
                 if (key != null)
                 {
-                    languageHotKey = key.GetValue("Language Hotkey")?.ToString() ?? "?";
-                    layoutHotKey = key.GetValue("Layout Hotkey")?.ToString() ?? "?";
+                    cuState = "present";
+                    cuLang = key.GetValue("Language Hotkey")?.ToString() ?? "absent";
+                    cuLay = key.GetValue("Layout Hotkey")?.ToString() ?? "absent";
                 }
             }
             catch
             {
-                // Registry unreadable: keep "?" placeholders.
+                // Registry unreadable: keep "absent" placeholders.
             }
-            _logger?.Info($"KB_TOGGLE_KEYS languageHotKey={languageHotKey} layoutHotKey={layoutHotKey} (OS chord armed if 1/2)");
+            string defState = "absent";
+            string defLang = "absent";
+            string defLay = "absent";
+            try
+            {
+                using var key = Registry.Users.OpenSubKey(@".DEFAULT\Keyboard Layout\Toggle");
+                if (key != null)
+                {
+                    defState = "present";
+                    defLang = key.GetValue("Language Hotkey")?.ToString() ?? "absent";
+                    defLay = key.GetValue("Layout Hotkey")?.ToString() ?? "absent";
+                }
+            }
+            catch
+            {
+                // Registry unreadable: keep "absent" placeholders.
+            }
+            _logger?.Info($"KB_TOGGLE_KEYS cu={cuState} lang={cuLang} lay={cuLay} def={defState} lang={defLang} lay={defLay}");
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var names = InputLanguage.InstalledInputLanguages
+                .Cast<InputLanguage>()
+                .Select(l =>
+                {
+                    try
+                    {
+                        return l.Culture?.Name ?? "?";
+                    }
+                    catch
+                    {
+                        return "?";
+                    }
+                })
+                .Distinct()
+                .ToArray();
+            _logger?.Info($"KB_LAYOUTS <{string.Join(",", names)}>");
         }
         catch
         {
@@ -133,7 +176,7 @@ public sealed class ForegroundWatchService : IDisposable
             long swallowed = SafeSwallowedCount();
             _gestureStartSwallowed = swallowed;
             _lastSwallowed = swallowed;
-            _logger?.Info($"GESTURE_HKL_START hkl={CurrentLayoutName()} swallowed={swallowed}");
+            _logger?.Info($"GESTURE_HKL_START hkl={CurrentLayoutName()} swallowed={swallowed}{ForegroundLocationSuffix()}");
         }
         catch
         {
@@ -148,7 +191,7 @@ public sealed class ForegroundWatchService : IDisposable
             long swallowed = SafeSwallowedCount();
             long delta = swallowed - _gestureStartSwallowed;
             _lastSwallowed = swallowed;
-            _logger?.Info($"GESTURE_HKL_END hkl={CurrentLayoutName()} swallowedDelta={delta}");
+            _logger?.Info($"GESTURE_HKL_END hkl={CurrentLayoutName()} swallowedDelta={delta}{ForegroundLocationSuffix()}");
         }
         catch
         {
@@ -224,6 +267,9 @@ public sealed class ForegroundWatchService : IDisposable
 
             var cur = new LayoutSample(hkl, tid);
 
+            // Captured BEFORE _lastHwnd is updated below (proc-name cache).
+            bool sameHwnd = hwnd == _lastHwnd;
+
             // Resolve the process name only when the foreground window changed
             // (caches _lastHwnd/_lastProcName); keep the previous tick's name
             // for Taskmgr open-edge detection.
@@ -268,7 +314,20 @@ public sealed class ForegroundWatchService : IDisposable
                 _lastThirdKeyVk = third.Value.Vk;
                 _lastThirdKeyName = keyName;
                 _lastThirdKeyAtUtc = third.Value.AtUtc;
-                _logger?.Info($"CHORD_THIRD_KEY vk={keyName} ageMs={ageMs} gesture={_gestureActive}");
+                _logger?.Info($"CHORD_THIRD_KEY vk={keyName} inj={third.Value.Injected} ageMs={ageMs} gesture={_gestureActive}");
+            }
+
+            var chord = SafeTakeAltShiftChord();
+            if (chord.HasValue)
+            {
+                try
+                {
+                    long chordAgeMs = Math.Max(0, (long)(DateTime.UtcNow - chord.Value.AtUtc).TotalMilliseconds);
+                    _logger?.Info($"ALT_SHIFT_CHORD inj={chord.Value.Injected} ageMs={chordAgeMs} gesture={_gestureActive}");
+                }
+                catch
+                {
+                }
             }
 
             bool flipped;
@@ -300,7 +359,16 @@ public sealed class ForegroundWatchService : IDisposable
                 {
                     newName = "?";
                 }
-                _logger?.Info($"KB_LAYOUT_FLIP {oldName} -> {newName} fg=\"{title}\" proc={procName} pid={pid} gesture={_gestureActive} swallowedDelta={swallowedDelta}");
+                string hookState;
+                try
+                {
+                    hookState = _guard.IsHookInstalled ? "ok" : "gone";
+                }
+                catch
+                {
+                    hookState = "gone";
+                }
+                _logger?.Info($"KB_LAYOUT_FLIP {oldName} -> {newName} hwnd=0x{hwnd.ToInt64():X} tid={tid} sameHwnd={sameHwnd} hook={hookState} fg=\"{title}\" proc={procName} pid={pid} gesture={_gestureActive} swallowedDelta={swallowedDelta}");
             }
 
             if (string.Equals(procName, "Taskmgr", StringComparison.OrdinalIgnoreCase)
@@ -378,7 +446,7 @@ public sealed class ForegroundWatchService : IDisposable
         }
     }
 
-    private (int Vk, DateTime AtUtc)? SafeTakeThirdKey()
+    private (int Vk, DateTime AtUtc, bool Injected)? SafeTakeThirdKey()
     {
         try
         {
@@ -387,6 +455,38 @@ public sealed class ForegroundWatchService : IDisposable
         catch
         {
             return null;
+        }
+    }
+
+    private (DateTime AtUtc, bool Injected)? SafeTakeAltShiftChord()
+    {
+        try
+        {
+            return _guard.TakeAltShiftChord();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Samples the current foreground window/thread (" hwnd=0x… tid=…") for
+    /// gesture-bound lines; returns "" when sampling fails (fallback: no suffix).
+    /// </summary>
+    private static string ForegroundLocationSuffix()
+    {
+        try
+        {
+            var hwnd = NativeMethods.GetForegroundWindow();
+            if (hwnd == IntPtr.Zero)
+                return string.Empty;
+            uint tid = NativeMethods.GetWindowThreadProcessId(hwnd, out _);
+            return $" hwnd=0x{hwnd.ToInt64():X} tid={tid}";
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 }

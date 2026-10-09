@@ -36,7 +36,20 @@ public sealed class KeyboardLayoutGuardService : IDisposable
     private readonly object _thirdKeyLock = new();
     private int _thirdKeyVk;
     private DateTime _thirdKeyAtUtc;
+    private bool _thirdKeyInjected;
     private bool _hasThirdKey;
+
+    // Alt+Shift chord completions (AltShiftWatcher.Feed on every key event,
+    // down + up): last (UTC time, LLKHF_INJECTED) pair, consumed each tick by
+    // ForegroundWatchService. Storage only — never logged here.
+    private readonly AltShiftWatcher _altShiftWatcher = new();
+    private readonly object _chordLock = new();
+    private DateTime _chordAtUtc;
+    private bool _chordInjected;
+    private bool _hasChord;
+
+    /// <summary>LLKHF_INJECTED bit in KBDLLHOOKSTRUCT.flags (injected input).</summary>
+    private const int LLKHF_INJECTED = 0x10;
 
     /// <summary>
     /// Spec shorthand "ctor(FileLogger? logger=null, Func&lt;bool&gt; isEnabled)"
@@ -59,19 +72,39 @@ public sealed class KeyboardLayoutGuardService : IDisposable
     public long SwallowedCount => Interlocked.Read(ref _swallowedCount);
 
     /// <summary>
-    /// Returns and clears the last stored third-key key-DOWN (vk + UTC time),
-    /// or null when none was recorded since the previous call. Thread-safe.
+    /// Returns and clears the last stored third-key key-DOWN (vk + UTC time +
+    /// LLKHF_INJECTED flag), or null when none was recorded since the
+    /// previous call. Thread-safe.
     /// </summary>
-    public (int Vk, DateTime AtUtc)? TakeThirdKeyDown()
+    public (int Vk, DateTime AtUtc, bool Injected)? TakeThirdKeyDown()
     {
         lock (_thirdKeyLock)
         {
             if (!_hasThirdKey)
                 return null;
             _hasThirdKey = false;
-            return (_thirdKeyVk, _thirdKeyAtUtc);
+            return (_thirdKeyVk, _thirdKeyAtUtc, _thirdKeyInjected);
         }
     }
+
+    /// <summary>
+    /// Returns and clears the last recorded Alt+Shift chord completion (UTC
+    /// time + LLKHF_INJECTED flag), or null when none was recorded since the
+    /// previous call. Thread-safe.
+    /// </summary>
+    public (DateTime AtUtc, bool Injected)? TakeAltShiftChord()
+    {
+        lock (_chordLock)
+        {
+            if (!_hasChord)
+                return null;
+            _hasChord = false;
+            return (_chordAtUtc, _chordInjected);
+        }
+    }
+
+    /// <summary>True while the low-level keyboard hook is installed.</summary>
+    public bool IsHookInstalled => _hook != IntPtr.Zero;
 
     /// <summary>
     /// Installs the low-level keyboard hook on the calling thread (call from the
@@ -175,6 +208,30 @@ public sealed class KeyboardLayoutGuardService : IDisposable
             }
 
             var decision = _guard.Feed(info.vkCode, isDown, directionalFocusEnabled, guardEnabled);
+
+            // KBDLLHOOKSTRUCT.flags exists (NativeMethods.KBDLLHOOKSTRUCT.flags);
+            // LLKHF_INJECTED marks input injected by another process / SendInput.
+            bool injected = (info.flags & LLKHF_INJECTED) != 0;
+
+            // Alt+Shift chord detector: feed EVERY key event (down + up, Feed
+            // handles both); on completion record (UTC time, injected) for the
+            // foreground watcher. Storage only — never log from the hook proc.
+            try
+            {
+                if (_altShiftWatcher.Feed(info.vkCode, isDown))
+                {
+                    lock (_chordLock)
+                    {
+                        _chordAtUtc = DateTime.UtcNow;
+                        _chordInjected = injected;
+                        _hasChord = true;
+                    }
+                }
+            }
+            catch
+            {
+                // Diagnostics must never disturb the hook: ignore.
+            }
             if (isDown && !IsModifierVk(info.vkCode))
             {
                 // Memorize the "third key" pressed while the OS chord is armed
@@ -188,6 +245,7 @@ public sealed class KeyboardLayoutGuardService : IDisposable
                         {
                             _thirdKeyVk = info.vkCode;
                             _thirdKeyAtUtc = DateTime.UtcNow;
+                            _thirdKeyInjected = injected;
                             _hasThirdKey = true;
                         }
                     }
