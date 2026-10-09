@@ -7,14 +7,13 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using PeekDows.Core.Models;
-using PeekDows.Core.Services;
 
 namespace PeekDows.App.Focus;
 
 /// <summary>
 /// "Ghost HUD" hint overlay: a per-pixel-alpha layered window centred on the
-/// gesture anchor showing ONLY populated slots as minimalist grey arrows
-/// (white when active) over a whisper-subtle radial grey halo.
+/// gesture anchor showing ONLY populated slots as pie wedges of a minimalist
+/// grey disc (active wedge white) with a punched donut hole at the anchor.
 /// Primary path: composition happens off-screen into a 32bpp ARGB bitmap
 /// pushed atomically via UpdateLayeredWindow from a canonical GDI blit
 /// (GetDC(NULL) -> CreateCompatibleDC -> GetHbitmap -> SelectObject ->
@@ -52,20 +51,32 @@ public sealed class HintOverlayForm : Form
     /// <summary>Magic key color: never visible while layered composition works.</summary>
     private static readonly Color KeyedMagic = Color.FromArgb(1, 2, 3);
 
-    // Arrow metrics in unscaled px (ArrowGeometry applies the DPI scale).
-    private const float ArrowInner = 16f;
-    private const float ArrowReach = 80f;
-    private const float ArrowActiveBonus = 8f;
-    private const float ArrowHeadLen = 11f;
-    private const float ArrowHeadHalf = 5f;
+    // Pie metrics in unscaled px: 8 wedges of 45° each (minus the gap),
+    // arranged as a donut (punched hole keeps the anchor point visible).
+    private const float PieOuter = 78f;
+    private const float PieActiveBonus = 6f;
+    private const float PieInner = 30f;
+    private const float PieGapDeg = 6f;
 
-    // Idle arrow grey, active white, halo peak. All monochrome by design.
-    private static readonly Color IdleGrey = Color.FromArgb(200, 181, 181, 181);
-    private static readonly Color ActiveWhite = Color.FromArgb(255, 255, 255, 255);
-    private const int HaloPeakAlpha = 22;
-    private const int HaloRadius = 90;
+    // Monochrome pie palette. All monochrome by design.
+    private static readonly Color BaseDisc = Color.FromArgb(26, 181, 181, 181);
+    private static readonly Color WedgeIdle = Color.FromArgb(130, 181, 181, 181);
+    private static readonly Color WedgeActive = Color.FromArgb(235, 255, 255, 255);
+    private static readonly Color WedgeGlow = Color.FromArgb(60, 255, 255, 255);
 
-    private static readonly DirectionalFocusSlot[] SlotOrder = ArrowGeometry.SlotOrder;
+    // Canonical slot order with GDI+ pie angles (degrees clockwise from the
+    // x-axis, y down — matches FillPie convention and the gesture detector).
+    private static readonly (DirectionalFocusSlot Slot, float Angle)[] SlotAngles =
+    [
+        (DirectionalFocusSlot.MiddleRight, 0f),
+        (DirectionalFocusSlot.BottomRight, 45f),
+        (DirectionalFocusSlot.BottomCenter, 90f),
+        (DirectionalFocusSlot.BottomLeft, 135f),
+        (DirectionalFocusSlot.MiddleLeft, 180f),
+        (DirectionalFocusSlot.TopLeft, 225f),
+        (DirectionalFocusSlot.TopCenter, 270f),
+        (DirectionalFocusSlot.TopRight, 315f),
+    ];
 
     private IReadOnlyList<DirectionalFocusSlot> _populated =
         Array.Empty<DirectionalFocusSlot>();
@@ -114,7 +125,7 @@ public sealed class HintOverlayForm : Form
     }
 
     /// <summary>
-    /// Shows arrows for populated slots only, centred on the gesture anchor
+    /// Shows pie wedges for populated slots only, centred on the gesture anchor
     /// (clamped to the working area). Restarts the fade-in when hidden.
     /// </summary>
     public void ShowAt(
@@ -299,83 +310,67 @@ public sealed class HintOverlayForm : Form
     private void PaintScene(Graphics g, int w, int h, float scale)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        PaintHalo(g, w, h, scale);
-        PaintArrows(g, w / 2f, scale);
-    }
+        float cx = w / 2f;
+        float cy = h / 2f;
 
-    private void PaintHalo(Graphics g, int w, int h, float scale)
-    {
-        float radius = HaloRadius * scale;
-        var center = new PointF(w / 2f, h / 2f);
-        using var path = new GraphicsPath();
-        path.AddEllipse(center.X - radius, center.Y - radius, radius * 2f, radius * 2f);
-        using var brush = new PathGradientBrush(path)
+        // Faint base disc unifying the pie.
+        float outer = PieOuter * scale;
+        using (var baseBrush = new SolidBrush(BaseDisc))
+            g.FillEllipse(baseBrush, cx - outer, cy - outer, outer * 2f, outer * 2f);
+
+        PaintWedges(g, cx, cy, scale);
+
+        // Punch the donut hole so the anchor point stays visible. On the
+        // bitmap path a SourceCopy transparent clear erases to alpha 0; on the
+        // keyed fallback path the magic color itself is keyed out.
+        float inner = PieInner * scale;
+        if (_keyedFallback)
         {
-            CenterColor = Color.FromArgb(HaloPeakAlpha, 180, 180, 180),
-            SurroundColors = [Color.FromArgb(0, 180, 180, 180)],
-        };
-        g.FillEllipse(brush, center.X - radius, center.Y - radius, radius * 2f, radius * 2f);
+            using var keyBrush = new SolidBrush(KeyedMagic);
+            g.FillEllipse(keyBrush, cx - inner, cy - inner, inner * 2f, inner * 2f);
+        }
+        else
+        {
+            var prev = g.CompositingMode;
+            g.CompositingMode = CompositingMode.SourceCopy;
+            using (var clear = new SolidBrush(Color.FromArgb(0, 0, 0, 0)))
+                g.FillEllipse(clear, cx - inner, cy - inner, inner * 2f, inner * 2f);
+            g.CompositingMode = prev;
+        }
     }
 
-    private void PaintArrows(Graphics g, float center, float scale)
+    private void PaintWedges(Graphics g, float cx, float cy, float scale)
     {
-        var set = new HashSet<DirectionalFocusSlot>(_populated);
-        var ordered = SlotOrder.Where(set.Contains).ToArray();
-        if (ordered.Length == 0)
+        if (_populated.Count == 0)
             return;
 
-        // Active arrow pops 80->88px; idle arrows rest at full length immediately.
-        float bonus = ArrowActiveBonus * (float)EaseOut(_pop);
-        var geoms = ArrowGeometry.ComputeArrows(
-            ordered, _activeSlot, center,
-            ArrowInner, ArrowReach, bonus, ArrowHeadLen, ArrowHeadHalf, scale);
+        var set = new HashSet<DirectionalFocusSlot>(_populated);
+        // Active wedge pops outward; idle wedges rest at full radius immediately.
+        float bonus = PieActiveBonus * (float)EaseOut(_pop) * scale;
+        float sweep = 45f - PieGapDeg;
 
-        for (int i = 0; i < ordered.Length; i++)
+        foreach (var (slot, angle) in SlotAngles)
         {
-            bool isActive = _activeSlot == ordered[i];
-            float penWidth = (isActive ? 4f : 3f) * scale;
+            if (!set.Contains(slot))
+                continue;
 
-            var (dx, dy) = ArrowGeometry.Direction(ordered[i]);
-            var p1 = new PointF(geoms[i].P1.X, geoms[i].P1.Y);
-            var tip = new PointF(geoms[i].Tip.X, geoms[i].Tip.Y);
-            // Shaft stops where it always did: 2px (scaled) short of the tip,
-            // covered by the head triangle.
-            var shaftEnd = new PointF(tip.X - dx * 2f * scale, tip.Y - dy * 2f * scale);
-            var head = new PointF[geoms[i].Head.Length];
-            for (int k = 0; k < head.Length; k++)
-                head[k] = new PointF(geoms[i].Head[k].X, geoms[i].Head[k].Y);
+            bool isActive = _activeSlot == slot;
+            float outer = PieOuter * scale + (isActive ? bonus : 0f);
+            float start = angle - sweep / 2f;
 
             if (isActive)
             {
                 // Soft glow underlay + crisp white core.
-                using var glow = new Pen(Color.FromArgb(60, 255, 255, 255), penWidth + 4f * scale)
-                {
-                    StartCap = LineCap.Round,
-                    EndCap = LineCap.Round,
-                    LineJoin = LineJoin.Round,
-                };
-                g.DrawLine(glow, p1, shaftEnd);
-                using var pen = new Pen(ActiveWhite, penWidth)
-                {
-                    StartCap = LineCap.Round,
-                    EndCap = LineCap.Round,
-                    LineJoin = LineJoin.Round,
-                };
-                using var brush = new SolidBrush(ActiveWhite);
-                g.DrawLine(pen, p1, shaftEnd);
-                g.FillPolygon(brush, head);
+                float gr = outer + 4f * scale;
+                using (var glow = new SolidBrush(WedgeGlow))
+                    g.FillPie(glow, cx - gr, cy - gr, gr * 2f, gr * 2f, start, sweep);
+                using (var brush = new SolidBrush(WedgeActive))
+                    g.FillPie(brush, cx - outer, cy - outer, outer * 2f, outer * 2f, start, sweep);
             }
             else
             {
-                using var pen = new Pen(IdleGrey, penWidth)
-                {
-                    StartCap = LineCap.Round,
-                    EndCap = LineCap.Round,
-                    LineJoin = LineJoin.Round,
-                };
-                using var brush = new SolidBrush(IdleGrey);
-                g.DrawLine(pen, p1, shaftEnd);
-                g.FillPolygon(brush, head);
+                using var brush = new SolidBrush(WedgeIdle);
+                g.FillPie(brush, cx - outer, cy - outer, outer * 2f, outer * 2f, start, sweep);
             }
         }
     }

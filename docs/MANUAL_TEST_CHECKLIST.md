@@ -128,9 +128,9 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Un-ignore confirm: on the Ignored apps page uncheck an entry → a dark confirm modal names the app → "Keep ignoring" leaves it checked and untouched; "Stop ignoring" + Save removes it from `settings.json`.
 - [ ] Ignored classes stay collapsed under "Advanced: window classes" and still save one-entry-per-line.
 
-## Beta — Direction hints (arrows-only overlay, Ctrl+Win hold)
+## Beta — Direction hints (pie overlay, Ctrl+Win hold)
 - [ ] Tray → Direction hints ▸ Off/Overlay : radio suit le mode, `settings.json:focusHintMode` suit après clic.
-- [ ] `Ctrl+Win` tenu → overlay avec flèches vers les slots occupés (2 apps en diagonale → 2 flèches, 4 → 4, 8 → 8) ; slot actif en blanc ; release d'une touche → disparition.
+- [ ] `Ctrl+Win` tenu → cercle en parts vers les slots occupés (2 apps en diagonale → 2 parts, 4 → 4, 8 → 8, trou central sur l'ancre) ; part active blanche + glow ; release d'une touche → disparition.
 - [ ] 3e touche pendant le tenu (`D`, flèches, `Tab`, lettre) → geste annulé aussitôt, la touche atteint sa cible (ex. `Ctrl+Win+D` crée un bureau, `Ctrl+Win+←/→` change de bureau).
 - [ ] `Win` relâché en dernier (seul) → noter si le menu Démarrer s'ouvre (cas à trancher — relâcher `Win` en premier en attendant).
 - [ ] `Esc` / clic pendant le tenu → annulation, pas d'activation surprise.
@@ -138,9 +138,9 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Typing normal (`Ctrl+C`, `Alt+Tab`, `Win+D` sans `Ctrl`) → inchangé.
 - [ ] Settings → Beta : segmented Off/Overlay, Save → tray suit ; tray → Beta suit sans Save (bannière si draft dirty).
 - [ ] Overlay n'est jamais arrangé (classifier : titre `PeekDowsHintOverlay` exclu).
-- [ ] Overlay : halo gris à peine visible, flèches grises semi-transparentes, active blanche + glow ; aucun flash à l'apparition, fade ~140ms.
-- [ ] Fonds clairs + sombres : pas de franges autour des flèches ; 125%/150% DPI : flèches nettes et bien dimensionnées.
-- [ ] Log après un geste : `HintOverlay: ULW ok=True ... populated=N` (si `ok=False`, le fallback keyed affiche quand même les flèches — signaler).
+- [ ] Overlay : disque de base à peine visible, parts grises semi-transparentes, active blanche + glow ; aucun flash à l'apparition, fade ~140ms.
+- [ ] Fonds clairs + sombres : pas de franges autour des parts ; 125%/150% DPI : cercle net et bien dimensionné.
+- [ ] Log après un geste : `HintOverlay: ULW ok=True ... populated=N` (si `ok=False`, le fallback keyed affiche quand même les parts — signaler).
 
 ## Diagnostic langue clavier / Task Manager (logs `%APPDATA%\PeekDows\logs\peekdows.log`)
 - [ ] Démarrage : lignes `KB_TOGGLE_KEYS` + `KB_LAYOUTS fr-CA,...` présentes (plus aucun hook installé — traçage passif uniquement).
