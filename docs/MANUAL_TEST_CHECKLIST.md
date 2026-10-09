@@ -139,3 +139,9 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Fonds clairs + sombres : pas de franges autour des flèches ; 125%/150% DPI : flèches nettes et bien dimensionnées.
 - [ ] Log après un geste : `HintOverlay: ULW ok=True ... populated=N` (si `ok=False`, le fallback keyed affiche quand même les flèches — signaler).
 - [ ] Garde clavier : layout FR, 5 gestes `Ctrl+Shift` tenu + souris → toujours FR ; `Ctrl+Shift+Esc` → Gestionnaire des tâches ; taper `aaa` après un geste → minuscules (pas de Shift fantôme) ; Beta → décoche la garde → le layout rebascule (comportement Windows natif).
+
+## Diagnostic langue clavier / Task Manager (logs `%APPDATA%\PeekDows\logs\peekdows.log`)
+- [ ] Démarrage : ligne `KB_TOGGLE_KEYS` présente (dit si l'accord OS est armé).
+- [ ] Geste tenu + souris : `GESTURE_HKL_START/END` avec le même HKL, pas de `KB_LAYOUT_FLIP` pendant.
+- [ ] Flip réel : `KB_LAYOUT_FLIP fr-FR -> en-US fg="..." proc=... gesture=True/False` → si `gesture=False` + changement de fenêtre = layouts par app Windows, pas la garde.
+- [ ] `Esc` pendant un geste : `CHORD_THIRD_KEY vk=Esc` puis `TASKMGR_OPEN ... hint=(Esc-pendant-geste => accord OS Ctrl+Shift+Esc)` — cause exacte prouvée.

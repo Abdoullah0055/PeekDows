@@ -19,6 +19,17 @@ Both`), tray↔desktop sync gaps — and no time to fix them properly right now.
 out of Beta first. Only then re-evaluate spotlight as an optional extra, with its own
 Beta cycle and a mandatory `FocusHintModeChanged`-style live-sync event from day one.
 
+## Dépannage — langue clavier & Task Manager
+
+- Si `Esc` ouvre le Gestionnaire pendant un geste : c'est l'accord OS
+  `Ctrl+Shift+Esc` (la garde laisse passer toute 3e touche par design) —
+  `TASKMGR_OPEN` dans le log le prouve. Piste : `Esc` = annuler le geste
+  (avaler `Esc`-down armé), à trancher après les preuves.
+- Si la langue flip sur changement de fenêtre sans geste : ce sont les
+  dispositions Windows par application (chaque fenêtre restaure la sienne) —
+  `KB_LAYOUT_FLIP ... gesture=False` le prouve. Remédiation : réglage Windows
+  « utiliser une méthode d'entrée différente par fenêtre » sur OFF.
+
 ## Candidates (not started)
 
 - **Undo Arrange** (`Ctrl+Alt+Z`): snapshot window rects before `ApplyPlacements`,
