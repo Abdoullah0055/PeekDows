@@ -85,6 +85,14 @@ public sealed class HintOverlayForm : Form
     /// </summary>
     public string LastBlitStatus { get; private set; } = "not-pushed";
 
+    /// <summary>
+    /// Remaining armed-window fraction, 1 (just armed) → 0 (about to expire).
+    /// Rendered as a thin countdown arc around the arrows; the host updates it
+    /// every armed tick. Timer reveal/pop behavior is unchanged.
+    /// </summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public double TimeFraction { get; set; } = 1.0;
+
     public HintOverlayForm(Action<string>? log = null)
     {
         _log = log;
@@ -301,6 +309,27 @@ public sealed class HintOverlayForm : Form
         g.SmoothingMode = SmoothingMode.AntiAlias;
         PaintHalo(g, w, h, scale);
         PaintArrows(g, w / 2f, scale);
+        PaintCountdown(g, w / 2f, h / 2f, scale);
+    }
+
+    /// <summary>
+    /// Armed-window countdown: a thin grey arc (~95px radius, 2px) sweeping
+    /// 360° × TimeFraction clockwise from the top. Clamped to 0..1; nothing
+    /// is drawn at 0 (expired — the host hides the overlay on disarm anyway).
+    /// </summary>
+    private void PaintCountdown(Graphics g, float cx, float cy, float scale)
+    {
+        double fraction = Math.Clamp(TimeFraction, 0, 1);
+        if (fraction <= 0)
+            return;
+        float radius = 95f * scale;
+        using var pen = new Pen(Color.FromArgb(120, 160, 160, 160), 2f * scale)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+        };
+        g.DrawArc(pen, cx - radius, cy - radius, radius * 2f, radius * 2f,
+            -90f, (float)(360.0 * fraction));
     }
 
     private void PaintHalo(Graphics g, int w, int h, float scale)

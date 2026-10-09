@@ -16,7 +16,7 @@ public sealed class DirectionalFocusService : IDisposable
     private const int TickIntervalMsIdle = 100;
 
     /// <summary>
-    /// Minimum gap between two activations while a Ctrl+Shift gesture is held. This is the
+    /// Minimum gap between two activations while an armed gesture is held. This is the
     /// pacing for HEALTHY slot-hopping: short enough that switching windows feels instant,
     /// long enough that we don't fire a second activation before the OS has settled the first.
     /// Per-hwnd cooldowns (foreground-mismatch, unstable tracker) carry the heavy protection;
@@ -25,6 +25,19 @@ public sealed class DirectionalFocusService : IDisposable
     private const int CooldownMs = 150;
 
     private const int RebuildCooldownMs = 500;
+
+    /// <summary>
+    /// Armed window after a Ctrl double-tap: the mouse flick is observed for
+    /// this long, then the gesture disarms itself ("timeout"). The overlay
+    /// countdown arc renders the remaining fraction.
+    /// </summary>
+    private const int ArmDurationMs = 2000;
+
+    // Cancellation keys polled while armed (GetAsyncKeyState already in NativeMethods).
+    private const int VkEscape = 0x1B;
+    private const int VkLButton = 0x01;
+    private const int VkRButton = 0x02;
+    private const int VkMButton = 0x04;
 
     private readonly DirectionalFocusGestureDetector _gestureDetector;
     private readonly DirectionalFocusRegistry _registry;
@@ -35,13 +48,13 @@ public sealed class DirectionalFocusService : IDisposable
     private readonly Func<IReadOnlyList<IntPtr>> _candidateWindowSource;
     private readonly Func<int> _getThresholdPx;
     private readonly FileLogger? _logger;
-    private readonly DirectionalFocusInputGate _inputGate;
     private readonly Func<DateTime> _nowProvider;
     private readonly IWindowAnimator? _animator;
 
     private readonly System.Windows.Forms.Timer _timer;
 
-    private bool _gestureWasActive;
+    private bool _armed;
+    private DateTime _armedUntil = DateTime.MinValue;
     private Point _anchor;
     private Rect _anchorMonitor;
     private DirectionalFocusSlot? _lastTriggeredSlot;
@@ -85,6 +98,9 @@ public sealed class DirectionalFocusService : IDisposable
 
     /// <summary>
     /// Internal ctor that accepts a custom clock for deterministic throttle/cooldown tests.
+    /// The input gate parameter is kept for signature compatibility (existing tests);
+    /// arming is now driven by <see cref="ArmGesture"/> (Ctrl double-tap), so the
+    /// gate is no longer consulted.
     /// </summary>
     internal DirectionalFocusService(
         DirectionalFocusGestureDetector gestureDetector,
@@ -108,7 +124,7 @@ public sealed class DirectionalFocusService : IDisposable
         _snapshotService = snapshotService;
         _candidateWindowSource = candidateWindowSource;
         _getThresholdPx = getThresholdPx;
-        _inputGate = inputGate;
+        _ = inputGate;
         _nowProvider = nowProvider;
         _logger = logger;
         _animator = animator;
@@ -128,24 +144,86 @@ public sealed class DirectionalFocusService : IDisposable
     {
         if (!_timer.Enabled) return;
         _timer.Stop();
-        ResetState();
-        try { GestureEnded?.Invoke(); } catch { }
+        if (_armed)
+            DisarmGesture("stop");
+        else
+        {
+            ResetState();
+            try { GestureEnded?.Invoke(); } catch { }
+        }
         _logger?.Info("DirectionalFocusService stopped");
     }
 
     public DirectionalFocusRegistry Registry => _registry;
 
     /// <summary>
-    /// Hint lifecycle for Overlay/Spotlight UI (Beta). Raised on the WinForms UI
-    /// thread (service timer thread): GestureStarted once per Ctrl+Shift hold with
-    /// the pinned anchor, GestureUpdated every active tick (slot may be null below
-    /// threshold, with threshold px + distance px for the progress ring),
-    /// GestureEnded when modifiers release, Win chord cancels, or Stop().
+    /// Hint lifecycle for Overlay UI (Beta). Raised on the WinForms UI
+    /// thread (service timer thread): GestureStarted once per arming
+    /// (Ctrl double-tap) with the pinned anchor, GestureUpdated every armed
+    /// tick (slot may be null below threshold, with threshold px + distance
+    /// px for the progress ring), GestureEnded on disarm (timeout, Esc,
+    /// click, typing, stop) or Stop().
     /// Subscribers must never throw (service swallows subscriber errors).
     /// </summary>
     public event Action<Point, Rect>? GestureStarted;
     public event Action<DirectionalFocusSlot?, int, double>? GestureUpdated;
     public event Action? GestureEnded;
+
+    /// <summary>
+    /// Arms the gesture at the given anchor (double-tap Ctrl position):
+    /// pins the anchor monitor, opens a 2000ms flick window, resets the slot
+    /// throttle and notifies GestureStarted once for the overlay.
+    /// Re-arming while armed restarts the window at the new anchor.
+    /// </summary>
+    public void ArmGesture(Point anchor)
+    {
+        _armed = true;
+        _timer.Interval = TickIntervalMsActive;
+        _anchor = anchor;
+        // Pin the monitor at arm time. For the whole armed window we resolve
+        // slots against THIS monitor, so a big horizontal move that drifts across a
+        // monitor border doesn't suddenly switch the slot set mid-gesture (which caused
+        // "no slots recognized" and ignored activations).
+        _anchorMonitor = MonitorFromPointNative(anchor.X, anchor.Y);
+        _armedUntil = _nowProvider().AddMilliseconds(ArmDurationMs);
+        _lastTriggeredSlot = null;
+        _logger?.Info($"Directional focus armed: double-tap Ctrl, anchor=({anchor.X},{anchor.Y}), anchorMonitor={_anchorMonitor}");
+        NotifyGestureStarted(_anchor, _anchorMonitor);
+    }
+
+    /// <summary>
+    /// Disarms the gesture (timeout, Esc, mouse click, typing, stop):
+    /// resets state and hides the overlay via GestureEnded. No-op when not armed.
+    /// </summary>
+    public void DisarmGesture(string reason)
+    {
+        if (!_armed)
+            return;
+        _armed = false;
+        ResetState();
+        _timer.Interval = TickIntervalMsIdle;
+        _logger?.Info($"Directional focus disarmed: {reason}");
+        NotifyGestureEnded();
+    }
+
+    /// <summary>
+    /// Remaining armed-window fraction, 1 (just armed) → 0 (expired). Read each
+    /// armed tick by the overlay host to drive the countdown arc. 0 when idle.
+    /// </summary>
+    public double ArmedTimeFraction
+    {
+        get
+        {
+            if (!_armed)
+                return 0;
+            double remainingMs = (_armedUntil - _nowProvider()).TotalMilliseconds;
+            if (remainingMs <= 0)
+                return 0;
+            if (remainingMs >= ArmDurationMs)
+                return 1;
+            return remainingMs / ArmDurationMs;
+        }
+    }
 
     private void OnTimerTick(object? sender, EventArgs e)
     {
@@ -161,57 +239,38 @@ public sealed class DirectionalFocusService : IDisposable
 
     internal void Tick()
     {
-        bool ctrlDown = IsKeyDown(NativeMethods.VK_CONTROL);
-        bool shiftDown = IsKeyDown(NativeMethods.VK_SHIFT);
-        bool altDown = IsKeyDown(NativeMethods.VK_MENU);
-        bool lWinDown = IsKeyDown(NativeMethods.VK_LWIN);
-        bool rWinDown = IsKeyDown(NativeMethods.VK_RWIN);
+        // Idle: nothing to observe. The gesture only exists inside the armed
+        // window opened by ArmGesture (Ctrl double-tap); no modifier polling here.
+        if (!_armed)
+            return;
 
-        // A Windows-key chord (e.g. Ctrl+Win+Arrow virtual-desktop switch) must never
-        // enter the gesture path. Reset everything and bail before reading the mouse,
-        // so changing desktops cannot pollute gesture state.
-        if (lWinDown || rWinDown)
+        var now = _nowProvider();
+
+        // (a) Armed-window timeout.
+        if (now > _armedUntil)
         {
-            if (_gestureWasActive)
-            {
-                ResetState();
-                _gestureWasActive = false;
-                _timer.Interval = TickIntervalMsIdle;
-                NotifyGestureEnded();
-            }
+            DisarmGesture("timeout");
             return;
         }
 
-        bool gestureActive = _inputGate.IsGestureModifierActive(ctrlDown, shiftDown, altDown, lWinDown, rWinDown);
-
-        if (!gestureActive)
+        // (b) Cancellations: Esc, mouse buttons, any non-Ctrl key (typing).
+        if (IsKeyDown(VkEscape))
         {
-            if (_gestureWasActive)
-            {
-                ResetState();
-                _gestureWasActive = false;
-                _timer.Interval = TickIntervalMsIdle;
-                NotifyGestureEnded();
-            }
+            DisarmGesture("esc");
+            return;
+        }
+        if (IsKeyDown(VkLButton) || IsKeyDown(VkRButton) || IsKeyDown(VkMButton))
+        {
+            DisarmGesture("click");
+            return;
+        }
+        if (IsTypingKeyDown())
+        {
+            DisarmGesture("typing");
             return;
         }
 
-        if (!_gestureWasActive)
-        {
-            _gestureWasActive = true;
-            _timer.Interval = TickIntervalMsActive;
-            _anchor = Cursor.Position;
-            // Pin the monitor at gesture START. For the whole Ctrl+Shift hold we resolve
-            // slots against THIS monitor, so a big horizontal move that drifts across a
-            // monitor border doesn't suddenly switch the slot set mid-gesture (which caused
-            // "no slots recognized" and ignored activations).
-            _anchorMonitor = MonitorFromPointNative(_anchor.X, _anchor.Y);
-            _lastTriggeredSlot = null;
-            _logger?.Info($"Directional focus modifiers active: Ctrl+Shift, anchorMonitor={_anchorMonitor}");
-            NotifyGestureStarted(_anchor, _anchorMonitor);
-            return;
-        }
-
+        // (c) Flick detection: anchor → cursor vector against the pinned monitor.
         var current = Cursor.Position;
         int dx = current.X - _anchor.X;
         int dy = current.Y - _anchor.Y;
@@ -223,13 +282,12 @@ public sealed class DirectionalFocusService : IDisposable
 
         if (slot == null) return;
 
-        // Don't re-trigger the slot we're already on while the gesture is held — the window
+        // Don't re-trigger the slot we're already on while armed — the window
         // is already in front, re-activating it would just spam it.
         if (slot == _lastTriggeredSlot) return;
 
-        // Global throttle during a held gesture: pace slot-hopping. Per-hwnd cooldowns and the
+        // Global throttle while armed: pace slot-hopping. Per-hwnd cooldowns and the
         // unstable tracker carry the heavy protection; this only bounds the gesture cadence.
-        var now = _nowProvider();
         if (IsThrottled(now))
         {
             _logger?.Info($"Directional focus activation throttled, cooldown remaining={(_cooldownUntil - now).TotalMilliseconds}ms");
@@ -244,6 +302,39 @@ public sealed class DirectionalFocusService : IDisposable
         _logger?.Info($"Directional focus trigger candidate: slot={slot.Value}, dx={dx}, dy={dy}, anchor=({_anchor.X},{_anchor.Y}), current=({current.X},{current.Y}), anchorMonitor={mouseWorkArea}, threshold={threshold}");
 
         ActivateSlot(mouseWorkArea, slot.Value, now);
+    }
+
+    /// <summary>
+    /// True when any non-Ctrl key is physically down. Armed ticks only: scans
+    /// VK 0x08-0xFE, skipping Ctrl (0x11/0xA2/0xA3) and the other known
+    /// modifiers (Shift/Alt/Win generic + L/R). Mouse buttons (0x01-0x07) are
+    /// outside the range (covered by the click check); a stuck modifier alone
+    /// never cancels, but any typed key does. Accepts false positives from
+    /// exotic held keys — cancelling is always safe.
+    /// </summary>
+    private static bool IsTypingKeyDown()
+    {
+        for (int vk = 0x08; vk <= 0xFE; vk++)
+        {
+            switch (vk)
+            {
+                case NativeMethods.VK_SHIFT:
+                case NativeMethods.VK_CONTROL:
+                case NativeMethods.VK_MENU:
+                case NativeMethods.VK_LWIN:
+                case NativeMethods.VK_RWIN:
+                case NativeMethods.VK_LSHIFT:
+                case NativeMethods.VK_RSHIFT:
+                case NativeMethods.VK_LCONTROL:
+                case NativeMethods.VK_RCONTROL:
+                case NativeMethods.VK_LMENU:
+                case NativeMethods.VK_RMENU:
+                    continue;
+            }
+            if (IsKeyDown(vk))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -547,8 +638,8 @@ public sealed class DirectionalFocusService : IDisposable
         _anchor = Point.Empty;
         _anchorMonitor = default;
         _lastTriggeredSlot = null;
-        // Releasing Ctrl+Shift (or stopping the service) clears the throttle so the next
-        // gesture begins fresh rather than inheriting the previous hold's cooldown.
+        // Disarming (or stopping the service) clears the throttle so the next
+        // armed gesture begins fresh rather than inheriting the previous one's cooldown.
         _lastFocusTime = DateTime.MinValue;
         _cooldownUntil = DateTime.MinValue;
     }

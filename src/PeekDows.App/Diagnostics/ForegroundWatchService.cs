@@ -25,7 +25,7 @@ public sealed class ForegroundWatchService : IDisposable
     private const int PollIntervalMs = 250;
     private const int MaxTitleChars = 40;
 
-    private readonly KeyboardLayoutGuardService _guard;
+    private readonly DirectionalTapService _guard;
     private readonly FileLogger? _logger;
     private readonly Func<bool> _isEnabled;
     private readonly System.Windows.Forms.Timer _timer;
@@ -47,7 +47,7 @@ public sealed class ForegroundWatchService : IDisposable
     private IReadOnlyList<ChordEdge> _cachedEdges = Array.Empty<ChordEdge>();
 
     public ForegroundWatchService(
-        KeyboardLayoutGuardService guard,
+        DirectionalTapService guard,
         FileLogger? logger,
         Func<bool>? isEnabled = null)
     {

@@ -34,16 +34,6 @@ public sealed class AppSettings
     public int DirectionalFocusThresholdPx { get; set; } = 50;
 
     /// <summary>
-    /// When true (default), a WH_KEYBOARD_LL hook swallows the key-UPs of a pure
-    /// Ctrl+Shift hold so Windows never sees the "toggle keyboard layout" chord
-    /// complete (FR↔EN flip) while gesturing. Only pure-chord releases are
-    /// blocked; every key-DOWN and any Alt/Win/other-key sequence passes through.
-    /// JSON name is "preventLayoutSwitch" (camelCase UI contract).
-    /// </summary>
-    [JsonPropertyName("preventLayoutSwitch")]
-    public bool PreventLayoutSwitchWhileGesturing { get; set; } = true;
-
-    /// <summary>
     /// When false (default), windows that are truly maximized via Windows are skipped during
     /// arrange. When true, maximized windows are restored and repositioned like normal windows.
     /// This only affects genuinely maximized windows; near-fullscreen non-maximized windows are

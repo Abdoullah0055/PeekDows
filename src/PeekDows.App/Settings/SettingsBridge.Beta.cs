@@ -13,7 +13,6 @@ public sealed partial class SettingsBridge
     {
         var s = _controller.CurrentSettings;
         data["focusHintMode"] = s.FocusHintMode ?? "Overlay";
-        data["preventLayoutSwitch"] = s.PreventLayoutSwitchWhileGesturing;
     }
 
     private void ApplyBetaDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool plainChanged)
@@ -23,11 +22,6 @@ public sealed partial class SettingsBridge
             && !string.Equals(settings.FocusHintMode, mode, StringComparison.Ordinal))
         {
             settings.FocusHintMode = mode;
-            plainChanged = true;
-        }
-        if (draft.PreventLayoutSwitch is { } pv && settings.PreventLayoutSwitchWhileGesturing != pv)
-        {
-            settings.PreventLayoutSwitchWhileGesturing = pv;
             plainChanged = true;
         }
     }

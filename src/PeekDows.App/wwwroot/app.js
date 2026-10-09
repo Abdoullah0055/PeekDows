@@ -6,7 +6,7 @@ const EDITABLE_KEYS = [
   "allowRepositionMaximized", "preset", "arrangeOnStartup",
   "showTrayNotifications", "thresholdPx",
   "ignoredProcesses", "ignoredClasses", "hotkeys",
-  "focusHintMode", "preventLayoutSwitch",
+  "focusHintMode",
 ];
 
 const state = { snapshot: null, draft: null, dirty: false };
@@ -46,13 +46,11 @@ function adoptSnapshot(data) {
   // Beta default on both copies: keeps dirty tracking exact even if an older
   // bridge ever omits this key (undefined vs default would read as dirty).
   state.snapshot.focusHintMode ??= "Overlay";
-  state.snapshot.preventLayoutSwitch ??= true;
   state.draft = pick(data);
   state.draft.ignoredProcesses ??= [];
   state.draft.ignoredClasses ??= [];
   state.draft.hotkeys ??= {};
   state.draft.focusHintMode ??= "Overlay";
-  state.draft.preventLayoutSwitch ??= true;
   setControlsFrom(data);
   markClean();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;

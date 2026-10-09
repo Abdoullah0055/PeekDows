@@ -32,7 +32,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private readonly PauseStateService _pauseState;
     private readonly System.Windows.Forms.Timer _pauseCheckTimer;
     private readonly DirectionalFocusService _directionalFocusService;
-    private readonly KeyboardLayoutGuardService _layoutGuardService;
+    private readonly DirectionalTapService _directionalTapService;
     private readonly ForegroundWatchService _kbWatchService;
     private readonly DirectionalFocusRegistry _directionalFocusRegistry;
     private readonly DirectionalFocusLayoutSnapshotService _directionalFocusSnapshotService;
@@ -181,23 +181,20 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _directionalFocusService.GestureUpdated += OnFocusHintGestureUpdated;
         _directionalFocusService.GestureEnded += OnFocusHintGestureEnded;
 
-        // Blocks Windows from flipping the keyboard layout (FR↔EN) on our
-        // Ctrl+Shift gesture chord: swallows the chord's key-UPs while the chord
-        // is pure (no third key), passes everything else (Ctrl+Shift+Esc intact).
-        _layoutGuardService = new KeyboardLayoutGuardService(
-            () => _settings.PreventLayoutSwitchWhileGesturing,
-            () => _settings.DirectionalFocusEnabled,
-            _logger);
+        // Double-tap Ctrl arms the directional gesture (observe-only hook, never
+        // swallows input): flicks stay free, no layout-switch guard needed.
+        _directionalTapService = new DirectionalTapService(_logger);
+        _directionalTapService.Armed += OnDirectionalTapArmed;
 
         if (_settings.DirectionalFocusEnabled)
         {
             _directionalFocusService.Start();
-            _layoutGuardService.Start();
+            _directionalTapService.Start();
         }
 
         // Layout/flip + Taskmgr tracer: always active, even when Directional
         // Focus is off, so layout flips stay explainable in all configurations.
-        _kbWatchService = new ForegroundWatchService(_layoutGuardService, _logger);
+        _kbWatchService = new ForegroundWatchService(_directionalTapService, _logger);
         _kbWatchService.Start();
 
         if (_settings.ArrangeOnStartup)
@@ -363,12 +360,12 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         if (_settings.DirectionalFocusEnabled)
         {
             _directionalFocusService.Start();
-            _layoutGuardService.Start();
+            _directionalTapService.Start();
         }
         else
         {
             _directionalFocusService.Stop();
-            _layoutGuardService.Stop();
+            _directionalTapService.Stop();
         }
 
         DirectionalFocusChanged?.Invoke(_settings.DirectionalFocusEnabled);
@@ -495,7 +492,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _logger.Info("PeekDows exiting");
         try { _animationService.SnapAllToTarget(); } catch { }
         HideFocusHints();
-        try { _layoutGuardService.Dispose(); } catch { }
+        try { _directionalTapService.Dispose(); } catch { }
         try { _kbWatchService.Dispose(); } catch { }
         _pauseCheckTimer.Stop();
         _pauseCheckTimer.Dispose();
@@ -561,6 +558,22 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _logger.Info($"Settings changed at runtime: IgnoredProcesses.Count={_settings.IgnoredProcesses.Count}, IgnoredClasses.Count={_settings.IgnoredClasses.Count}, AllowRepositionMaximizedWindows={_settings.AllowRepositionMaximizedWindows}");
     }
 
+    /// <summary>
+    /// Ctrl double-tap completed (observe-only hook): arm the directional
+    /// gesture at the tap position. Runs on the UI thread (hook thread).
+    /// </summary>
+    private void OnDirectionalTapArmed(System.Drawing.Point anchor)
+    {
+        try
+        {
+            _directionalFocusService.ArmGesture(anchor);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Directional tap arm failed: {ex.Message}");
+        }
+    }
+
     private void OnFocusHintGestureStarted(System.Drawing.Point anchor, Rect monitor)
     {
         try
@@ -601,6 +614,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             // Nothing populated → hide (nothing to point at).
             if (vm.ShowOverlay && _hintOverlay != null && populated.Count > 0)
             {
+                _hintOverlay.TimeFraction = _directionalFocusService.ArmedTimeFraction;
                 _hintOverlay.ShowAt(_hintAnchor, populated, slot);
             }
             else
@@ -625,17 +639,6 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             _logger.Warn($"Focus hint gesture-end trace failed: {ex.Message}");
         }
         HideFocusHints();
-        // Clear a phantom Shift/Ctrl hold left by swallowed chord key-UPs (would
-        // otherwise shift the next typed characters). Worker thread per the
-        // service contract; skips itself when modifiers are physically held.
-        try
-        {
-            System.Threading.Tasks.Task.Run(() =>
-            {
-                try { ShiftResyncService.TryResyncForeground(_logger); } catch { }
-            });
-        }
-        catch { }
     }
 
     private void EnsureHintForms()
@@ -919,11 +922,12 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 _directionalFocusService.GestureStarted -= OnFocusHintGestureStarted;
                 _directionalFocusService.GestureUpdated -= OnFocusHintGestureUpdated;
                 _directionalFocusService.GestureEnded -= OnFocusHintGestureEnded;
+                _directionalTapService.Armed -= OnDirectionalTapArmed;
             }
             catch { }
             HideFocusHints();
             try { _hintOverlay?.Dispose(); } catch { }
-            try { _layoutGuardService.Dispose(); } catch { }
+            try { _directionalTapService.Dispose(); } catch { }
             try { _kbWatchService.Dispose(); } catch { }
             _pauseCheckTimer.Stop();
             _pauseCheckTimer.Dispose();
