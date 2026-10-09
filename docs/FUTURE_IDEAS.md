@@ -30,15 +30,14 @@ Beta cycle and a mandatory `FocusHintModeChanged`-style live-sync event from day
   `KB_LAYOUT_FLIP ... gesture=False` le prouve. Remédiation : réglage Windows
   « utiliser une méthode d'entrée différente par fenêtre » sur OFF.
 
-## Décision accord (2026-10-09) : double-tap Ctrl
+## Décision accord (2026-10-09) : tenu Ctrl+Win
 
-L'accord `Ctrl+Shift` tenu est abandonné : toggle OS systématique + auto-sabotage
-par l'impulsion Alt d'activation (désarmement + Alt+Shift fantôme) + Shift fantôme
-(ups avalés, resync structurellement skippé) — prouvé par les logs (swallows sans
-effet, flips post-UP avec garde désarmée, resync 3/3 skippé). Le hook clavier est
-désormais 100 % observateur (zéro avalage) : les deux classes de bugs meurent par
-construction. Repli documenté (non implémenté) : tenu `Ctrl+Alt-gauche` (jamais
-`AltGr`), si le double-tap ne convient pas à l'usage.
+`Ctrl+Shift` tenu abandonné (toggle OS + auto-sabotage Alt), puis double-tap `Ctrl`
+abandonné à son tour (demande utilisateur : tenu `Ctrl`+`Win`). Le hook clavier est
+entièrement supprimé : polling seul, 3e touche = annulation immédiate, aucun
+avalage nulle part. Points de vigilance : release `Win`-en-dernier → Démarrer
+(à trancher au test manuel) ; `Ctrl+Win+D/flèches` préservés via annulation.
+Repli documenté (non implémenté) : tenu `Ctrl+Alt-gauche` (jamais `AltGr`).
 
 ## Candidates (not started)
 
