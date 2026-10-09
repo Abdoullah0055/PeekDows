@@ -130,7 +130,7 @@ public class SettingsServiceTests : IDisposable
         var settings = new AppSettings { Version = 1, DirectionalFocusThresholdPx = 80 };
         var migrated = _settingsService.MigrateIfNeeded(settings);
         Assert.Equal(50, migrated.DirectionalFocusThresholdPx);
-        Assert.Equal(3, migrated.Version);
+        Assert.Equal(5, migrated.Version);
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public class SettingsServiceTests : IDisposable
         var settings = new AppSettings { Version = 1, DirectionalFocusThresholdPx = 70 };
         var migrated = _settingsService.MigrateIfNeeded(settings);
         Assert.Equal(70, migrated.DirectionalFocusThresholdPx);
-        Assert.Equal(3, migrated.Version);
+        Assert.Equal(5, migrated.Version);
     }
 
     [Fact]
@@ -267,11 +267,11 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public void MigrateIfNeeded_BumpsVersion2_ToVersion3()
+    public void MigrateIfNeeded_BumpsVersion2_ToVersion5()
     {
         var settings = new AppSettings { Version = 2 };
         var migrated = _settingsService.MigrateIfNeeded(settings);
-        Assert.Equal(3, migrated.Version);
+        Assert.Equal(5, migrated.Version);
     }
 
     [Fact]
@@ -287,6 +287,168 @@ public class SettingsServiceTests : IDisposable
         _settingsService.Save(settings);
         var json = File.ReadAllText(_testSettingsPath);
         Assert.DoesNotContain("SingleWindowMode", json);
+    }
+
+    [Fact]
+    public void MigrateIfNeeded_V3ToV5_AppliesOverlayDefault()
+    {
+        // Simulates a real V3 settings.json (no focus-hint keys): migration must apply
+        // the Overlay default and bump to V5.
+        File.WriteAllText(_testSettingsPath, "{\"Version\":3,\"AutoArrange\":true}");
+
+        var settings = _settingsService.Load();
+
+        Assert.Equal("Overlay", settings.FocusHintMode);
+        Assert.Equal(5, settings.Version);
+    }
+
+    [Fact]
+    public void AppSettings_FocusHintDefaults_AreOverlayVersion5()
+    {
+        var settings = new AppSettings();
+
+        Assert.Equal("Overlay", settings.FocusHintMode);
+        Assert.Equal(5, settings.Version);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("nonsense")]
+    [InlineData("full")]
+    public void MigrateIfNeeded_InvalidFocusHintMode_NormalizesToOverlay(string? mode)
+    {
+        var settings = new AppSettings { Version = 4, FocusHintMode = mode! };
+
+        var migrated = _settingsService.MigrateIfNeeded(settings);
+
+        Assert.Equal("Overlay", migrated.FocusHintMode);
+        Assert.Equal(5, migrated.Version);
+    }
+
+    [Theory]
+    [InlineData("off", "Off")]
+    [InlineData("OFF", "Off")]
+    [InlineData("overlay", "Overlay")]
+    [InlineData("OVERLAY", "Overlay")]
+    [InlineData("Off", "Off")]
+    [InlineData("Overlay", "Overlay")]
+    [InlineData("  Overlay  ", "Overlay")]
+    public void MigrateIfNeeded_ValidFocusHintMode_IsPreservedCanonicalized(string input, string expected)
+    {
+        var settings = new AppSettings { Version = 4, FocusHintMode = input };
+
+        var migrated = _settingsService.MigrateIfNeeded(settings);
+
+        Assert.Equal(expected, migrated.FocusHintMode);
+        Assert.Equal(5, migrated.Version);
+    }
+
+    [Theory]
+    [InlineData("Both", "Overlay")]
+    [InlineData("both", "Overlay")]
+    [InlineData("BOTH", "Overlay")]
+    [InlineData("Spotlight", "Off")]
+    [InlineData("spotlight", "Off")]
+    [InlineData("SPOTLIGHT", "Off")]
+    public void MigrateIfNeeded_LegacyFocusHintMode_IsRemappedToV5(string input, string expected)
+    {
+        var settings = new AppSettings { Version = 4, FocusHintMode = input };
+
+        var migrated = _settingsService.MigrateIfNeeded(settings);
+
+        Assert.Equal(expected, migrated.FocusHintMode);
+        Assert.Equal(5, migrated.Version);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("nonsense")]
+    public void MigrateIfNeeded_UnknownFocusHintMode_DefaultsToOverlay(string? mode)
+    {
+        var settings = new AppSettings { Version = 4, FocusHintMode = mode! };
+
+        var migrated = _settingsService.MigrateIfNeeded(settings);
+
+        Assert.Equal("Overlay", migrated.FocusHintMode);
+        Assert.Equal(5, migrated.Version);
+    }
+
+    [Fact]
+    public void MigrateIfNeeded_V5AlreadyCurrent_PreservesOffAndOverlay()
+    {
+        var off = _settingsService.MigrateIfNeeded(new AppSettings { Version = 5, FocusHintMode = "Off" });
+        var overlay = _settingsService.MigrateIfNeeded(new AppSettings { Version = 5, FocusHintMode = "Overlay" });
+
+        Assert.Equal("Off", off.FocusHintMode);
+        Assert.Equal("Overlay", overlay.FocusHintMode);
+        Assert.Equal(5, off.Version);
+        Assert.Equal(5, overlay.Version);
+    }
+
+    [Fact]
+    public void Load_LegacyV4Json_WithSpotlightAndStaleKeys_MigratesToV5()
+    {
+        // Real V4 file: spotlight mode + retired overlayShowIcons/spotlightOpacity keys.
+        // Stale keys are ignored by the deserializer; mode maps Spotlight → Off.
+        File.WriteAllText(_testSettingsPath,
+            "{\"Version\":4,\"focusHintMode\":\"Spotlight\",\"overlayShowIcons\":false,\"spotlightOpacity\":60}");
+
+        var settings = _settingsService.Load();
+
+        Assert.Equal("Off", settings.FocusHintMode);
+        Assert.Equal(5, settings.Version);
+    }
+
+    [Fact]
+    public void Load_LegacyV4Json_WithBoth_MigratesToOverlay()
+    {
+        File.WriteAllText(_testSettingsPath, "{\"Version\":4,\"focusHintMode\":\"Both\"}");
+
+        var settings = _settingsService.Load();
+
+        Assert.Equal("Overlay", settings.FocusHintMode);
+        Assert.Equal(5, settings.Version);
+    }
+
+    [Fact]
+    public void Save_And_Load_PreservesFocusHintOverlay()
+    {
+        var settings = _settingsService.Load();
+        settings.FocusHintMode = "Overlay";
+        _settingsService.Save(settings);
+
+        var loaded = _settingsService.Load();
+
+        Assert.Equal("Overlay", loaded.FocusHintMode);
+    }
+
+    [Fact]
+    public void Save_And_Load_PreservesFocusHintOff()
+    {
+        var settings = _settingsService.Load();
+        settings.FocusHintMode = "Off";
+        _settingsService.Save(settings);
+
+        var loaded = _settingsService.Load();
+
+        Assert.Equal("Off", loaded.FocusHintMode);
+    }
+
+    [Fact]
+    public void Save_WritesCamelCaseFocusHintKey_ForUiContract()
+    {
+        var settings = _settingsService.Load();
+        _settingsService.Save(settings);
+
+        var json = File.ReadAllText(_testSettingsPath);
+
+        Assert.Contains("focusHintMode", json);
+        Assert.DoesNotContain("overlayShowIcons", json);
+        Assert.DoesNotContain("spotlightOpacity", json);
     }
 
     public void Dispose()

@@ -64,6 +64,7 @@ public sealed class SettingsBridgeHotkeysTests
         public event Action<bool>? AnimateWindowTransitionsChanged;
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
+        public event Action<string>? FocusHintModeChanged;
 
         public bool TryUpdateHotkey(string name, string gesture, out string error)
         {
@@ -88,6 +89,8 @@ public sealed class SettingsBridgeHotkeysTests
         public void ToggleDirectionalFocus() { }
         public void ToggleAnimateWindowTransitions() { }
         public void ToggleAllowRepositionMaximizedWindows() { }
+        public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
+
         public void SetWindowSizePreset(WindowSizePreset preset) { }
         public void OpenSettings() { }
         public void OpenLogFile() { }

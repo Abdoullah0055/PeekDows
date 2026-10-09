@@ -333,6 +333,7 @@ public class AutoArrangeServiceTests : IDisposable
         public event Action<bool>? AnimateWindowTransitionsChanged;
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
+        public event Action<string>? FocusHintModeChanged;
 
         public void ArrangeNow() => ArrangeNowCallCount++;
         public void TogglePause() { }
@@ -344,6 +345,8 @@ public class AutoArrangeServiceTests : IDisposable
         public void ToggleDirectionalFocus() { }
         public void ToggleAnimateWindowTransitions() { }
         public void ToggleAllowRepositionMaximizedWindows() { }
+        public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
+
         public void SetWindowSizePreset(WindowSizePreset preset) { }
         public void OpenSettings() { }
         public void OpenLogFile() { }

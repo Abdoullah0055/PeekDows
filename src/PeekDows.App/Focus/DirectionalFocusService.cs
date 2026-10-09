@@ -129,10 +129,23 @@ public sealed class DirectionalFocusService : IDisposable
         if (!_timer.Enabled) return;
         _timer.Stop();
         ResetState();
+        try { GestureEnded?.Invoke(); } catch { }
         _logger?.Info("DirectionalFocusService stopped");
     }
 
     public DirectionalFocusRegistry Registry => _registry;
+
+    /// <summary>
+    /// Hint lifecycle for Overlay/Spotlight UI (Beta). Raised on the WinForms UI
+    /// thread (service timer thread): GestureStarted once per Ctrl+Shift hold with
+    /// the pinned anchor, GestureUpdated every active tick (slot may be null below
+    /// threshold, with threshold px + distance px for the progress ring),
+    /// GestureEnded when modifiers release, Win chord cancels, or Stop().
+    /// Subscribers must never throw (service swallows subscriber errors).
+    /// </summary>
+    public event Action<Point, Rect>? GestureStarted;
+    public event Action<DirectionalFocusSlot?, int, double>? GestureUpdated;
+    public event Action? GestureEnded;
 
     private void OnTimerTick(object? sender, EventArgs e)
     {
@@ -164,6 +177,7 @@ public sealed class DirectionalFocusService : IDisposable
                 ResetState();
                 _gestureWasActive = false;
                 _timer.Interval = TickIntervalMsIdle;
+                NotifyGestureEnded();
             }
             return;
         }
@@ -177,6 +191,7 @@ public sealed class DirectionalFocusService : IDisposable
                 ResetState();
                 _gestureWasActive = false;
                 _timer.Interval = TickIntervalMsIdle;
+                NotifyGestureEnded();
             }
             return;
         }
@@ -193,6 +208,7 @@ public sealed class DirectionalFocusService : IDisposable
             _anchorMonitor = MonitorFromPointNative(_anchor.X, _anchor.Y);
             _lastTriggeredSlot = null;
             _logger?.Info($"Directional focus modifiers active: Ctrl+Shift, anchorMonitor={_anchorMonitor}");
+            NotifyGestureStarted(_anchor, _anchorMonitor);
             return;
         }
 
@@ -202,6 +218,8 @@ public sealed class DirectionalFocusService : IDisposable
 
         var threshold = _getThresholdPx();
         var slot = _gestureDetector.Detect(_anchor.X, _anchor.Y, current.X, current.Y, threshold);
+        double distance = Math.Sqrt((double)dx * dx + (double)dy * dy);
+        NotifyGestureUpdated(slot, threshold, distance);
 
         if (slot == null) return;
 
@@ -533,6 +551,21 @@ public sealed class DirectionalFocusService : IDisposable
         // gesture begins fresh rather than inheriting the previous hold's cooldown.
         _lastFocusTime = DateTime.MinValue;
         _cooldownUntil = DateTime.MinValue;
+    }
+
+    private void NotifyGestureStarted(Point anchor, Rect monitor)
+    {
+        try { GestureStarted?.Invoke(anchor, monitor); } catch { }
+    }
+
+    private void NotifyGestureUpdated(DirectionalFocusSlot? slot, int threshold, double distance)
+    {
+        try { GestureUpdated?.Invoke(slot, threshold, distance); } catch { }
+    }
+
+    private void NotifyGestureEnded()
+    {
+        try { GestureEnded?.Invoke(); } catch { }
     }
 
     private static bool IsKeyDown(int vk)

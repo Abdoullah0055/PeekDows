@@ -135,6 +135,7 @@ public sealed class SettingsHostForm : Form
         _controller.StartWithWindowsChanged += OnExternalChange;
         _controller.AllowRepositionMaximizedWindowsChanged += OnExternalChange;
         _controller.WindowSizePresetChanged += OnExternalPresetChange;
+        _controller.FocusHintModeChanged += OnExternalHintModeChange;
         _controller.StateChanged += OnExternalStateChange;
     }
 
@@ -146,6 +147,7 @@ public sealed class SettingsHostForm : Form
         _controller.StartWithWindowsChanged -= OnExternalChange;
         _controller.AllowRepositionMaximizedWindowsChanged -= OnExternalChange;
         _controller.WindowSizePresetChanged -= OnExternalPresetChange;
+        _controller.FocusHintModeChanged -= OnExternalHintModeChange;
         _controller.StateChanged -= OnExternalStateChange;
         _bridge.DirtyChanged -= OnDirtyChanged;
         InitializationFailed = null;
@@ -153,6 +155,7 @@ public sealed class SettingsHostForm : Form
 
     private void OnExternalChange(bool _) => PostExternalChange();
     private void OnExternalPresetChange(WindowSizePreset _) => PostExternalChange();
+    private void OnExternalHintModeChange(string _) => PostExternalChange();
     private void OnExternalStateChange(RuntimeState _) => PostExternalChange();
 
     private void PostExternalChange()

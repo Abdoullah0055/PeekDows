@@ -143,6 +143,9 @@ public class WindowClassifier
         // (parent is dotnet.exe) and double-instance cases still exclude our own windows.
         if (window.ProcessId == Environment.ProcessId) return false;
         if (string.Equals(window.ClassName, "PeekDowsTray", StringComparison.OrdinalIgnoreCase)) return false;
+        // Focus hint overlay (Ctrl+Shift gesture): never arrangeable, including from a
+        // second PeekDows instance with a different PID (title match is PID-independent).
+        if (string.Equals(window.Title, "PeekDowsHintOverlay", StringComparison.Ordinal)) return false;
         if (string.Equals(window.Title, "PeekDows", StringComparison.OrdinalIgnoreCase)
             && string.Equals(window.ClassName, "WindowsForms10.Window", StringComparison.OrdinalIgnoreCase)) return false;
         if (IsIgnoredProcess(window.ProcessName)) return false;

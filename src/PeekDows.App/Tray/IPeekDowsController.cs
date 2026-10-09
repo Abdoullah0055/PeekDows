@@ -29,6 +29,7 @@ public interface IPeekDowsController
     void ToggleAnimateWindowTransitions();
     void ToggleAllowRepositionMaximizedWindows();
     void SetWindowSizePreset(WindowSizePreset preset);
+    void SetFocusHintMode(string mode);
     void OpenSettings();
     void OpenLogFile();
     void OpenLogsFolder();
@@ -48,4 +49,8 @@ public interface IPeekDowsController
     event Action<bool>? AnimateWindowTransitionsChanged;
     event Action<bool>? AllowRepositionMaximizedWindowsChanged;
     event Action<WindowSizePreset>? WindowSizePresetChanged;
+    // Live-sync invariant: every setting mutable from the tray MUST raise its
+    // Changed event when mutated, and SettingsHostForm MUST subscribe to it —
+    // otherwise the open settings window stays stale (cf. FocusHintMode bug).
+    event Action<string>? FocusHintModeChanged;
 }

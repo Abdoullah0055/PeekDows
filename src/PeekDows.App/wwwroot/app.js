@@ -6,6 +6,7 @@ const EDITABLE_KEYS = [
   "allowRepositionMaximized", "preset", "arrangeOnStartup",
   "showTrayNotifications", "thresholdPx",
   "ignoredProcesses", "ignoredClasses", "hotkeys",
+  "focusHintMode", "preventLayoutSwitch",
 ];
 
 const state = { snapshot: null, draft: null, dirty: false };
@@ -42,16 +43,23 @@ window.chrome?.webview?.addEventListener("message", (event) => {
 
 function adoptSnapshot(data) {
   state.snapshot = data;
+  // Beta default on both copies: keeps dirty tracking exact even if an older
+  // bridge ever omits this key (undefined vs default would read as dirty).
+  state.snapshot.focusHintMode ??= "Overlay";
+  state.snapshot.preventLayoutSwitch ??= true;
   state.draft = pick(data);
   state.draft.ignoredProcesses ??= [];
   state.draft.ignoredClasses ??= [];
   state.draft.hotkeys ??= {};
+  state.draft.focusHintMode ??= "Overlay";
+  state.draft.preventLayoutSwitch ??= true;
   setControlsFrom(data);
   markClean();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;
   renderPresetSelection(data.preset);
   renderPreview(data.preset);
   $("thresholdValue").textContent = `${data.thresholdPx} px`;
+  renderHintModeSelection(state.draft.focusHintMode);
 }
 
 function onExternalChange(data) {
@@ -379,6 +387,19 @@ for (const btn of document.querySelectorAll("#preset .seg")) {
 function renderPresetSelection(preset) {
   for (const b of document.querySelectorAll("#preset .seg"))
     b.classList.toggle("sel", b.dataset.preset === preset);
+}
+
+for (const btn of document.querySelectorAll("#hintmode .seg")) {
+  btn.addEventListener("click", () => {
+    state.draft.focusHintMode = btn.dataset.hintmode;
+    renderHintModeSelection(btn.dataset.hintmode);
+    syncDirty();
+  });
+}
+
+function renderHintModeSelection(mode) {
+  for (const b of document.querySelectorAll("#hintmode .seg"))
+    b.classList.toggle("sel", b.dataset.hintmode === mode);
 }
 
 // ---------- footer actions ----------

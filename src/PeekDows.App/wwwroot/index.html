@@ -35,6 +35,7 @@
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>
           Ignored apps
         </button>
+        <button class="navitem" data-page="beta">🧪 Beta <span class="chip">BETA</span></button>
         <div class="foot" id="statusFoot"><span class="dot"></span>Running</div>
       </nav>
 
@@ -195,6 +196,25 @@
                 <button class="btn" id="unignoreCancel">Keep ignoring</button>
                 <button class="btn primary" id="unignoreConfirm">Stop ignoring</button>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- BETA -->
+        <section class="page" id="page-beta">
+          <h2>Beta Features</h2>
+          <p class="sub">En test — promu vers Layout quand validé. Changes apply when you press Save.</p>
+          <div class="card">
+            <div class="row" style="border-top:none">
+              <div class="txt"><div class="t">Focus hints</div><div class="d">Arrows-only overlay shown when directional focus triggers. Off disables all hints.</div></div>
+              <div class="segmented" id="hintmode">
+                <button class="seg" data-hintmode="Off">Off</button>
+                <button class="seg" data-hintmode="Overlay">Overlay</button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="txt"><div class="t">Prevent keyboard layout switch</div><div class="d">Swallows the chord completion while gesturing so Windows never flips FR↔EN. Disable if you use Ctrl+Shift shortcuts that misbehave.</div></div>
+              <label class="switch"><input type="checkbox" data-key="preventLayoutSwitch"><span class="track"></span><span class="thumb"></span></label>
             </div>
           </div>
         </section>

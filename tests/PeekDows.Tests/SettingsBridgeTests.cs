@@ -58,8 +58,11 @@ public class SettingsBridgeTests : IDisposable
         Assert.False(data.GetProperty("arrangeOnStartup").GetBoolean());
         Assert.False(data.GetProperty("showTrayNotifications").GetBoolean());
         Assert.Equal(50, data.GetProperty("thresholdPx").GetInt32());
-        Assert.Equal(3, data.GetProperty("version").GetInt32());
+        Assert.Equal(5, data.GetProperty("version").GetInt32());
         Assert.Equal("9.9.9", data.GetProperty("appVersion").GetString());
+        Assert.Equal("Overlay", data.GetProperty("focusHintMode").GetString());
+        Assert.False(data.TryGetProperty("overlayShowIcons", out _));
+        Assert.False(data.TryGetProperty("spotlightOpacity", out _));
     }
 
     [Fact]
@@ -332,6 +335,7 @@ public class SettingsBridgeTests : IDisposable
         public event Action<bool>? AnimateWindowTransitionsChanged;
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
+        public event Action<string>? FocusHintModeChanged;
 
         public void ArrangeNow() { Calls.Add(nameof(ArrangeNow)); }
         public void TogglePause() { Calls.Add(nameof(TogglePause)); }
@@ -385,6 +389,8 @@ public class SettingsBridgeTests : IDisposable
             _settingsService.Save(CurrentSettings);
             AllowRepositionMaximizedWindowsChanged?.Invoke(CurrentSettings.AllowRepositionMaximizedWindows);
         }
+
+        public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
 
         public void SetWindowSizePreset(WindowSizePreset preset)
         {

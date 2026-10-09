@@ -102,6 +102,7 @@ public sealed class SettingsBridgeWindowsTests
         public event Action<bool>? AnimateWindowTransitionsChanged;
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
+        public event Action<string>? FocusHintModeChanged;
 
         public void ArrangeNow() { }
         public void TogglePause() { }
@@ -113,6 +114,8 @@ public sealed class SettingsBridgeWindowsTests
         public void ToggleDirectionalFocus() { }
         public void ToggleAnimateWindowTransitions() { }
         public void ToggleAllowRepositionMaximizedWindows() { }
+        public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
+
         public void SetWindowSizePreset(WindowSizePreset preset) { }
         public void OpenSettings() { }
         public void OpenLogFile() { }

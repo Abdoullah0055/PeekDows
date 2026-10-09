@@ -124,6 +124,41 @@ public class TrayMenuBuilder
         directionalFocusItem.Click += (s, e) => _controller.ToggleDirectionalFocus();
         menu.Items.Add(directionalFocusItem);
 
+        // Direction hints: radio submenu (AppSettings.FocusHintMode, default "Overlay").
+        // Modes: Off | Overlay only (spotlight removed). Legacy values normalize
+        // like the v5 migration (Both→Overlay, Spotlight→Off).
+        var focusHintMenu = NewItem("Direction hints", "direction-hints");
+        var hintOffItem = new ToolStripMenuItem("Off");
+        var hintOverlayItem = new ToolStripMenuItem("Overlay");
+        var hintItems = new (ToolStripMenuItem Item, string Mode)[]
+        {
+            (hintOffItem, "Off"),
+            (hintOverlayItem, "Overlay"),
+        };
+        foreach (var (item, mode) in hintItems)
+        {
+            item.Checked = string.Equals(GetCurrentFocusHintMode(), mode, StringComparison.OrdinalIgnoreCase);
+            var capturedMode = mode;
+            item.Click += (s, e) =>
+            {
+                _controller.SetFocusHintMode(capturedMode);
+                // Instant refresh (same UI thread, no rebuild): update radio checks
+                // immediately so a reopened menu never shows a stale state.
+                foreach (var (sibling, siblingMode) in hintItems)
+                    sibling.Checked = string.Equals(siblingMode, capturedMode, StringComparison.OrdinalIgnoreCase);
+            };
+            focusHintMenu.DropDownItems.Add(item);
+        }
+        // Re-sync on open: covers changes made elsewhere (e.g. Settings window)
+        // while this ContextMenuStrip instance is alive.
+        focusHintMenu.DropDownOpening += (s, e) =>
+        {
+            var current = GetCurrentFocusHintMode();
+            foreach (var (item, mode) in hintItems)
+                item.Checked = string.Equals(mode, current, StringComparison.OrdinalIgnoreCase);
+        };
+        menu.Items.Add(focusHintMenu);
+
         menu.Items.Add(new ToolStripSeparator());
 
         var settingsItem = NewItem("Settings", "settings");
@@ -147,6 +182,36 @@ public class TrayMenuBuilder
         _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, repositionMaximizedItem, startWithWindowsItem, directionalFocusItem, animateTransitionsItem, smallPresetItem, mediumPresetItem, largePresetItem);
 
         return menu;
+    }
+
+    /// <summary>
+    /// Resolves the current focus-hint mode (AppSettings.FocusHintMode, default "Overlay").
+    /// Legacy values normalize like the v5 migration (Both→Overlay, Spotlight→Off).
+    /// </summary>
+    private string GetCurrentFocusHintMode()
+    {
+        try
+        {
+            var normalized = NormalizeFocusHintMode(_controller.CurrentSettings?.FocusHintMode);
+            if (normalized != null)
+                return normalized;
+        }
+        catch { /* defensive read; fall through to default */ }
+        return "Overlay";
+    }
+
+    private static string NormalizeFocusHintMode(string? mode)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+            return "Overlay";
+        switch (mode.Trim().ToLowerInvariant())
+        {
+            case "off": return "Off";
+            case "overlay": return "Overlay";
+            case "spotlight": return "Off";
+            case "both": return "Overlay";
+            default: return "Overlay";
+        }
     }
 
     /// <summary>

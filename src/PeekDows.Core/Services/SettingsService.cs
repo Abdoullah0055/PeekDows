@@ -107,9 +107,36 @@ public class SettingsService
         return settings;
     }
 
-    public AppSettings MigrateIfNeeded(AppSettings settings)
+    /// <summary>
+    /// Legacy (v4) canonicalization, kept for the v3→v4 migration step: valid
+    /// Off/Overlay/Spotlight/Both keep canonical casing, unknown → "Both".
+    /// The subsequent v5 step remaps to Off|Overlay.
+    /// </summary>
+    private static string NormalizeFocusHintMode(string? value)
     {
-        settings.IgnoredProcesses ??= new List<string>();
+        if (string.Equals(value, "Off", StringComparison.OrdinalIgnoreCase)) return "Off";
+        if (string.Equals(value, "Overlay", StringComparison.OrdinalIgnoreCase)) return "Overlay";
+        if (string.Equals(value, "Spotlight", StringComparison.OrdinalIgnoreCase)) return "Spotlight";
+        if (string.Equals(value, "Both", StringComparison.OrdinalIgnoreCase)) return "Both";
+        return "Both";
+    }
+
+    /// <summary>
+    /// Canonicalizes a FocusHintMode value (case-insensitive). Unknown, empty or null
+    /// values fall back to "Overlay". Valid Off/Overlay choices keep their canonical
+    /// casing; legacy Both/Spotlight values map to Overlay/Off respectively.
+    /// </summary>
+    private static string NormalizeFocusHintModeV5(string? value)
+    {
+        if (string.Equals(value, "Off", StringComparison.OrdinalIgnoreCase)) return "Off";
+        if (string.Equals(value, "Overlay", StringComparison.OrdinalIgnoreCase)) return "Overlay";
+        if (string.Equals(value, "Both", StringComparison.OrdinalIgnoreCase)) return "Overlay";
+        if (string.Equals(value, "Spotlight", StringComparison.OrdinalIgnoreCase)) return "Off";
+        return "Overlay";
+    }
+
+    public AppSettings MigrateIfNeeded(AppSettings settings)
+    {        settings.IgnoredProcesses ??= new List<string>();
         settings.IgnoredClasses ??= new List<string>();
         settings.Hotkeys ??= new Dictionary<string, string>();
 
@@ -134,6 +161,31 @@ public class SettingsService
         if (settings.Version < 3)
         {
             settings.Version = 3;
+        }
+
+        // --- Migration to schema v4: focus hint settings added (FocusHintMode default
+        // "Both", OverlayShowAppIcons default true, SpotlightDimOpacity default 45).
+        // Existing installs (Version < 4) have no persisted values, so the property
+        // initializers already supply the defaults. Only normalize invalid data:
+        // unknown/empty FocusHintMode → "Both" (case-insensitive canonicalization preserves
+        // any valid existing choice). The spotlight clamp was dropped with schema v5
+        // (SpotlightDimOpacity retired); a stale spotlightOpacity key in old JSON is
+        // ignored by the deserializer (unknown properties are skipped by default). ---
+        if (settings.Version < 4)
+        {
+            settings.FocusHintMode = NormalizeFocusHintMode(settings.FocusHintMode);
+            settings.Version = 4;
+        }
+
+        // --- Migration to schema v5: spotlight retired, OverlayShowAppIcons retired.
+        // FocusHintMode is now Off | Overlay (default "Overlay"). Mapping (case-insensitive):
+        // Both → Overlay, Spotlight → Off, Off → Off, Overlay → Overlay;
+        // null/empty/unknown → "Overlay". Valid Off/Overlay values are never overwritten,
+        // only re-cased to canonical form. ---
+        if (settings.Version < 5)
+        {
+            settings.FocusHintMode = NormalizeFocusHintModeV5(settings.FocusHintMode);
+            settings.Version = 5;
         }
 
 #pragma warning disable CS0618 // OverflowBehavior is deprecated

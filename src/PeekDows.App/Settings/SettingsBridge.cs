@@ -100,6 +100,7 @@ public sealed partial class SettingsBridge
         };
         AugmentSnapshotIgnored(data);
         AugmentSnapshotHotkeys(data);
+        AugmentSnapshotBeta(data);
         return data;
     }
 
@@ -216,6 +217,7 @@ public sealed partial class SettingsBridge
         if (draft.ThresholdPx is { } th && th > 0 && settings.DirectionalFocusThresholdPx != th) { settings.DirectionalFocusThresholdPx = th; plainChanged = true; }
 
         ApplyIgnoredDraft(draft, settings, ref plainChanged);
+        ApplyBetaDraft(draft, settings, ref plainChanged);
         string? hotkeyError = null;
         ApplyHotkeysDraft(draft, ref hotkeyError);
         if (hotkeyError is not null)

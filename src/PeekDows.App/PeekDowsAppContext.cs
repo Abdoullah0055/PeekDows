@@ -31,6 +31,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private readonly PauseStateService _pauseState;
     private readonly System.Windows.Forms.Timer _pauseCheckTimer;
     private readonly DirectionalFocusService _directionalFocusService;
+    private readonly KeyboardLayoutGuardService _layoutGuardService;
     private readonly DirectionalFocusRegistry _directionalFocusRegistry;
     private readonly DirectionalFocusLayoutSnapshotService _directionalFocusSnapshotService;
     private readonly IVirtualDesktopService _virtualDesktopService;
@@ -41,6 +42,12 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private int _arrangeInProgress;
 
     private AppSettings _settings;
+
+    // Focus hint overlay (Beta): created lazily on the UI thread, driven by
+    // DirectionalFocusService gesture events. Never focusable/clickable.
+    private HintOverlayForm? _hintOverlay;
+    private System.Drawing.Point _hintAnchor = System.Drawing.Point.Empty;
+    private Rect _hintAnchorMonitor;
 
     public RuntimeState State => _pauseState.State;
     public bool IsPaused => _pauseState.IsPaused;
@@ -168,9 +175,22 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             _logger,
             _animationService);
 
+        _directionalFocusService.GestureStarted += OnFocusHintGestureStarted;
+        _directionalFocusService.GestureUpdated += OnFocusHintGestureUpdated;
+        _directionalFocusService.GestureEnded += OnFocusHintGestureEnded;
+
+        // Blocks Windows from flipping the keyboard layout (FR↔EN) on our
+        // Ctrl+Shift gesture chord: swallows the chord's key-UPs while the chord
+        // is pure (no third key), passes everything else (Ctrl+Shift+Esc intact).
+        _layoutGuardService = new KeyboardLayoutGuardService(
+            () => _settings.PreventLayoutSwitchWhileGesturing,
+            () => _settings.DirectionalFocusEnabled,
+            _logger);
+
         if (_settings.DirectionalFocusEnabled)
         {
             _directionalFocusService.Start();
+            _layoutGuardService.Start();
         }
 
         if (_settings.ArrangeOnStartup)
@@ -336,13 +356,61 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         if (_settings.DirectionalFocusEnabled)
         {
             _directionalFocusService.Start();
+            _layoutGuardService.Start();
         }
         else
         {
             _directionalFocusService.Stop();
+            _layoutGuardService.Stop();
         }
 
         DirectionalFocusChanged?.Invoke(_settings.DirectionalFocusEnabled);
+    }
+
+    /// <summary>
+    /// Sets the direction-hint mode (Off/Overlay). Normalizes null/unknown to
+    /// "Overlay" (legacy "Both"→Overlay, "Spotlight"→Off), persists via
+    /// SettingsService, then notifies runtime. Menu refresh is builder-side
+    /// (radio checks updated on Click + DropDownOpening), no full menu rebuild.
+    /// Raises <see cref="FocusHintModeChanged"/> so the open settings window can
+    /// mirror the tray change live (same pattern as the other Changed events).
+    /// </summary>
+    public event Action<string>? FocusHintModeChanged;
+
+    public void SetFocusHintMode(string mode)
+    {
+        var normalized = NormalizeFocusHintMode(mode);
+        if (string.Equals(_settings.FocusHintMode, normalized, StringComparison.Ordinal))
+            return;
+
+        _settings.FocusHintMode = normalized;
+        _settingsService.Save(_settings);
+        _logger.Info($"FocusHintMode changed: {normalized}");
+        OnSettingsChanged();
+        FocusHintModeChanged?.Invoke(normalized);
+    }
+
+    /// <summary>
+    /// Toggles Off ↔ Overlay. Convenience for a future hotkey; tray submenu
+    /// calls SetFocusHintMode directly.
+    /// </summary>
+    public void CycleFocusHintMode()
+    {
+        SetFocusHintMode(NormalizeFocusHintMode(_settings.FocusHintMode) == "Off" ? "Overlay" : "Off");
+    }
+
+    private static string NormalizeFocusHintMode(string? mode)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+            return "Overlay";
+        switch (mode.Trim().ToLowerInvariant())
+        {
+            case "off": return "Off";
+            case "overlay": return "Overlay";
+            case "spotlight": return "Off";
+            case "both": return "Overlay";
+            default: return "Overlay";
+        }
     }
 
     public bool IsAnimateWindowTransitionsEnabled => _settings.AnimateWindowTransitions;
@@ -419,6 +487,8 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     {
         _logger.Info("PeekDows exiting");
         try { _animationService.SnapAllToTarget(); } catch { }
+        HideFocusHints();
+        try { _layoutGuardService.Dispose(); } catch { }
         _pauseCheckTimer.Stop();
         _pauseCheckTimer.Dispose();
         _autoArrangeService.Dispose();
@@ -475,7 +545,80 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     public void OnSettingsChanged()
     {
         _classifier.UpdateSettings(_settings);
+        if (string.Equals(_settings.FocusHintMode, "Off", StringComparison.OrdinalIgnoreCase)
+            || !_settings.DirectionalFocusEnabled)
+        {
+            HideFocusHints();
+        }
         _logger.Info($"Settings changed at runtime: IgnoredProcesses.Count={_settings.IgnoredProcesses.Count}, IgnoredClasses.Count={_settings.IgnoredClasses.Count}, AllowRepositionMaximizedWindows={_settings.AllowRepositionMaximizedWindows}");
+    }
+
+    private void OnFocusHintGestureStarted(System.Drawing.Point anchor, Rect monitor)
+    {
+        try
+        {
+            _hintAnchor = anchor;
+            _hintAnchorMonitor = monitor;
+            EnsureHintForms();
+            // First paint: arrows for populated slots (no active slot yet).
+            OnFocusHintGestureUpdated(null, _settings.DirectionalFocusThresholdPx, 0);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Focus hint start failed: {ex.Message}");
+        }
+    }
+
+    private void OnFocusHintGestureUpdated(DirectionalFocusSlot? slot, int threshold, double distance)
+    {
+        try
+        {
+            if (!_settings.DirectionalFocusEnabled)
+            {
+                HideFocusHints();
+                return;
+            }
+            EnsureHintForms();
+
+            var available = _directionalFocusRegistry.GetAvailableSlots(_hintAnchorMonitor);
+            var populated = new System.Collections.Generic.List<DirectionalFocusSlot>(available.Count);
+            foreach (var (s, _) in available)
+                populated.Add(s);
+
+            bool hasTarget = slot != null && populated.Contains(slot.Value);
+            var vm = FocusHintState.Resolve(_settings.FocusHintMode, slot, hasTarget);
+
+            // Arrows-only overlay: show solely populated slots, no background, no text.
+            // Nothing populated → hide (nothing to point at).
+            if (vm.ShowOverlay && _hintOverlay != null && populated.Count > 0)
+            {
+                _hintOverlay.ShowAt(_hintAnchor, populated, slot);
+            }
+            else
+            {
+                HideFocusHints();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Focus hint update failed: {ex.Message}");
+        }
+    }
+
+    private void OnFocusHintGestureEnded()
+    {
+        HideFocusHints();
+    }
+
+    private void EnsureHintForms()
+    {
+        if (_hintOverlay == null)
+            _hintOverlay = new HintOverlayForm(msg => _logger.Info($"HintOverlay: {msg}"));
+    }
+
+    private void HideFocusHints()
+    {
+        try { _hintOverlay?.HideHint(); } catch { }
     }
 
     private void OnArrangeNowRequested()
@@ -743,6 +886,16 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         if (disposing)
         {
             try { _animationService.SnapAllToTarget(); } catch { }
+            try
+            {
+                _directionalFocusService.GestureStarted -= OnFocusHintGestureStarted;
+                _directionalFocusService.GestureUpdated -= OnFocusHintGestureUpdated;
+                _directionalFocusService.GestureEnded -= OnFocusHintGestureEnded;
+            }
+            catch { }
+            HideFocusHints();
+            try { _hintOverlay?.Dispose(); } catch { }
+            try { _layoutGuardService.Dispose(); } catch { }
             _pauseCheckTimer.Stop();
             _pauseCheckTimer.Dispose();
             _autoArrangeService.Dispose();

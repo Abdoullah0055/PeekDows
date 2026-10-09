@@ -132,6 +132,7 @@ public class RepositionMaximizedWindowsToggleTests
         public event Action<bool>? AnimateWindowTransitionsChanged;
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
+        public event Action<string>? FocusHintModeChanged;
 
         public void ArrangeNow() { }
         public void TogglePause() { }
@@ -149,6 +150,8 @@ public class RepositionMaximizedWindowsToggleTests
             _settingsService?.Save(CurrentSettings);
             AllowRepositionMaximizedWindowsChanged?.Invoke(CurrentSettings.AllowRepositionMaximizedWindows);
         }
+
+        public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
 
         public void SetWindowSizePreset(WindowSizePreset preset) { }
 
