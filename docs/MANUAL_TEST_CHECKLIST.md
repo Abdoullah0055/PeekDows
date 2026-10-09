@@ -150,3 +150,8 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
   - `hook=gone` = retrait silencieux du hook ;
   - même hwnd+tid + rien = TSF/IME profond.
 - [ ] `Esc` pendant un geste : `CHORD_THIRD_KEY vk=Esc` puis `TASKMGR_OPEN ... hint=(Esc-pendant-geste => accord OS Ctrl+Shift+Esc)` — cause exacte prouvée.
+
+## Diagnostic majuscules fantômes + trigger DOWN vs UP
+- [ ] Démarrage : `KB_OS_STATE sticky=... caps=...` présent (exclut StickyKeys/CapsLock).
+- [ ] Geste + frappe `aaa` juste après release : minuscules ; log `ShiftResync applied` (ou `skipped (modifiers physically held)` si tu re-tenais Shift — normal).
+- [ ] Flip : lire `edges=[...]` — downs seuls avant le flip = trigger DOWN (pivot nécessaire) ; flip après UP non-avalé = chemin hors-messages.
