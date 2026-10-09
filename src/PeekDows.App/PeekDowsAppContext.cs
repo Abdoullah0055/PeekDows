@@ -625,6 +625,17 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             _logger.Warn($"Focus hint gesture-end trace failed: {ex.Message}");
         }
         HideFocusHints();
+        // Clear a phantom Shift/Ctrl hold left by swallowed chord key-UPs (would
+        // otherwise shift the next typed characters). Worker thread per the
+        // service contract; skips itself when modifiers are physically held.
+        try
+        {
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try { ShiftResyncService.TryResyncForeground(_logger); } catch { }
+            });
+        }
+        catch { }
     }
 
     private void EnsureHintForms()

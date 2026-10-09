@@ -48,6 +48,11 @@ public sealed class KeyboardLayoutGuardService : IDisposable
     private bool _chordInjected;
     private bool _hasChord;
 
+    // Modifier edge journal (Ctrl/Shift/Alt/Win L/R/generic, down + up):
+    // recorded in the hook proc, drained each tick by ForegroundWatchService
+    // to explain layout flips. Storage only — never logged here.
+    private readonly ChordEdgeRecorder _edges = new();
+
     /// <summary>LLKHF_INJECTED bit in KBDLLHOOKSTRUCT.flags (injected input).</summary>
     private const int LLKHF_INJECTED = 0x10;
 
@@ -100,6 +105,24 @@ public sealed class KeyboardLayoutGuardService : IDisposable
                 return null;
             _hasChord = false;
             return (_chordAtUtc, _chordInjected);
+        }
+    }
+
+    /// <summary>
+    /// Returns and clears all recorded modifier edges (Ctrl/Shift/Alt/Win
+    /// L/R/generic, down + up) since the previous call. Thread-safe, never
+    /// throws (empty list on failure). Consumed each tick by
+    /// ForegroundWatchService to annotate KB_LAYOUT_FLIP lines.
+    /// </summary>
+    public IReadOnlyList<ChordEdge> DrainEdges()
+    {
+        try
+        {
+            return _edges.Drain();
+        }
+        catch
+        {
+            return Array.Empty<ChordEdge>();
         }
     }
 
@@ -212,6 +235,19 @@ public sealed class KeyboardLayoutGuardService : IDisposable
             // KBDLLHOOKSTRUCT.flags exists (NativeMethods.KBDLLHOOKSTRUCT.flags);
             // LLKHF_INJECTED marks input injected by another process / SendInput.
             bool injected = (info.flags & LLKHF_INJECTED) != 0;
+
+            // Modifier edge journal for flip-cause analysis: record EVERY
+            // modifier event (L/R/generic, down + up). Storage only — never
+            // log from the hook proc.
+            try
+            {
+                if (IsModifierVk(info.vkCode))
+                    _edges.Record(info.vkCode, isDown, injected, DateTime.UtcNow.Ticks);
+            }
+            catch
+            {
+                // Diagnostics must never disturb the hook: ignore.
+            }
 
             // Alt+Shift chord detector: feed EVERY key event (down + up, Feed
             // handles both); on completion record (UTC time, injected) for the

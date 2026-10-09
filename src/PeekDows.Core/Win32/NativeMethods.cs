@@ -262,4 +262,32 @@ public static class NativeMethods
         public int time;
         public IntPtr dwExtraInfo;
     }
+
+    // --- Modifier-edge journal + Shift resync + OS-state probe (additive only) ---
+    public const int VK_CAPITAL = 0x14;
+
+    [DllImport("user32.dll")]
+    public static extern short GetKeyState(int nVirtKey);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetKeyboardState(byte[] lpKeyState);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetKeyboardState(byte[] lpKeyState);
+
+    public const uint SPI_GETSTICKYKEYS = 0x000A;
+    public const uint SKF_STICKYKEYSON = 0x0001;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct STICKYKEYS
+    {
+        public uint cbSize;
+        public uint dwFlags;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref STICKYKEYS pvParam, uint fWinIni);
 }

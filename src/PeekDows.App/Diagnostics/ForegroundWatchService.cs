@@ -41,6 +41,11 @@ public sealed class ForegroundWatchService : IDisposable
     private bool _gestureActive;
     private bool _disposed;
 
+    // Modifier edge journal cache: replaced every tick from guard.DrainEdges()
+    // (drained even when no flip, so the buffer never goes stale); rendered
+    // on KB_LAYOUT_FLIP lines only.
+    private IReadOnlyList<ChordEdge> _cachedEdges = Array.Empty<ChordEdge>();
+
     public ForegroundWatchService(
         KeyboardLayoutGuardService guard,
         FileLogger? logger,
@@ -127,6 +132,37 @@ public sealed class ForegroundWatchService : IDisposable
         {
         }
 
+        try
+        {
+            string sticky;
+            try
+            {
+                var sk = new NativeMethods.STICKYKEYS { cbSize = 8 };
+                bool ok = NativeMethods.SystemParametersInfo(
+                    NativeMethods.SPI_GETSTICKYKEYS, sk.cbSize, ref sk, 0);
+                sticky = ok
+                    ? (((sk.dwFlags & NativeMethods.SKF_STICKYKEYSON) != 0) ? "on" : "off")
+                    : "?";
+            }
+            catch
+            {
+                sticky = "?";
+            }
+            string caps;
+            try
+            {
+                caps = ((NativeMethods.GetKeyState(NativeMethods.VK_CAPITAL) & 1) != 0) ? "on" : "off";
+            }
+            catch
+            {
+                caps = "?";
+            }
+            _logger?.Info($"KB_OS_STATE sticky={sticky} caps={caps}");
+        }
+        catch
+        {
+        }
+
         // Initial sample: establishes the baseline so the first tick never
         // reports a spurious flip. _prev stays null when sampling fails.
         try
@@ -176,7 +212,7 @@ public sealed class ForegroundWatchService : IDisposable
             long swallowed = SafeSwallowedCount();
             _gestureStartSwallowed = swallowed;
             _lastSwallowed = swallowed;
-            _logger?.Info($"GESTURE_HKL_START hkl={CurrentLayoutName()} swallowed={swallowed}{ForegroundLocationSuffix()}");
+            _logger?.Info($"GESTURE_HKL_START hkl={CurrentLayoutName()} swallowed={swallowed}{ForegroundLocationSuffix()}{ShiftCapsSuffix()}");
         }
         catch
         {
@@ -191,7 +227,7 @@ public sealed class ForegroundWatchService : IDisposable
             long swallowed = SafeSwallowedCount();
             long delta = swallowed - _gestureStartSwallowed;
             _lastSwallowed = swallowed;
-            _logger?.Info($"GESTURE_HKL_END hkl={CurrentLayoutName()} swallowedDelta={delta}{ForegroundLocationSuffix()}");
+            _logger?.Info($"GESTURE_HKL_END hkl={CurrentLayoutName()} swallowedDelta={delta}{ForegroundLocationSuffix()}{ShiftCapsSuffix()}");
         }
         catch
         {
@@ -330,6 +366,17 @@ public sealed class ForegroundWatchService : IDisposable
                 }
             }
 
+            // Drain the modifier edge journal every tick into the cache
+            // (rendered on flip lines only, so the buffer never goes stale).
+            try
+            {
+                _cachedEdges = _guard.DrainEdges() ?? Array.Empty<ChordEdge>();
+            }
+            catch
+            {
+                _cachedEdges = Array.Empty<ChordEdge>();
+            }
+
             bool flipped;
             try
             {
@@ -368,7 +415,7 @@ public sealed class ForegroundWatchService : IDisposable
                 {
                     hookState = "gone";
                 }
-                _logger?.Info($"KB_LAYOUT_FLIP {oldName} -> {newName} hwnd=0x{hwnd.ToInt64():X} tid={tid} sameHwnd={sameHwnd} hook={hookState} fg=\"{title}\" proc={procName} pid={pid} gesture={_gestureActive} swallowedDelta={swallowedDelta}");
+                _logger?.Info($"KB_LAYOUT_FLIP {oldName} -> {newName} hwnd=0x{hwnd.ToInt64():X} tid={tid} sameHwnd={sameHwnd} hook={hookState} fg=\"{title}\" proc={procName} pid={pid} gesture={_gestureActive} swallowedDelta={swallowedDelta} {FormatChordEdges(_cachedEdges)}");
             }
 
             if (string.Equals(procName, "Taskmgr", StringComparison.OrdinalIgnoreCase)
@@ -487,6 +534,77 @@ public sealed class ForegroundWatchService : IDisposable
         catch
         {
             return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Physical Shift + CapsLock state suffix for gesture-bound lines
+    /// (" shiftPhys=down caps=off"). Never throws (failures yield "?").
+    /// </summary>
+    private static string ShiftCapsSuffix()
+    {
+        string shift;
+        try
+        {
+            shift = ((NativeMethods.GetAsyncKeyState(NativeMethods.VK_SHIFT) & 0x8000) != 0) ? "down" : "up";
+        }
+        catch
+        {
+            shift = "?";
+        }
+        string caps;
+        try
+        {
+            caps = ((NativeMethods.GetKeyState(NativeMethods.VK_CAPITAL) & 1) != 0) ? "on" : "off";
+        }
+        catch
+        {
+            caps = "?";
+        }
+        return $" shiftPhys={shift} caps={caps}";
+    }
+
+    /// <summary>
+    /// Renders the drained modifier edge buffer as "edges=[Nom-down@12ms,…]"
+    /// (whole buffer, capacity 40; per-edge try/catch). Never throws.
+    /// </summary>
+    private static string FormatChordEdges(IReadOnlyList<ChordEdge> edges)
+    {
+        try
+        {
+            if (edges == null || edges.Count == 0)
+                return "edges=[]";
+            long nowTicks = DateTime.UtcNow.Ticks;
+            var parts = new string[edges.Count];
+            for (int i = 0; i < edges.Count; i++)
+            {
+                try
+                {
+                    var e = edges[i];
+                    string name;
+                    try
+                    {
+                        name = KeyboardLayoutMonitor.KeyName(e.Vk);
+                    }
+                    catch
+                    {
+                        name = $"0x{e.Vk:X2}";
+                    }
+                    long ageMs = (nowTicks - e.TicksUtc) / TimeSpan.TicksPerMillisecond;
+                    if (ageMs < 0)
+                        ageMs = 0;
+                    parts[i] = $"{name}-{(e.KeyDown ? "down" : "up")}@{ageMs}ms";
+                }
+                catch
+                {
+                    parts[i] = "?";
+                }
+            }
+            return $"edges=[{string.Join(",", parts)}]";
+        }
+        catch
+        {
+            return "edges=[]";
         }
     }
 }
