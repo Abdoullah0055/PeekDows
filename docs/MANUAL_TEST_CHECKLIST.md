@@ -127,3 +127,15 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Windows: open the Windows page, Refresh → rows are listed (title, process, eligibility); click "Ignorer ce process" on a row → the process appears checked in the Ignored apps list (Save still required to apply).
 - [ ] Un-ignore confirm: on the Ignored apps page uncheck an entry → a dark confirm modal names the app → "Keep ignoring" leaves it checked and untouched; "Stop ignoring" + Save removes it from `settings.json`.
 - [ ] Ignored classes stay collapsed under "Advanced: window classes" and still save one-entry-per-line.
+
+## Beta — Direction hints (arrows-only overlay)
+- [ ] Tray → Direction hints ▸ Off/Overlay : radio suit le mode, `settings.json:focusHintMode` suit après clic.
+- [ ] `Ctrl+Shift` tenu → seules les flèches vers les slots occupés s'affichent (2 apps en diagonale → 2 flèches, 4 → 4, 8 → 8), sans aucun fond ; slot actif en blanc.
+- [ ] Aucun slot occupé → rien ne s'affiche ; relâche `Ctrl/Shift` ou `Win` → disparition aussitôt, sans focus volé.
+- [ ] Settings → Beta : segmented Off/Overlay, Save → tray suit ; tray → Beta suit sans Save (bannière si draft dirty) — régression du bug sync : vérifier dans les deux sens.
+- [ ] Vieux `settings.json` (`Both`/`Spotlight`/`spotlightOpacity`) → migré au chargement (`Both`→Overlay, `Spotlight`→Off), app démarre.
+- [ ] Overlay n'est jamais arrangé (classifier : titre `PeekDowsHintOverlay` exclu).
+- [ ] Overlay : halo gris à peine visible, flèches grises semi-transparentes, active blanche + glow ; aucun flash de fond (mauve) à l'apparition, fade ~140ms.
+- [ ] Fonds clairs + sombres : pas de franges autour des flèches ; 125%/150% DPI : flèches nettes et bien dimensionnées.
+- [ ] Log après un geste : `HintOverlay: ULW ok=True ... populated=N` (si `ok=False`, le fallback keyed affiche quand même les flèches — signaler).
+- [ ] Garde clavier : layout FR, 5 gestes `Ctrl+Shift` tenu + souris → toujours FR ; `Ctrl+Shift+Esc` → Gestionnaire des tâches ; taper `aaa` après un geste → minuscules (pas de Shift fantôme) ; Beta → décoche la garde → le layout rebascule (comportement Windows natif).
