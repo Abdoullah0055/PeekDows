@@ -14,15 +14,22 @@ public class DirectionalFocusInputGateTests
     }
 
     [Fact]
-    public void ShiftOnly_ReturnsFalse()
+    public void WinOnly_ReturnsFalse()
     {
-        Assert.False(_gate.IsGestureModifierActive(ctrlDown: false, shiftDown: true, altDown: false, lWinDown: false, rWinDown: false));
+        Assert.False(_gate.IsGestureModifierActive(ctrlDown: false, shiftDown: false, altDown: false, lWinDown: true, rWinDown: false));
+        Assert.False(_gate.IsGestureModifierActive(ctrlDown: false, shiftDown: false, altDown: false, lWinDown: false, rWinDown: true));
     }
 
     [Fact]
-    public void CtrlShift_ReturnsTrue()
+    public void CtrlLWin_ReturnsTrue()
     {
-        Assert.True(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: true, altDown: false, lWinDown: false, rWinDown: false));
+        Assert.True(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: false, altDown: false, lWinDown: true, rWinDown: false));
+    }
+
+    [Fact]
+    public void CtrlRWin_ReturnsTrue()
+    {
+        Assert.True(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: false, altDown: false, lWinDown: false, rWinDown: true));
     }
 
     [Fact]
@@ -32,39 +39,28 @@ public class DirectionalFocusInputGateTests
     }
 
     [Fact]
+    public void CtrlShift_ReturnsFalse()
+    {
+        // The retired chord: must never arm (OS layout toggle).
+        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: true, altDown: false, lWinDown: false, rWinDown: false));
+    }
+
+    [Fact]
+    public void CtrlWinShift_ReturnsFalse()
+    {
+        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: true, altDown: false, lWinDown: true, rWinDown: false));
+        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: true, altDown: false, lWinDown: false, rWinDown: true));
+    }
+
+    [Fact]
+    public void CtrlWinAlt_ReturnsFalse()
+    {
+        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: false, altDown: true, lWinDown: true, rWinDown: false));
+    }
+
+    [Fact]
     public void CtrlAlt_ReturnsFalse()
     {
         Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: false, altDown: true, lWinDown: false, rWinDown: false));
-    }
-
-    [Fact]
-    public void CtrlShiftAlt_ReturnsFalse()
-    {
-        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: true, altDown: true, lWinDown: false, rWinDown: false));
-    }
-
-    [Fact]
-    public void CtrlWin_ReturnsFalse()
-    {
-        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: false, altDown: false, lWinDown: true, rWinDown: false));
-    }
-
-    [Fact]
-    public void CtrlRWin_ReturnsFalse()
-    {
-        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: false, altDown: false, lWinDown: false, rWinDown: true));
-    }
-
-    [Fact]
-    public void CtrlShiftWin_ReturnsFalse()
-    {
-        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: true, altDown: false, lWinDown: true, rWinDown: false));
-    }
-
-    [Fact]
-    public void CtrlShiftWin_AllVariantsReturnFalse()
-    {
-        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: true, altDown: false, lWinDown: false, rWinDown: true));
-        Assert.False(_gate.IsGestureModifierActive(ctrlDown: true, shiftDown: true, altDown: false, lWinDown: true, rWinDown: true));
     }
 }

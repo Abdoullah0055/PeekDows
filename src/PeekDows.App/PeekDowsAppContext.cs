@@ -32,7 +32,6 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private readonly PauseStateService _pauseState;
     private readonly System.Windows.Forms.Timer _pauseCheckTimer;
     private readonly DirectionalFocusService _directionalFocusService;
-    private readonly DirectionalTapService _directionalTapService;
     private readonly ForegroundWatchService _kbWatchService;
     private readonly DirectionalFocusRegistry _directionalFocusRegistry;
     private readonly DirectionalFocusLayoutSnapshotService _directionalFocusSnapshotService;
@@ -181,20 +180,15 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _directionalFocusService.GestureUpdated += OnFocusHintGestureUpdated;
         _directionalFocusService.GestureEnded += OnFocusHintGestureEnded;
 
-        // Double-tap Ctrl arms the directional gesture (observe-only hook, never
-        // swallows input): flicks stay free, no layout-switch guard needed.
-        _directionalTapService = new DirectionalTapService(_logger);
-        _directionalTapService.Armed += OnDirectionalTapArmed;
-
         if (_settings.DirectionalFocusEnabled)
         {
             _directionalFocusService.Start();
-            _directionalTapService.Start();
         }
 
-        // Layout/flip + Taskmgr tracer: always active, even when Directional
-        // Focus is off, so layout flips stay explainable in all configurations.
-        _kbWatchService = new ForegroundWatchService(_directionalTapService, _logger);
+    // Layout/flip + Taskmgr tracer: always active, even when Directional
+    // Focus is off, so layout flips stay explainable in all configurations.
+    // Polling-only design: no keyboard hook is installed anymore.
+    _kbWatchService = new ForegroundWatchService(_logger);
         _kbWatchService.Start();
 
         if (_settings.ArrangeOnStartup)
@@ -360,12 +354,10 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         if (_settings.DirectionalFocusEnabled)
         {
             _directionalFocusService.Start();
-            _directionalTapService.Start();
         }
         else
         {
             _directionalFocusService.Stop();
-            _directionalTapService.Stop();
         }
 
         DirectionalFocusChanged?.Invoke(_settings.DirectionalFocusEnabled);
@@ -491,9 +483,8 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     {
         _logger.Info("PeekDows exiting");
         try { _animationService.SnapAllToTarget(); } catch { }
-        HideFocusHints();
-        try { _directionalTapService.Dispose(); } catch { }
-        try { _kbWatchService.Dispose(); } catch { }
+            HideFocusHints();
+            try { _kbWatchService.Dispose(); } catch { }
         _pauseCheckTimer.Stop();
         _pauseCheckTimer.Dispose();
         _autoArrangeService.Dispose();
@@ -559,21 +550,9 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     }
 
     /// <summary>
-    /// Ctrl double-tap completed (observe-only hook): arm the directional
-    /// gesture at the tap position. Runs on the UI thread (hook thread).
+    /// Ctrl+Win hold started: show the arrows overlay at the anchor.
+    /// Runs on the UI thread (service timer thread).
     /// </summary>
-    private void OnDirectionalTapArmed(System.Drawing.Point anchor)
-    {
-        try
-        {
-            _directionalFocusService.ArmGesture(anchor);
-        }
-        catch (Exception ex)
-        {
-            _logger.Warn($"Directional tap arm failed: {ex.Message}");
-        }
-    }
-
     private void OnFocusHintGestureStarted(System.Drawing.Point anchor, Rect monitor)
     {
         try
@@ -614,7 +593,6 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             // Nothing populated → hide (nothing to point at).
             if (vm.ShowOverlay && _hintOverlay != null && populated.Count > 0)
             {
-                _hintOverlay.TimeFraction = _directionalFocusService.ArmedTimeFraction;
                 _hintOverlay.ShowAt(_hintAnchor, populated, slot);
             }
             else
@@ -922,12 +900,10 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 _directionalFocusService.GestureStarted -= OnFocusHintGestureStarted;
                 _directionalFocusService.GestureUpdated -= OnFocusHintGestureUpdated;
                 _directionalFocusService.GestureEnded -= OnFocusHintGestureEnded;
-                _directionalTapService.Armed -= OnDirectionalTapArmed;
             }
             catch { }
             HideFocusHints();
             try { _hintOverlay?.Dispose(); } catch { }
-            try { _directionalTapService.Dispose(); } catch { }
             try { _kbWatchService.Dispose(); } catch { }
             _pauseCheckTimer.Stop();
             _pauseCheckTimer.Dispose();

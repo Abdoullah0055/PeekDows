@@ -4,7 +4,6 @@ using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 using Microsoft.Win32;
-using PeekDows.App.Focus;
 using PeekDows.Core.Services;
 using PeekDows.Core.Win32;
 
@@ -12,20 +11,18 @@ namespace PeekDows.App.Diagnostics;
 
 /// <summary>
 /// UI-thread foreground watcher that traces every keyboard-layout flip and
-/// every Task Manager open with its exact cause into peekdows.log. Polls the
-/// foreground window + its thread's HKL every 250ms, consumes the guard's
-/// third-key diagnostic, and correlates everything with the Directional Focus
-/// gesture bounds. Never throws (every tick path is guarded), never logs
-/// keystroke contents — only layout names, process names, window titles and
-/// the armed-chord third key. Always active, even when Directional Focus is
-/// off, so layout flips stay explainable in all configurations.
+/// every Task Manager open into peekdows.log. Polling-only design: no keyboard
+/// hook is installed anywhere (the Ctrl+Win hold gesture has no OS layout
+/// toggle). Never throws (every tick path is guarded), never logs keystroke
+/// contents — only layout names, process names and window titles. Always
+/// active, even when Directional Focus is off, so layout flips stay
+/// explainable in all configurations.
 /// </summary>
 public sealed class ForegroundWatchService : IDisposable
 {
     private const int PollIntervalMs = 250;
     private const int MaxTitleChars = 40;
 
-    private readonly DirectionalTapService _guard;
     private readonly FileLogger? _logger;
     private readonly Func<bool> _isEnabled;
     private readonly System.Windows.Forms.Timer _timer;
@@ -33,25 +30,13 @@ public sealed class ForegroundWatchService : IDisposable
     private LayoutSample? _prev;
     private IntPtr _lastHwnd = IntPtr.Zero;
     private string _lastProcName = "?";
-    private long _lastSwallowed;
-    private long _gestureStartSwallowed;
-    private int? _lastThirdKeyVk;
-    private string _lastThirdKeyName = "?";
-    private DateTime _lastThirdKeyAtUtc;
     private bool _gestureActive;
     private bool _disposed;
 
-    // Modifier edge journal cache: replaced every tick from guard.DrainEdges()
-    // (drained even when no flip, so the buffer never goes stale); rendered
-    // on KB_LAYOUT_FLIP lines only.
-    private IReadOnlyList<ChordEdge> _cachedEdges = Array.Empty<ChordEdge>();
-
     public ForegroundWatchService(
-        DirectionalTapService guard,
         FileLogger? logger,
         Func<bool>? isEnabled = null)
     {
-        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _logger = logger;
         _isEnabled = isEnabled ?? (() => true);
         _timer = new System.Windows.Forms.Timer { Interval = PollIntervalMs };
@@ -173,7 +158,6 @@ public sealed class ForegroundWatchService : IDisposable
                 uint tid = NativeMethods.GetWindowThreadProcessId(hwnd, out _);
                 IntPtr hkl = NativeMethods.GetKeyboardLayout(tid);
                 _prev = new LayoutSample(hkl, tid);
-                _lastSwallowed = SafeSwallowedCount();
             }
         }
         catch
@@ -209,10 +193,7 @@ public sealed class ForegroundWatchService : IDisposable
         _gestureActive = true;
         try
         {
-            long swallowed = SafeSwallowedCount();
-            _gestureStartSwallowed = swallowed;
-            _lastSwallowed = swallowed;
-            _logger?.Info($"GESTURE_HKL_START hkl={CurrentLayoutName()} swallowed={swallowed}{ForegroundLocationSuffix()}{ShiftCapsSuffix()}");
+            _logger?.Info($"GESTURE_HKL_START hkl={CurrentLayoutName()}{ForegroundLocationSuffix()}{ShiftCapsSuffix()}");
         }
         catch
         {
@@ -224,10 +205,7 @@ public sealed class ForegroundWatchService : IDisposable
     {
         try
         {
-            long swallowed = SafeSwallowedCount();
-            long delta = swallowed - _gestureStartSwallowed;
-            _lastSwallowed = swallowed;
-            _logger?.Info($"GESTURE_HKL_END hkl={CurrentLayoutName()} swallowedDelta={delta}{ForegroundLocationSuffix()}{ShiftCapsSuffix()}");
+            _logger?.Info($"GESTURE_HKL_END hkl={CurrentLayoutName()}{ForegroundLocationSuffix()}{ShiftCapsSuffix()}");
         }
         catch
         {
@@ -331,52 +309,6 @@ public sealed class ForegroundWatchService : IDisposable
 
             string title = GetForegroundTitle(hwnd);
 
-            long swallowedNow = SafeSwallowedCount();
-            long swallowedDelta = swallowedNow - _lastSwallowed;
-
-            var third = SafeTakeThirdKey();
-            if (third.HasValue)
-            {
-                string keyName;
-                try
-                {
-                    keyName = KeyboardLayoutMonitor.KeyName(third.Value.Vk);
-                }
-                catch
-                {
-                    keyName = $"VK_{third.Value.Vk:X2}";
-                }
-                long ageMs = Math.Max(0, (long)(DateTime.UtcNow - third.Value.AtUtc).TotalMilliseconds);
-                _lastThirdKeyVk = third.Value.Vk;
-                _lastThirdKeyName = keyName;
-                _lastThirdKeyAtUtc = third.Value.AtUtc;
-                _logger?.Info($"CHORD_THIRD_KEY vk={keyName} inj={third.Value.Injected} ageMs={ageMs} gesture={_gestureActive}");
-            }
-
-            var chord = SafeTakeAltShiftChord();
-            if (chord.HasValue)
-            {
-                try
-                {
-                    long chordAgeMs = Math.Max(0, (long)(DateTime.UtcNow - chord.Value.AtUtc).TotalMilliseconds);
-                    _logger?.Info($"ALT_SHIFT_CHORD inj={chord.Value.Injected} ageMs={chordAgeMs} gesture={_gestureActive}");
-                }
-                catch
-                {
-                }
-            }
-
-            // Drain the modifier edge journal every tick into the cache
-            // (rendered on flip lines only, so the buffer never goes stale).
-            try
-            {
-                _cachedEdges = _guard.DrainEdges() ?? Array.Empty<ChordEdge>();
-            }
-            catch
-            {
-                _cachedEdges = Array.Empty<ChordEdge>();
-            }
-
             bool flipped;
             try
             {
@@ -406,29 +338,16 @@ public sealed class ForegroundWatchService : IDisposable
                 {
                     newName = "?";
                 }
-                string hookState;
-                try
-                {
-                    hookState = _guard.IsHookInstalled ? "ok" : "gone";
-                }
-                catch
-                {
-                    hookState = "gone";
-                }
-                _logger?.Info($"KB_LAYOUT_FLIP {oldName} -> {newName} hwnd=0x{hwnd.ToInt64():X} tid={tid} sameHwnd={sameHwnd} hook={hookState} fg=\"{title}\" proc={procName} pid={pid} gesture={_gestureActive} swallowedDelta={swallowedDelta} {FormatChordEdges(_cachedEdges)}");
+                _logger?.Info($"KB_LAYOUT_FLIP {oldName} -> {newName} hwnd=0x{hwnd.ToInt64():X} tid={tid} sameHwnd={sameHwnd} fg=\"{title}\" proc={procName} pid={pid} gesture={_gestureActive}");
             }
 
             if (string.Equals(procName, "Taskmgr", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(prevProc, "Taskmgr", StringComparison.OrdinalIgnoreCase))
             {
-                string lastThird = _lastThirdKeyVk == null
-                    ? "none"
-                    : $"{_lastThirdKeyName}/{Math.Max(0, (long)(DateTime.UtcNow - _lastThirdKeyAtUtc).TotalMilliseconds)}ms";
-                _logger?.Info($"TASKMGR_OPEN fg=\"{title}\" gesture={_gestureActive} lastThirdKey={lastThird} swallowedDelta={swallowedDelta} hint=(Esc-pendant-geste => accord OS Ctrl+Shift+Esc)");
+                _logger?.Info($"TASKMGR_OPEN fg=\"{title}\" gesture={_gestureActive} hint=(OS chord Ctrl+Shift+Esc, unrelated to the Ctrl+Win hold)");
             }
 
             _prev = cur;
-            _lastSwallowed = swallowedNow;
         }
         catch
         {
@@ -481,42 +400,6 @@ public sealed class ForegroundWatchService : IDisposable
         }
     }
 
-    private long SafeSwallowedCount()
-    {
-        try
-        {
-            return _guard.SwallowedCount;
-        }
-        catch
-        {
-            return _lastSwallowed;
-        }
-    }
-
-    private (int Vk, DateTime AtUtc, bool Injected)? SafeTakeThirdKey()
-    {
-        try
-        {
-            return _guard.TakeThirdKeyDown();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private (DateTime AtUtc, bool Injected)? SafeTakeAltShiftChord()
-    {
-        try
-        {
-            return _guard.TakeAltShiftChord();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     /// <summary>
     /// Samples the current foreground window/thread (" hwnd=0x… tid=…") for
     /// gesture-bound lines; returns "" when sampling fails (fallback: no suffix).
@@ -562,49 +445,5 @@ public sealed class ForegroundWatchService : IDisposable
             caps = "?";
         }
         return $" shiftPhys={shift} caps={caps}";
-    }
-
-    /// <summary>
-    /// Renders the drained modifier edge buffer as "edges=[Nom-down@12ms,…]"
-    /// (whole buffer, capacity 40; per-edge try/catch). Never throws.
-    /// </summary>
-    private static string FormatChordEdges(IReadOnlyList<ChordEdge> edges)
-    {
-        try
-        {
-            if (edges == null || edges.Count == 0)
-                return "edges=[]";
-            long nowTicks = DateTime.UtcNow.Ticks;
-            var parts = new string[edges.Count];
-            for (int i = 0; i < edges.Count; i++)
-            {
-                try
-                {
-                    var e = edges[i];
-                    string name;
-                    try
-                    {
-                        name = KeyboardLayoutMonitor.KeyName(e.Vk);
-                    }
-                    catch
-                    {
-                        name = $"0x{e.Vk:X2}";
-                    }
-                    long ageMs = (nowTicks - e.TicksUtc) / TimeSpan.TicksPerMillisecond;
-                    if (ageMs < 0)
-                        ageMs = 0;
-                    parts[i] = $"{name}-{(e.KeyDown ? "down" : "up")}@{ageMs}ms";
-                }
-                catch
-                {
-                    parts[i] = "?";
-                }
-            }
-            return $"edges=[{string.Join(",", parts)}]";
-        }
-        catch
-        {
-            return "edges=[]";
-        }
     }
 }
