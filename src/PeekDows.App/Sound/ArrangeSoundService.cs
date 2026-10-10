@@ -16,7 +16,7 @@ public sealed class ArrangeSoundService : IDisposable
 {
     private static readonly HashSet<string> FactoryNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "chime-soft", "chime-double", "pop-minimal"
+        "chime-soft", "whoosh-wind", "pop-minimal"
     };
 
     private const string Alias = "peekdows_arrange";

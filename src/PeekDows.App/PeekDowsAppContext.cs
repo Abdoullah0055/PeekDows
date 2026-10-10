@@ -463,7 +463,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
             "PeekDows", "sounds");
 
-    private static readonly string[] FactorySoundNames = { "chime-soft", "chime-double", "pop-minimal" };
+    private static readonly string[] FactorySoundNames = { "chime-soft", "whoosh-wind", "pop-minimal" };
 
     public void ToggleArrangeSound()
     {
