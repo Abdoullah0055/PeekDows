@@ -7,9 +7,9 @@
     44.1 kHz, peak-normalized to avoid clipping. Outputs are COMMITTED under
     src/PeekDows.App/Assets/Sounds so builds never need to run this script;
     re-run it only to retune the sounds.
-      chime-soft.wav   — single soft 660 Hz blip, 0.35 s
-      chime-double.wav — gentle 660 -> 880 Hz two-tone, 0.55 s
-      pop-minimal.wav  — short 180 Hz thump, 0.15 s
+      chime-soft.wav   — single soft 660 Hz blip, 0.35 s (reference, untouched)
+      chime-double.wav — calm low two-tone 440 -> 587 Hz, 0.47 s, quiet
+      pop-minimal.wav  — soft low 220 Hz tick, 0.10 s, very quiet
 #>
 [CmdletBinding()]
 param()
@@ -24,14 +24,14 @@ if (-not (Test-Path -LiteralPath $outDir)) {
 
 $sampleRate = 44100
 
-function Write-Wav([string]$path, [System.Collections.Generic.List[double]]$samples) {
-    # Peak-normalize to 0.89 to leave headroom (classy = never harsh).
+function Write-Wav([string]$path, [System.Collections.Generic.List[double]]$samples, [double]$level = 0.89) {
+    # Peak-normalize to $level to leave headroom (classy = never harsh).
     $peak = 0.0
     foreach ($s in $samples) {
         $a = [Math]::Abs($s)
         if ($a -gt $peak) { $peak = $a }
     }
-    $gain = if ($peak -gt 0) { 0.89 / $peak } else { 1.0 }
+    $gain = if ($peak -gt 0) { $level / $peak } else { 1.0 }
 
     $fs = [System.IO.File]::Create($path)
     try {
@@ -80,12 +80,12 @@ Add-Tone $acc 660.0 0.35 0.12
 Write-Wav (Join-Path $outDir 'chime-soft.wav') $acc
 
 $acc = New-Object System.Collections.Generic.List[double]
-Add-Tone $acc 660.0 0.28 0.10
-Add-Tone $acc 880.0 0.30 0.12
-Write-Wav (Join-Path $outDir 'chime-double.wav') $acc
+Add-Tone $acc 440.0 0.22 0.07
+Add-Tone $acc 587.25 0.25 0.09
+Write-Wav (Join-Path $outDir 'chime-double.wav') $acc 0.6
 
 $acc = New-Object System.Collections.Generic.List[double]
-Add-Tone $acc 180.0 0.15 0.035
-Write-Wav (Join-Path $outDir 'pop-minimal.wav') $acc
+Add-Tone $acc 220.0 0.10 0.025
+Write-Wav (Join-Path $outDir 'pop-minimal.wav') $acc 0.55
 
 Write-Host 'Done.'
