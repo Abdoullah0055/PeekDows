@@ -30,6 +30,13 @@ public interface IPeekDowsController
     void ToggleAllowRepositionMaximizedWindows();
     void SetWindowSizePreset(WindowSizePreset preset);
     void SetFocusHintMode(string mode);
+    void ToggleArrangeSound();
+    void EnableArrangeSoundForHours(int hours);
+    void DisableArrangeSound(string reason);
+    string[] GetUserSounds();
+    string PickArrangeSoundFile();
+    void DeleteArrangeSoundFile(string name);
+    void PreviewArrangeSound(string name);
     void OpenSettings();
     void OpenLogFile();
     void OpenLogsFolder();
@@ -53,4 +60,5 @@ public interface IPeekDowsController
     // Changed event when mutated, and SettingsHostForm MUST subscribe to it —
     // otherwise the open settings window stays stale (cf. FocusHintMode bug).
     event Action<string>? FocusHintModeChanged;
+    event Action<bool>? SoundChanged;
 }

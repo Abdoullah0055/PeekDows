@@ -451,6 +451,16 @@ public class SettingsServiceTests : IDisposable
         Assert.DoesNotContain("spotlightOpacity", json);
     }
 
+    [Fact]
+    public void AppSettings_ArrangeSoundDefaults_AreDisabledChimeSoftNoAutoOff()
+    {
+        var settings = new AppSettings();
+
+        Assert.False(settings.ArrangeSoundEnabled);
+        Assert.Equal("chime-soft", settings.ArrangeSoundName);
+        Assert.Equal(0, settings.ArrangeSoundAutoOffHours);
+    }
+
     public void Dispose()
     {
         var dir = Path.GetDirectoryName(_testSettingsPath);

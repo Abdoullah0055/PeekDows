@@ -290,4 +290,11 @@ public static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref STICKYKEYS pvParam, uint fWinIni);
+
+    /// <summary>
+    /// WinMM multimedia control interface. Used by ArrangeSoundService to play the
+    /// arrange-success chime (alias "peekdows_arrange"). Returns 0 on success.
+    /// </summary>
+    [DllImport("winmm.dll")]
+    public static extern int mciSendString(string cmd, StringBuilder? ret, int retLen, IntPtr hwndCallback);
 }

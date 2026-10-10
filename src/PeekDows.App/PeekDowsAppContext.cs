@@ -40,6 +40,9 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private readonly UnstableWindowTracker _unstableWindowTracker;
     private readonly WindowAnimationService _animationService;
     private readonly LoneWindowMaximizePolicy _loneWindowMaximizePolicy;
+    private readonly PeekDows.App.Sound.ArrangeSoundService _soundService;
+    private readonly System.Windows.Forms.Timer _soundAutoOffTimer;
+    private DateTime? _soundEnabledUntil;
     private int _arrangeInProgress;
 
     private AppSettings _settings;
@@ -74,6 +77,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     public event Action<bool>? AnimateWindowTransitionsChanged;
     public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
     public event Action<WindowSizePreset>? WindowSizePresetChanged;
+    public event Action<bool>? SoundChanged;
 
     public string LogFilePath => _logger.LogFilePath;
 
@@ -190,6 +194,10 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     // Polling-only design: no keyboard hook is installed anymore.
     _kbWatchService = new ForegroundWatchService(_logger);
         _kbWatchService.Start();
+
+        _soundService = new PeekDows.App.Sound.ArrangeSoundService(GetUserSoundsDir, _logger);
+        _soundAutoOffTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
+        _soundAutoOffTimer.Tick += OnSoundAutoOffTick;
 
         if (_settings.ArrangeOnStartup)
         {
@@ -447,6 +455,208 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         ArrangeNow();
     }
 
+    // ----- Arrange sound (Beta): chime on each successful arrange -----
+
+    private static string GetUserSoundsDir()
+        => System.IO.Path.Combine(
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
+            "PeekDows", "sounds");
+
+    private static readonly string[] FactorySoundNames = { "chime-soft", "chime-double", "pop-minimal" };
+
+    public void ToggleArrangeSound()
+    {
+        _settings.ArrangeSoundEnabled = !_settings.ArrangeSoundEnabled;
+        _soundEnabledUntil = null;
+        _soundAutoOffTimer.Stop();
+        _settingsService.Save(_settings);
+        _logger.Info($"ArrangeSound toggled to {_settings.ArrangeSoundEnabled}");
+        OnSettingsChanged();
+        SoundChanged?.Invoke(_settings.ArrangeSoundEnabled);
+    }
+
+    public void EnableArrangeSoundForHours(int hours)
+    {
+        if (hours <= 0)
+        {
+            _settings.ArrangeSoundEnabled = true;
+            _settings.ArrangeSoundAutoOffHours = 0;
+            _soundEnabledUntil = null;
+            _soundAutoOffTimer.Stop();
+        }
+        else
+        {
+            _settings.ArrangeSoundEnabled = true;
+            _settings.ArrangeSoundAutoOffHours = hours;
+            _soundEnabledUntil = PeekDows.Core.Services.ArrangeSoundPlanning.ComputeAutoOffDeadline(DateTime.UtcNow, hours);
+            _soundAutoOffTimer.Start();
+        }
+        _settingsService.Save(_settings);
+        _logger.Info($"ArrangeSound enabled for {hours}h (until={_soundEnabledUntil?.ToString("o") ?? "persistent"})");
+        OnSettingsChanged();
+        SoundChanged?.Invoke(true);
+    }
+
+    public void DisableArrangeSound(string reason)
+    {
+        if (!_settings.ArrangeSoundEnabled) return;
+        _settings.ArrangeSoundEnabled = false;
+        _soundEnabledUntil = null;
+        _soundAutoOffTimer.Stop();
+        _settingsService.Save(_settings);
+        _logger.Info($"ArrangeSound disabled ({reason})");
+        OnSettingsChanged();
+        SoundChanged?.Invoke(false);
+    }
+
+    private void OnSoundAutoOffTick(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (_soundEnabledUntil.HasValue && DateTime.UtcNow >= _soundEnabledUntil.Value)
+                DisableArrangeSound("auto-off");
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"ArrangeSound auto-off check failed: {ex.Message}");
+        }
+    }
+
+    public string[] GetUserSounds()
+    {
+        try
+        {
+            var dir = GetUserSoundsDir();
+            if (!System.IO.Directory.Exists(dir))
+                return Array.Empty<string>();
+            var files = new System.Collections.Generic.List<string>();
+            foreach (var pattern in new[] { "*.mp3", "*.wav" })
+            {
+                foreach (var f in System.IO.Directory.GetFiles(dir, pattern))
+                    files.Add(System.IO.Path.GetFileName(f));
+            }
+            files.Sort(StringComparer.OrdinalIgnoreCase);
+            return files.ToArray();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    public string PickArrangeSoundFile()
+    {
+        try
+        {
+            using var dlg = new OpenFileDialog
+            {
+                Filter = "Audio|*.mp3;*.wav",
+                Multiselect = false,
+            };
+            if (dlg.ShowDialog() != DialogResult.OK)
+                return "";
+            var src = dlg.FileName;
+            if (!PeekDows.Core.Services.SoundFileValidator.HasSupportedExtension(src))
+            {
+                _logger.Warn($"ArrangeSound: unsupported extension: {src}");
+                return "";
+            }
+            long len;
+            try
+            {
+                len = new System.IO.FileInfo(src).Length;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"ArrangeSound: cannot read file size: {ex.Message}");
+                return "";
+            }
+            if (len > PeekDows.Core.Services.SoundFileValidator.MaxBytes)
+            {
+                _logger.Warn($"ArrangeSound: file too large ({len} bytes): {src}");
+                return "";
+            }
+            var clean = PeekDows.Core.Services.SoundFileValidator.SanitizeFileName(System.IO.Path.GetFileName(src));
+            if (string.IsNullOrEmpty(clean))
+            {
+                _logger.Warn($"ArrangeSound: invalid file name: {src}");
+                return "";
+            }
+            var dir = GetUserSoundsDir();
+            try
+            {
+                System.IO.Directory.CreateDirectory(dir);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"ArrangeSound: cannot create sounds dir: {ex.Message}");
+                return "";
+            }
+            var final = PeekDows.Core.Services.SoundFileValidator.Deduplicate(dir, clean);
+            try
+            {
+                System.IO.File.Copy(src, System.IO.Path.Combine(dir, final));
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"ArrangeSound: copy failed: {ex.Message}");
+                return "";
+            }
+            _logger.Info($"ArrangeSound: imported {final}");
+            return final;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"ArrangeSound pick failed: {ex.Message}");
+            return "";
+        }
+    }
+
+    public void DeleteArrangeSoundFile(string name)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(name)) return;
+            foreach (var f in FactorySoundNames)
+            {
+                if (string.Equals(name, f, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(name, f + ".wav", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.Warn($"ArrangeSound: refusing to delete factory sound {name}");
+                    return;
+                }
+            }
+            var file = System.IO.Path.GetFileName(name);
+            var path = System.IO.Path.Combine(GetUserSoundsDir(), file);
+            try
+            {
+                if (System.IO.File.Exists(path))
+                    System.IO.File.Delete(path);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"ArrangeSound: delete failed: {ex.Message}");
+            }
+            if (string.Equals(_settings.ArrangeSoundName, name, StringComparison.OrdinalIgnoreCase))
+            {
+                _settings.ArrangeSoundName = "chime-soft";
+                _settingsService.Save(_settings);
+                _logger.Info("ArrangeSound: deleted selected sound, reset to chime-soft");
+                OnSettingsChanged();
+                SoundChanged?.Invoke(_settings.ArrangeSoundEnabled);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"ArrangeSound delete failed: {ex.Message}");
+        }
+    }
+
+    public void PreviewArrangeSound(string name)
+    {
+        try { _soundService.Play(name); } catch { }
+    }
+
     // When StartWithWindows is false, do not delete an existing shortcut here.
     // The shortcut is removed only when the user explicitly disables the option from the tray.
     private void SyncStartWithWindows()
@@ -487,6 +697,9 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             try { _kbWatchService.Dispose(); } catch { }
         _pauseCheckTimer.Stop();
         _pauseCheckTimer.Dispose();
+        try { _soundAutoOffTimer.Stop(); } catch { }
+        try { _soundAutoOffTimer.Dispose(); } catch { }
+        try { _soundService.Dispose(); } catch { }
         _autoArrangeService.Dispose();
         _directionalFocusService.Dispose();
         _animationService.Dispose();
@@ -870,6 +1083,12 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             {
                 _logger.Info($"Arrange completed successfully: {result.SucceededCount} window(s) placed");
             }
+
+            if (result.SucceededHwnds.Count > 0 && _settings.ArrangeSoundEnabled)
+            {
+                try { _soundService.Play(_settings.ArrangeSoundName); }
+                catch (Exception ex) { _logger.Warn($"ArrangeSound trigger failed: {ex.Message}"); }
+            }
         }
         catch (Exception ex)
         {
@@ -907,6 +1126,9 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             try { _kbWatchService.Dispose(); } catch { }
             _pauseCheckTimer.Stop();
             _pauseCheckTimer.Dispose();
+            try { _soundAutoOffTimer.Stop(); } catch { }
+            try { _soundAutoOffTimer.Dispose(); } catch { }
+            try { _soundService.Dispose(); } catch { }
             _autoArrangeService.Dispose();
             _directionalFocusService.Dispose();
             _animationService.Dispose();

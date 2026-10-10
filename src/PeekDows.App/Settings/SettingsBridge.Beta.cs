@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 namespace PeekDows.App.Settings;
 
 /// <summary>
-/// Beta settings bridge (Agent C): focus hint mode only (Off|Overlay).
-/// Backed by Agent 1's AppSettings (FocusHintMode).
+/// Beta settings bridge (Agent C): focus hint mode (Off|Overlay) + arrange sound
+/// (soundEnabled/soundName/soundAutoOffHours/userSounds + pick/preview/delete).
+/// Backed by Agent 1's AppSettings (FocusHintMode, ArrangeSound*).
 /// </summary>
 public sealed partial class SettingsBridge
 {
@@ -13,6 +15,19 @@ public sealed partial class SettingsBridge
     {
         var s = _controller.CurrentSettings;
         data["focusHintMode"] = s.FocusHintMode ?? "Overlay";
+        data["soundEnabled"] = s.ArrangeSoundEnabled;
+        data["soundName"] = string.IsNullOrEmpty(s.ArrangeSoundName) ? "chime-soft" : s.ArrangeSoundName;
+        data["soundAutoOffHours"] = s.ArrangeSoundAutoOffHours;
+        string[] userSounds;
+        try
+        {
+            userSounds = _controller.GetUserSounds() ?? Array.Empty<string>();
+        }
+        catch
+        {
+            userSounds = Array.Empty<string>();
+        }
+        data["userSounds"] = userSounds;
     }
 
     private void ApplyBetaDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool plainChanged)
@@ -23,6 +38,86 @@ public sealed partial class SettingsBridge
         {
             settings.FocusHintMode = mode;
             plainChanged = true;
+        }
+
+        // Toggle-backed like the other tray toggles: flip only when different so the
+        // controller persists and raises SoundChanged (tray + open settings stay in sync).
+        if (draft.SoundEnabled is { } se && settings.ArrangeSoundEnabled != se)
+            _controller.ToggleArrangeSound();
+
+        if (draft.SoundName is { } sn
+            && !string.IsNullOrWhiteSpace(sn)
+            && !string.Equals(settings.ArrangeSoundName, sn, StringComparison.Ordinal))
+        {
+            settings.ArrangeSoundName = sn;
+            plainChanged = true;
+        }
+
+        if (draft.SoundAutoOffHours is { } hours
+            && hours >= 0
+            && settings.ArrangeSoundAutoOffHours != hours)
+        {
+            settings.ArrangeSoundAutoOffHours = hours;
+            plainChanged = true;
+        }
+    }
+
+    /// <summary>
+    /// Handles pickSoundFile / previewSound / deleteSoundFile. Called from the
+    /// HandleMessage switch (SettingsBridge.cs). Never throws.
+    /// </summary>
+    private string? TryHandleSoundMessage(string type, JsonElement root)
+    {
+        try
+        {
+            switch (type)
+            {
+                case "pickSoundFile":
+                {
+                    string name;
+                    try
+                    {
+                        name = _controller.PickArrangeSoundFile() ?? "";
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Warn($"SettingsBridge: pickSoundFile failed: {ex.Message}");
+                        return Error("pick-failed");
+                    }
+                    return JsonSerializer.Serialize(new { type = "soundFile", name }, WriteOptions);
+                }
+                case "previewSound":
+                {
+                    var name = root.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
+                        ? n.GetString() ?? ""
+                        : "";
+                    try { _controller.PreviewArrangeSound(name); } catch { }
+                    return null;
+                }
+                case "deleteSoundFile":
+                {
+                    var name = root.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
+                        ? n.GetString() ?? ""
+                        : "";
+                    try
+                    {
+                        _controller.DeleteArrangeSoundFile(name);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Warn($"SettingsBridge: deleteSoundFile failed: {ex.Message}");
+                        return Applied(ok: false, error: "delete-failed");
+                    }
+                    return Applied(ok: true, error: null);
+                }
+                default:
+                    return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.Warn($"SettingsBridge: sound message '{type}' failed: {ex.Message}");
+            return Error("sound-failed");
         }
     }
 

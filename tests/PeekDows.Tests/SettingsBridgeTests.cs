@@ -336,6 +336,7 @@ public class SettingsBridgeTests : IDisposable
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
         public event Action<string>? FocusHintModeChanged;
+        public event Action<bool>? SoundChanged;
 
         public void ArrangeNow() { Calls.Add(nameof(ArrangeNow)); }
         public void TogglePause() { Calls.Add(nameof(TogglePause)); }
@@ -391,6 +392,33 @@ public class SettingsBridgeTests : IDisposable
         }
 
         public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
+
+        public void ToggleArrangeSound()
+        {
+            Calls.Add(nameof(ToggleArrangeSound));
+            CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled;
+            _settingsService.Save(CurrentSettings);
+            SoundChanged?.Invoke(CurrentSettings.ArrangeSoundEnabled);
+        }
+
+        public void EnableArrangeSoundForHours(int hours)
+        {
+            CurrentSettings.ArrangeSoundEnabled = true;
+            _settingsService.Save(CurrentSettings);
+            SoundChanged?.Invoke(true);
+        }
+
+        public void DisableArrangeSound(string reason)
+        {
+            CurrentSettings.ArrangeSoundEnabled = false;
+            _settingsService.Save(CurrentSettings);
+            SoundChanged?.Invoke(false);
+        }
+
+        public string[] GetUserSounds() => Array.Empty<string>();
+        public string PickArrangeSoundFile() => "";
+        public void DeleteArrangeSoundFile(string name) { }
+        public void PreviewArrangeSound(string name) { }
 
         public void SetWindowSizePreset(WindowSizePreset preset)
         {

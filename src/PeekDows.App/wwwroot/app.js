@@ -7,9 +7,13 @@ const EDITABLE_KEYS = [
   "showTrayNotifications", "thresholdPx",
   "ignoredProcesses", "ignoredClasses", "hotkeys",
   "focusHintMode",
+  "soundEnabled", "soundName", "soundAutoOffHours",
 ];
 
 const state = { snapshot: null, draft: null, dirty: false };
+
+// User-imported sounds (read-only list from snapshot, refreshed via requestSnapshot).
+let userSounds = [];
 
 // Read-only Windows snapshot rows (filled on Refresh, never part of the draft).
 let windowsRows = [];
@@ -38,6 +42,7 @@ window.chrome?.webview?.addEventListener("message", (event) => {
   if (msg.type === "settings") adoptSnapshot(msg.data);
   else if (msg.type === "externalChange") onExternalChange(msg.data);
   else if (msg.type === "applied") onApplied(msg);
+  else if (msg.type === "soundFile") onSoundFile(msg);
   else if (msg.type === "windows") { windowsRows = msg.data ?? []; renderWindowsRows(); }
 });
 
@@ -46,11 +51,16 @@ function adoptSnapshot(data) {
   // Beta default on both copies: keeps dirty tracking exact even if an older
   // bridge ever omits this key (undefined vs default would read as dirty).
   state.snapshot.focusHintMode ??= "Overlay";
+  state.snapshot.soundName ??= "chime-soft";
+  state.snapshot.soundAutoOffHours ??= 0;
+  userSounds = data.userSounds ?? [];
   state.draft = pick(data);
   state.draft.ignoredProcesses ??= [];
   state.draft.ignoredClasses ??= [];
   state.draft.hotkeys ??= {};
   state.draft.focusHintMode ??= "Overlay";
+  state.draft.soundName ??= "chime-soft";
+  state.draft.soundAutoOffHours ??= 0;
   setControlsFrom(data);
   markClean();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;
@@ -58,6 +68,14 @@ function adoptSnapshot(data) {
   renderPreview(data.preset);
   $("thresholdValue").textContent = `${data.thresholdPx} px`;
   renderHintModeSelection(state.draft.focusHintMode);
+  renderSoundSelection(state.draft.soundName);
+  renderUserSounds();
+}
+
+function onSoundFile(msg) {
+  // Import happens immediately on disk (C#-side copy); refresh the snapshot so
+  // the user-sounds list re-renders from the new source of truth.
+  if (msg.name) post({ type: "requestSnapshot" });
 }
 
 function onExternalChange(data) {
@@ -88,6 +106,10 @@ function setControlsFrom(data) {
     el.checked = !!data[el.dataset.key];
   }
   $("threshold").value = data.thresholdPx;
+  const hours = $("soundAutoOffHours");
+  if (hours) hours.value = data.soundAutoOffHours ?? 0;
+  renderSoundSelection(state.draft?.soundName);
+  renderUserSounds();
   renderIgnoredList();
   renderIgnoredSearch();
   const ic = $("ignoredClasses");
@@ -399,6 +421,75 @@ function renderHintModeSelection(mode) {
   for (const b of document.querySelectorAll("#hintmode .seg"))
     b.classList.toggle("sel", b.dataset.hintmode === mode);
 }
+
+// ---------- arrange sound (beta) ----------
+for (const btn of document.querySelectorAll("#sounds .seg")) {
+  btn.addEventListener("click", () => {
+    if (!state.draft) return;
+    state.draft.soundName = btn.dataset.sound;
+    renderSoundSelection(btn.dataset.sound);
+    renderUserSounds();
+    post({ type: "previewSound", name: btn.dataset.sound });
+    syncDirty();
+  });
+}
+
+function renderSoundSelection(name) {
+  for (const b of document.querySelectorAll("#sounds .seg"))
+    b.classList.toggle("sel", b.dataset.sound === name);
+}
+
+function renderUserSounds() {
+  const box = $("userSounds");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!userSounds || userSounds.length === 0) {
+    box.innerHTML = '<div class="empty">No custom sounds yet. Add an MP3 or WAV.</div>';
+    return;
+  }
+  for (const name of userSounds) {
+    const row = document.createElement("div");
+    row.className = "checkrow";
+    const txt = document.createElement("span");
+    txt.className = "txt";
+    txt.textContent = name;
+    if (state.draft && state.draft.soundName === name) {
+      txt.style.fontWeight = "bold";
+    }
+    const play = document.createElement("button");
+    play.className = "btn";
+    play.textContent = "▶";
+    play.title = "Preview";
+    play.addEventListener("click", () => {
+      if (!state.draft) return;
+      state.draft.soundName = name;
+      renderSoundSelection(name);
+      renderUserSounds();
+      post({ type: "previewSound", name });
+      syncDirty();
+    });
+    const del = document.createElement("button");
+    del.className = "btn";
+    del.textContent = "Delete";
+    del.addEventListener("click", () => {
+      if (!confirm(`Delete sound "${name}"?`)) return;
+      post({ type: "deleteSoundFile", name });
+    });
+    row.append(txt, play, del);
+    box.append(row);
+  }
+}
+
+const addSound = $("addSound");
+if (addSound) addSound.addEventListener("click", () => post({ type: "pickSoundFile" }));
+
+const soundHours = $("soundAutoOffHours");
+if (soundHours) soundHours.addEventListener("input", () => {
+  if (!state.draft) return;
+  const v = parseInt(soundHours.value, 10);
+  state.draft.soundAutoOffHours = Number.isNaN(v) ? 0 : Math.max(0, v);
+  syncDirty();
+});
 
 // ---------- footer actions ----------
 $("saveBtn").addEventListener("click", () => post({ type: "apply", data: state.draft }));

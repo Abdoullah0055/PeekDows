@@ -124,6 +124,15 @@ public class TrayMenuBuilder
         directionalFocusItem.Click += (s, e) => _controller.ToggleDirectionalFocus();
         menu.Items.Add(directionalFocusItem);
 
+        var arrangeSoundItem = NewItem("Arrange sound", "arrange-sound");
+        arrangeSoundItem.Checked = _controller.CurrentSettings.ArrangeSoundEnabled;
+        arrangeSoundItem.Click += (s, e) =>
+        {
+            _controller.ToggleArrangeSound();
+            arrangeSoundItem.Checked = _controller.CurrentSettings.ArrangeSoundEnabled;
+        };
+        menu.Items.Add(arrangeSoundItem);
+
         // Direction hints: radio submenu (AppSettings.FocusHintMode, default "Overlay").
         // Modes: Off | Overlay only (spotlight removed). Legacy values normalize
         // like the v5 migration (Both→Overlay, Spotlight→Off).

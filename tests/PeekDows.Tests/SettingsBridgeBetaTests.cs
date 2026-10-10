@@ -161,6 +161,89 @@ public sealed class SettingsBridgeBetaTests : IDisposable
         Assert.Equal(0, _controller.OnSettingsChangedCount);
     }
 
+    [Fact]
+    public void Snapshot_SoundDefaults_Exposed()
+    {
+        using var doc = JsonDocument.Parse(_bridge.BuildSnapshotMessage());
+        var data = doc.RootElement.GetProperty("data");
+
+        Assert.False(data.GetProperty("soundEnabled").GetBoolean());
+        Assert.Equal("chime-soft", data.GetProperty("soundName").GetString());
+        Assert.Equal(0, data.GetProperty("soundAutoOffHours").GetInt32());
+        Assert.Equal(0, data.GetProperty("userSounds").GetArrayLength());
+    }
+
+    [Fact]
+    public void Apply_SoundEnabled_TogglesPersistsAndSnapshots()
+    {
+        Assert.False(_settings.ArrangeSoundEnabled);
+
+        var response = _bridge.HandleMessage("""{"type":"apply","data":{"soundEnabled":true}}""");
+
+        Assert.True(_settings.ArrangeSoundEnabled);
+        Assert.True(_settingsService.Load().ArrangeSoundEnabled);
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.True(doc.RootElement.GetProperty("data").GetProperty("soundEnabled").GetBoolean());
+    }
+
+    [Fact]
+    public void Apply_SoundName_PersistsAndNotifies()
+    {
+        var response = _bridge.HandleMessage("""{"type":"apply","data":{"soundName":"pop-minimal"}}""");
+
+        Assert.Equal("pop-minimal", _settings.ArrangeSoundName);
+        Assert.Equal("pop-minimal", _settingsService.Load().ArrangeSoundName);
+        Assert.Equal(1, _controller.OnSettingsChangedCount);
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.Equal("pop-minimal", doc.RootElement.GetProperty("data").GetProperty("soundName").GetString());
+    }
+
+    [Fact]
+    public void Apply_SoundAutoOffHours_PersistsAndNotifies()
+    {
+        _bridge.HandleMessage("""{"type":"apply","data":{"soundAutoOffHours":3}}""");
+
+        Assert.Equal(3, _settings.ArrangeSoundAutoOffHours);
+        Assert.Equal(3, _settingsService.Load().ArrangeSoundAutoOffHours);
+        Assert.Equal(1, _controller.OnSettingsChangedCount);
+    }
+
+    [Fact]
+    public void Apply_NegativeSoundAutoOffHours_Ignored()
+    {
+        _settings.ArrangeSoundAutoOffHours = 0;
+
+        _bridge.HandleMessage("""{"type":"apply","data":{"soundAutoOffHours":-2}}""");
+
+        Assert.Equal(0, _settings.ArrangeSoundAutoOffHours);
+        Assert.Equal(0, _controller.OnSettingsChangedCount);
+    }
+
+    [Fact]
+    public void Apply_EmptySoundName_Ignored()
+    {
+        _settings.ArrangeSoundName = "chime-soft";
+
+        _bridge.HandleMessage("""{"type":"apply","data":{"soundName":""}}""");
+
+        Assert.Equal("chime-soft", _settings.ArrangeSoundName);
+        Assert.Equal(0, _controller.OnSettingsChangedCount);
+    }
+
+    [Fact]
+    public void Apply_SameSoundValues_DoNotNotify()
+    {
+        _settings.ArrangeSoundName = "chime-soft";
+        _settings.ArrangeSoundAutoOffHours = 0;
+
+        _bridge.HandleMessage("""{"type":"apply","data":{"soundName":"chime-soft","soundAutoOffHours":0}}""");
+
+        Assert.Equal(0, _controller.OnSettingsChangedCount);
+    }
+
     /// <summary>
     /// Minimal fake controller mirroring real semantics. Implements the full
     /// IPeekDowsController surface (incl. SetFocusHintMode).
@@ -198,6 +281,7 @@ public sealed class SettingsBridgeBetaTests : IDisposable
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
         public event Action<string>? FocusHintModeChanged;
+        public event Action<bool>? SoundChanged;
 
         public void ArrangeNow() { }
         public void TogglePause() { }
@@ -257,5 +341,31 @@ public sealed class SettingsBridgeBetaTests : IDisposable
             CurrentSettings.FocusHintMode = mode;
             _settingsService.Save(CurrentSettings);
         }
+
+        public void ToggleArrangeSound()
+        {
+            CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled;
+            _settingsService.Save(CurrentSettings);
+            SoundChanged?.Invoke(CurrentSettings.ArrangeSoundEnabled);
+        }
+
+        public void EnableArrangeSoundForHours(int hours)
+        {
+            CurrentSettings.ArrangeSoundEnabled = true;
+            _settingsService.Save(CurrentSettings);
+            SoundChanged?.Invoke(true);
+        }
+
+        public void DisableArrangeSound(string reason)
+        {
+            CurrentSettings.ArrangeSoundEnabled = false;
+            _settingsService.Save(CurrentSettings);
+            SoundChanged?.Invoke(false);
+        }
+
+        public string[] GetUserSounds() => Array.Empty<string>();
+        public string PickArrangeSoundFile() => "";
+        public void DeleteArrangeSoundFile(string name) { }
+        public void PreviewArrangeSound(string name) { }
     }
 }

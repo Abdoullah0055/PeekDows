@@ -213,6 +213,29 @@
               </div>
             </div>
           </div>
+          <div class="card">
+            <div class="row" style="border-top:none">
+              <div class="txt"><div class="t">Arrange sound</div><div class="d">Short chime played after each successful arrange. Off by default.</div></div>
+              <label class="switch"><input type="checkbox" data-key="soundEnabled"><span class="track"></span><span class="thumb"></span></label>
+            </div>
+            <div class="row" style="display:block">
+              <div class="txt"><div class="t">Preset</div><div class="d">Factory chimes (click previews the sound).</div></div>
+              <div class="segmented" id="sounds">
+                <button class="seg" data-sound="chime-soft">Chime soft</button>
+                <button class="seg" data-sound="chime-double">Chime double</button>
+                <button class="seg" data-sound="pop-minimal">Pop minimal</button>
+              </div>
+            </div>
+            <div class="row" style="display:block">
+              <div class="txt"><div class="t">Mes sons</div><div class="d">MP3/WAV up to 5 MB, stored in %APPDATA%\PeekDows\sounds\.</div></div>
+              <div id="userSounds"></div>
+              <div style="margin-top:8px"><button class="btn" id="addSound">Ajouter un son</button></div>
+            </div>
+            <div class="row">
+              <div class="txt"><div class="t">Auto-off</div><div class="d">Hours before the sound turns itself off. 0 = permanent.</div></div>
+              <input type="number" min="0" step="1" data-key="soundAutoOffHours" id="soundAutoOffHours">
+            </div>
+          </div>
         </section>
       </main>
     </div>

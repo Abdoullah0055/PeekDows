@@ -136,6 +136,7 @@ public sealed class SettingsHostForm : Form
         _controller.AllowRepositionMaximizedWindowsChanged += OnExternalChange;
         _controller.WindowSizePresetChanged += OnExternalPresetChange;
         _controller.FocusHintModeChanged += OnExternalHintModeChange;
+        _controller.SoundChanged += OnExternalChange;
         _controller.StateChanged += OnExternalStateChange;
     }
 
@@ -148,6 +149,7 @@ public sealed class SettingsHostForm : Form
         _controller.AllowRepositionMaximizedWindowsChanged -= OnExternalChange;
         _controller.WindowSizePresetChanged -= OnExternalPresetChange;
         _controller.FocusHintModeChanged -= OnExternalHintModeChange;
+        _controller.SoundChanged -= OnExternalChange;
         _controller.StateChanged -= OnExternalStateChange;
         _bridge.DirtyChanged -= OnDirtyChanged;
         InitializationFailed = null;

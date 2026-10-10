@@ -103,6 +103,7 @@ public sealed class SettingsBridgeWindowsTests
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
         public event Action<string>? FocusHintModeChanged;
+        public event Action<bool>? SoundChanged;
 
         public void ArrangeNow() { }
         public void TogglePause() { }
@@ -115,6 +116,28 @@ public sealed class SettingsBridgeWindowsTests
         public void ToggleAnimateWindowTransitions() { }
         public void ToggleAllowRepositionMaximizedWindows() { }
         public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
+        public void ToggleArrangeSound()
+        {
+            CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled;
+            _settingsService.Save(CurrentSettings);
+            SoundChanged?.Invoke(CurrentSettings.ArrangeSoundEnabled);
+        }
+        public void EnableArrangeSoundForHours(int hours)
+        {
+            CurrentSettings.ArrangeSoundEnabled = true;
+            _settingsService.Save(CurrentSettings);
+            SoundChanged?.Invoke(true);
+        }
+        public void DisableArrangeSound(string reason)
+        {
+            CurrentSettings.ArrangeSoundEnabled = false;
+            _settingsService.Save(CurrentSettings);
+            SoundChanged?.Invoke(false);
+        }
+        public string[] GetUserSounds() => Array.Empty<string>();
+        public string PickArrangeSoundFile() => "";
+        public void DeleteArrangeSoundFile(string name) { }
+        public void PreviewArrangeSound(string name) { }
 
         public void SetWindowSizePreset(WindowSizePreset preset) { }
         public void OpenSettings() { }

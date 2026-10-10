@@ -128,6 +128,13 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Un-ignore confirm: on the Ignored apps page uncheck an entry → a dark confirm modal names the app → "Keep ignoring" leaves it checked and untouched; "Stop ignoring" + Save removes it from `settings.json`.
 - [ ] Ignored classes stay collapsed under "Advanced: window classes" and still save one-entry-per-line.
 
+## Beta — Arrange sound (bibliothèque + auto-off)
+- [ ] Beta → Arrange sound : les 3 presets jouent en preview (sans Save) ; upload MP3/WAV → apparaît dans « Mes sons » ; fichier invalide/>5 Mo → refusé proprement.
+- [ ] Supprimer un son perso → confirmation + retour sur `chime-soft` si c'était le sélectionné ; presets d'usine non-supprimables.
+- [ ] Activer → Arrange Now avec fenêtres → son audible ; arrange vide/en pause → silence ; toggle tray suit, tray→Beta suit sans Save.
+- [ ] Auto-off : activer avec N heures → passé l'échéance, extinction + Save (deadline session-only : reboot = OFF).
+- [ ] Fichier son supprimé à la main → arrange silencieux + warn dans le log, pas de crash.
+
 ## Beta — Direction hints (pie overlay, Ctrl+Win hold)
 - [ ] Tray → Direction hints ▸ Off/Overlay : radio suit le mode, `settings.json:focusHintMode` suit après clic.
 - [ ] `Ctrl+Win` tenu → cercle en parts vers les slots occupés (2 apps en diagonale → 2 parts, 4 → 4, 8 → 8, trou central sur l'ancre) ; part active blanche + glow ; release d'une touche → disparition.

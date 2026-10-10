@@ -65,6 +65,7 @@ public sealed class SettingsBridgeHotkeysTests
         public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
         public event Action<WindowSizePreset>? WindowSizePresetChanged;
         public event Action<string>? FocusHintModeChanged;
+        public event Action<bool>? SoundChanged;
 
         public bool TryUpdateHotkey(string name, string gesture, out string error)
         {
@@ -90,6 +91,25 @@ public sealed class SettingsBridgeHotkeysTests
         public void ToggleAnimateWindowTransitions() { }
         public void ToggleAllowRepositionMaximizedWindows() { }
         public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
+        public void ToggleArrangeSound()
+        {
+            CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled;
+            SoundChanged?.Invoke(CurrentSettings.ArrangeSoundEnabled);
+        }
+        public void EnableArrangeSoundForHours(int hours)
+        {
+            CurrentSettings.ArrangeSoundEnabled = true;
+            SoundChanged?.Invoke(true);
+        }
+        public void DisableArrangeSound(string reason)
+        {
+            CurrentSettings.ArrangeSoundEnabled = false;
+            SoundChanged?.Invoke(false);
+        }
+        public string[] GetUserSounds() => Array.Empty<string>();
+        public string PickArrangeSoundFile() => "";
+        public void DeleteArrangeSoundFile(string name) { }
+        public void PreviewArrangeSound(string name) { }
 
         public void SetWindowSizePreset(WindowSizePreset preset) { }
         public void OpenSettings() { }

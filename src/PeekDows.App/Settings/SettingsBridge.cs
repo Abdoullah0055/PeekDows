@@ -157,6 +157,10 @@ public sealed partial class SettingsBridge
                     var windowsResponse = TryHandleWindowsMessage(type, root);
                     if (windowsResponse is not null) return windowsResponse;
                     return Error("windows-provider-missing");
+                case "pickSoundFile":
+                case "previewSound":
+                case "deleteSoundFile":
+                    return TryHandleSoundMessage(type, root);
                 default:
                     var ext = TryHandleWindowsMessage(type, root);
                     if (ext is not null) return ext;

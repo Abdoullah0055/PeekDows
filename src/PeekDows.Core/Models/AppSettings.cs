@@ -55,6 +55,15 @@ public sealed class AppSettings
     [JsonPropertyName("focusHintMode")]
     public string FocusHintMode { get; set; } = "Overlay";
 
+    [JsonPropertyName("soundEnabled")]
+    public bool ArrangeSoundEnabled { get; set; } = false;
+
+    [JsonPropertyName("soundName")]
+    public string ArrangeSoundName { get; set; } = "chime-soft";
+
+    [JsonPropertyName("soundAutoOffHours")]
+    public int ArrangeSoundAutoOffHours { get; set; } = 0;
+
     public WindowSizePreset WindowSizePreset { get; set; } = WindowSizePreset.Small;
 
     public List<string> IgnoredProcesses { get; set; } = new()
