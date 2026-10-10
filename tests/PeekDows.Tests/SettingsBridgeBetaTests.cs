@@ -169,7 +169,7 @@ public sealed class SettingsBridgeBetaTests : IDisposable
 
         Assert.False(data.GetProperty("soundEnabled").GetBoolean());
         Assert.Equal("chime-soft", data.GetProperty("soundName").GetString());
-        Assert.Equal(0, data.GetProperty("soundAutoOffHours").GetInt32());
+        Assert.Equal(0, data.GetProperty("soundAutoOffMinutes").GetInt32());
         Assert.Equal(0, data.GetProperty("userSounds").GetArrayLength());
     }
 
@@ -202,23 +202,23 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     }
 
     [Fact]
-    public void Apply_SoundAutoOffHours_PersistsAndNotifies()
+    public void Apply_SoundAutoOffMinutes_PersistsAndNotifies()
     {
-        _bridge.HandleMessage("""{"type":"apply","data":{"soundAutoOffHours":3}}""");
+        _bridge.HandleMessage("""{"type":"apply","data":{"soundAutoOffMinutes":90}}""");
 
-        Assert.Equal(3, _settings.ArrangeSoundAutoOffHours);
-        Assert.Equal(3, _settingsService.Load().ArrangeSoundAutoOffHours);
+        Assert.Equal(90, _settings.ArrangeSoundAutoOffMinutes);
+        Assert.Equal(90, _settingsService.Load().ArrangeSoundAutoOffMinutes);
         Assert.Equal(1, _controller.OnSettingsChangedCount);
     }
 
     [Fact]
-    public void Apply_NegativeSoundAutoOffHours_Ignored()
+    public void Apply_NegativeSoundAutoOffMinutes_Ignored()
     {
-        _settings.ArrangeSoundAutoOffHours = 0;
+        _settings.ArrangeSoundAutoOffMinutes = 0;
 
-        _bridge.HandleMessage("""{"type":"apply","data":{"soundAutoOffHours":-2}}""");
+        _bridge.HandleMessage("""{"type":"apply","data":{"soundAutoOffMinutes":-2}}""");
 
-        Assert.Equal(0, _settings.ArrangeSoundAutoOffHours);
+        Assert.Equal(0, _settings.ArrangeSoundAutoOffMinutes);
         Assert.Equal(0, _controller.OnSettingsChangedCount);
     }
 
@@ -237,9 +237,9 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     public void Apply_SameSoundValues_DoNotNotify()
     {
         _settings.ArrangeSoundName = "chime-soft";
-        _settings.ArrangeSoundAutoOffHours = 0;
+        _settings.ArrangeSoundAutoOffMinutes = 0;
 
-        _bridge.HandleMessage("""{"type":"apply","data":{"soundName":"chime-soft","soundAutoOffHours":0}}""");
+        _bridge.HandleMessage("""{"type":"apply","data":{"soundName":"chime-soft","soundAutoOffMinutes":0}}""");
 
         Assert.Equal(0, _controller.OnSettingsChangedCount);
     }
@@ -349,12 +349,7 @@ public sealed class SettingsBridgeBetaTests : IDisposable
             SoundChanged?.Invoke(CurrentSettings.ArrangeSoundEnabled);
         }
 
-        public void EnableArrangeSoundForHours(int hours)
-        {
-            CurrentSettings.ArrangeSoundEnabled = true;
-            _settingsService.Save(CurrentSettings);
-            SoundChanged?.Invoke(true);
-        }
+        public void RefreshArrangeSoundAutoOff() { }
 
         public void DisableArrangeSound(string reason)
         {

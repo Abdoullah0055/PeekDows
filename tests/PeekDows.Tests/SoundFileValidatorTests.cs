@@ -125,10 +125,10 @@ public class SoundFileValidatorTests
     }
 
     [Fact]
-    public void ComputeAutoOffDeadline_TwoHours_ReturnsNowPlusTwoHours()
+    public void ComputeAutoOffDeadline_NinetyMinutes_ReturnsNowPlusNinetyMinutes()
     {
         var now = new DateTime(2026, 10, 10, 12, 0, 0, DateTimeKind.Utc);
 
-        Assert.Equal(now.AddHours(2), ArrangeSoundPlanning.ComputeAutoOffDeadline(now, 2));
+        Assert.Equal(now.AddMinutes(90), ArrangeSoundPlanning.ComputeAutoOffDeadline(now, 90));
     }
 }

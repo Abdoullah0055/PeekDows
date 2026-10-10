@@ -231,9 +231,20 @@
               <div id="userSounds"></div>
               <div style="margin-top:8px"><button class="btn" id="addSound">Ajouter un son</button></div>
             </div>
-            <div class="row">
-              <div class="txt"><div class="t">Auto-off</div><div class="d">Hours before the sound turns itself off. 0 = permanent.</div></div>
-              <input type="number" min="0" step="1" data-key="soundAutoOffHours" id="soundAutoOffHours">
+            <div class="row" style="display:block">
+              <div class="txt"><div class="t">Auto-off</div><div class="d">How long the sound stays on. 0 h 00 = permanent.</div></div>
+              <div class="dur" id="soundDur" role="group" aria-label="Auto-off duration">
+                <div class="dur-col">
+                  <div class="dur-wheel" id="durH" tabindex="0" aria-label="Hours"></div>
+                  <div class="dur-unit">h</div>
+                </div>
+                <div class="dur-sep">:</div>
+                <div class="dur-col">
+                  <div class="dur-wheel" id="durM" tabindex="0" aria-label="Minutes"></div>
+                  <div class="dur-unit">min</div>
+                </div>
+                <div class="dur-band" aria-hidden="true"></div>
+              </div>
             </div>
           </div>
         </section>

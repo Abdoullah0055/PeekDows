@@ -5,11 +5,11 @@ namespace PeekDows.Core.Services;
 
 public static class ArrangeSoundPlanning
 {
-    public static DateTime? ComputeAutoOffDeadline(DateTime nowUtc, int hours)
+    public static DateTime? ComputeAutoOffDeadline(DateTime nowUtc, int totalMinutes)
     {
-        if (hours <= 0)
+        if (totalMinutes <= 0)
             return null;
-        return nowUtc.AddHours(hours);
+        return nowUtc.AddMinutes(totalMinutes);
     }
 }
 

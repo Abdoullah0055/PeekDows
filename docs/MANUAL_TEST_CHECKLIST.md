@@ -132,7 +132,8 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Beta → Arrange sound : les 3 presets jouent en preview (sans Save) ; upload MP3/WAV → apparaît dans « Mes sons » ; fichier invalide/>5 Mo → refusé proprement.
 - [ ] Supprimer un son perso → confirmation + retour sur `chime-soft` si c'était le sélectionné ; presets d'usine non-supprimables.
 - [ ] Activer → Arrange Now avec fenêtres → son audible ; arrange vide/en pause → silence ; toggle tray suit, tray→Beta suit sans Save.
-- [ ] Auto-off : activer avec N heures → passé l'échéance, extinction + Save (deadline session-only : reboot = OFF).
+- [ ] Auto-off : picker tambour heures (0-23) + minutes (00-59) style horloge iOS, scroll + clic, surbrillance suivie ; Save persiste le total en minutes (`soundAutoOffMinutes`).
+- [ ] Auto-off : activer avec 1 h 30 → passé l'échéance, extinction + Save ; Save arme désormais la deadline (bug corrigé : avant, elle ne s'armait jamais depuis les réglages).
 - [ ] Fichier son supprimé à la main → arrange silencieux + warn dans le log, pas de crash.
 
 ## Beta — Direction hints (pie overlay, Ctrl+Win hold)

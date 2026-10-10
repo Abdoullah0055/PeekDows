@@ -6,7 +6,7 @@ namespace PeekDows.App.Settings;
 
 /// <summary>
 /// Beta settings bridge (Agent C): focus hint mode (Off|Overlay) + arrange sound
-/// (soundEnabled/soundName/soundAutoOffHours/userSounds + pick/preview/delete).
+/// (soundEnabled/soundName/soundAutoOffMinutes/userSounds + pick/preview/delete).
 /// Backed by Agent 1's AppSettings (FocusHintMode, ArrangeSound*).
 /// </summary>
 public sealed partial class SettingsBridge
@@ -17,7 +17,7 @@ public sealed partial class SettingsBridge
         data["focusHintMode"] = s.FocusHintMode ?? "Overlay";
         data["soundEnabled"] = s.ArrangeSoundEnabled;
         data["soundName"] = string.IsNullOrEmpty(s.ArrangeSoundName) ? "chime-soft" : s.ArrangeSoundName;
-        data["soundAutoOffHours"] = s.ArrangeSoundAutoOffHours;
+        data["soundAutoOffMinutes"] = s.ArrangeSoundAutoOffMinutes;
         string[] userSounds;
         try
         {
@@ -53,11 +53,11 @@ public sealed partial class SettingsBridge
             plainChanged = true;
         }
 
-        if (draft.SoundAutoOffHours is { } hours
-            && hours >= 0
-            && settings.ArrangeSoundAutoOffHours != hours)
+        if (draft.SoundAutoOffMinutes is { } minutes
+            && minutes >= 0
+            && settings.ArrangeSoundAutoOffMinutes != minutes)
         {
-            settings.ArrangeSoundAutoOffHours = hours;
+            settings.ArrangeSoundAutoOffMinutes = minutes;
             plainChanged = true;
         }
     }

@@ -61,8 +61,13 @@ public sealed class AppSettings
     [JsonPropertyName("soundName")]
     public string ArrangeSoundName { get; set; } = "chime-soft";
 
-    [JsonPropertyName("soundAutoOffHours")]
-    public int ArrangeSoundAutoOffHours { get; set; } = 0;
+    /// <summary>
+    /// Auto-off duration in total minutes (0 = stays on). The legacy
+    /// "soundAutoOffHours" key (v1 of this feature) is ignored on load.
+    /// JSON name is "soundAutoOffMinutes" (camelCase UI contract).
+    /// </summary>
+    [JsonPropertyName("soundAutoOffMinutes")]
+    public int ArrangeSoundAutoOffMinutes { get; set; } = 0;
 
     public WindowSizePreset WindowSizePreset { get; set; } = WindowSizePreset.Small;
 

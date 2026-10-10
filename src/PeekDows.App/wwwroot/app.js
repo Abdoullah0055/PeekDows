@@ -7,7 +7,7 @@ const EDITABLE_KEYS = [
   "showTrayNotifications", "thresholdPx",
   "ignoredProcesses", "ignoredClasses", "hotkeys",
   "focusHintMode",
-  "soundEnabled", "soundName", "soundAutoOffHours",
+  "soundEnabled", "soundName", "soundAutoOffMinutes",
 ];
 
 const state = { snapshot: null, draft: null, dirty: false };
@@ -52,7 +52,7 @@ function adoptSnapshot(data) {
   // bridge ever omits this key (undefined vs default would read as dirty).
   state.snapshot.focusHintMode ??= "Overlay";
   state.snapshot.soundName ??= "chime-soft";
-  state.snapshot.soundAutoOffHours ??= 0;
+  state.snapshot.soundAutoOffMinutes ??= 0;
   userSounds = data.userSounds ?? [];
   state.draft = pick(data);
   state.draft.ignoredProcesses ??= [];
@@ -60,7 +60,7 @@ function adoptSnapshot(data) {
   state.draft.hotkeys ??= {};
   state.draft.focusHintMode ??= "Overlay";
   state.draft.soundName ??= "chime-soft";
-  state.draft.soundAutoOffHours ??= 0;
+  state.draft.soundAutoOffMinutes ??= 0;
   setControlsFrom(data);
   markClean();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;
@@ -106,8 +106,7 @@ function setControlsFrom(data) {
     el.checked = !!data[el.dataset.key];
   }
   $("threshold").value = data.thresholdPx;
-  const hours = $("soundAutoOffHours");
-  if (hours) hours.value = data.soundAutoOffHours ?? 0;
+  renderSoundDuration(state.draft?.soundAutoOffMinutes ?? 0);
   renderSoundSelection(state.draft?.soundName);
   renderUserSounds();
   renderIgnoredList();
@@ -483,13 +482,90 @@ function renderUserSounds() {
 const addSound = $("addSound");
 if (addSound) addSound.addEventListener("click", () => post({ type: "pickSoundFile" }));
 
-const soundHours = $("soundAutoOffHours");
-if (soundHours) soundHours.addEventListener("input", () => {
-  if (!state.draft) return;
-  const v = parseInt(soundHours.value, 10);
-  state.draft.soundAutoOffHours = Number.isNaN(v) ? 0 : Math.max(0, v);
+// ---------- auto-off drum picker (iOS clock style: hours 0-23, minutes 00-59) ----------
+const DUR_ITEM_PX = 30;
+const DUR_H_MAX = 23;
+const DUR_M_MAX = 59;
+let durProgrammatic = false; // true while renderSoundDuration positions the wheels
+
+function durPad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function buildDurWheel(id, max, fmt) {
+  const wheel = $(id);
+  if (!wheel || wheel.dataset.built) return;
+  wheel.dataset.built = "1";
+  const padTop = document.createElement("div");
+  padTop.className = "dur-pad";
+  wheel.append(padTop);
+  for (let i = 0; i <= max; i++) {
+    const item = document.createElement("div");
+    item.className = "dur-item";
+    item.dataset.index = i;
+    item.textContent = fmt(i);
+    item.addEventListener("click", () => {
+      wheel.scrollTop = i * DUR_ITEM_PX;
+      onDurScroll();
+    });
+    wheel.append(item);
+  }
+  const padBottom = document.createElement("div");
+  padBottom.className = "dur-pad";
+  wheel.append(padBottom);
+  let debounce = null;
+  wheel.addEventListener("scroll", () => {
+    if (durProgrammatic) return;
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(onDurScroll, 110);
+  });
+}
+
+function durSelected(wheel) {
+  if (!wheel) return 0;
+  const items = wheel.querySelectorAll(".dur-item");
+  if (items.length === 0) return 0;
+  const idx = Math.max(0, Math.min(items.length - 1, Math.round(wheel.scrollTop / DUR_ITEM_PX)));
+  // Settle on the exact row (CSS proximity snap may stop between rows).
+  const exact = idx * DUR_ITEM_PX;
+  if (Math.abs(wheel.scrollTop - exact) > 1) wheel.scrollTop = exact;
+  for (const el of items) el.classList.toggle("sel", Number(el.dataset.index) === idx);
+  return idx;
+}
+
+function onDurScroll() {
+  if (!state.draft || durProgrammatic) return;
+  const h = durSelected($("durH"));
+  const m = durSelected($("durM"));
+  state.draft.soundAutoOffMinutes = h * 60 + m;
   syncDirty();
-});
+}
+
+function renderSoundDuration(totalMinutes) {
+  buildDurWheel("durH", DUR_H_MAX, (i) => String(i));
+  buildDurWheel("durM", DUR_M_MAX, durPad2);
+  const total = Math.max(0, totalMinutes | 0);
+  const h = Math.min(DUR_H_MAX, Math.floor(total / 60));
+  const m = Math.min(DUR_M_MAX, total % 60);
+  durProgrammatic = true;
+  try {
+    const wh = $("durH");
+    const wm = $("durM");
+    if (wh) {
+      wh.scrollTop = h * DUR_ITEM_PX;
+      for (const el of wh.querySelectorAll(".dur-item"))
+        el.classList.toggle("sel", Number(el.dataset.index) === h);
+    }
+    if (wm) {
+      wm.scrollTop = m * DUR_ITEM_PX;
+      for (const el of wm.querySelectorAll(".dur-item"))
+        el.classList.toggle("sel", Number(el.dataset.index) === m);
+    }
+  } finally {
+    // Let the programmatic scrolls land before listening again.
+    setTimeout(() => { durProgrammatic = false; }, 60);
+  }
+}
 
 // ---------- footer actions ----------
 $("saveBtn").addEventListener("click", () => post({ type: "apply", data: state.draft }));

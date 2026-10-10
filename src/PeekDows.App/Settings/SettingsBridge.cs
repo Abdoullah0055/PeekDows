@@ -231,6 +231,8 @@ public sealed partial class SettingsBridge
         {
             _settingsService.Save(settings);
             _controller.OnSettingsChanged();
+            // Re-arm (or stop) the sound auto-off deadline from the saved values.
+            try { _controller.RefreshArrangeSoundAutoOff(); } catch { }
         }
 
         return Applied(ok: true, error: null);

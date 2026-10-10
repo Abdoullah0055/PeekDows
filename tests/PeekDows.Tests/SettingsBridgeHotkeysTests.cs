@@ -96,11 +96,7 @@ public sealed class SettingsBridgeHotkeysTests
             CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled;
             SoundChanged?.Invoke(CurrentSettings.ArrangeSoundEnabled);
         }
-        public void EnableArrangeSoundForHours(int hours)
-        {
-            CurrentSettings.ArrangeSoundEnabled = true;
-            SoundChanged?.Invoke(true);
-        }
+        public void RefreshArrangeSoundAutoOff() { }
         public void DisableArrangeSound(string reason)
         {
             CurrentSettings.ArrangeSoundEnabled = false;

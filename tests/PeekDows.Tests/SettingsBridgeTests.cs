@@ -401,12 +401,7 @@ public class SettingsBridgeTests : IDisposable
             SoundChanged?.Invoke(CurrentSettings.ArrangeSoundEnabled);
         }
 
-        public void EnableArrangeSoundForHours(int hours)
-        {
-            CurrentSettings.ArrangeSoundEnabled = true;
-            _settingsService.Save(CurrentSettings);
-            SoundChanged?.Invoke(true);
-        }
+        public void RefreshArrangeSoundAutoOff() { }
 
         public void DisableArrangeSound(string reason)
         {

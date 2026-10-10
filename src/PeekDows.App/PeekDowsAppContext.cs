@@ -198,6 +198,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _soundService = new PeekDows.App.Sound.ArrangeSoundService(GetUserSoundsDir, _logger);
         _soundAutoOffTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
         _soundAutoOffTimer.Tick += OnSoundAutoOffTick;
+        RefreshArrangeSoundAutoOff();
 
         if (_settings.ArrangeOnStartup)
         {
@@ -467,34 +468,39 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     public void ToggleArrangeSound()
     {
         _settings.ArrangeSoundEnabled = !_settings.ArrangeSoundEnabled;
-        _soundEnabledUntil = null;
-        _soundAutoOffTimer.Stop();
         _settingsService.Save(_settings);
         _logger.Info($"ArrangeSound toggled to {_settings.ArrangeSoundEnabled}");
         OnSettingsChanged();
         SoundChanged?.Invoke(_settings.ArrangeSoundEnabled);
+        RefreshArrangeSoundAutoOff();
     }
 
-    public void EnableArrangeSoundForHours(int hours)
+    /// <summary>
+    /// Single arming point for the auto-off deadline, derived from the live
+    /// settings: enabled + minutes > 0 → deadline armed; otherwise stopped.
+    /// Called after ctor load, toggles and successful settings applies.
+    /// </summary>
+    public void RefreshArrangeSoundAutoOff()
     {
-        if (hours <= 0)
+        try
         {
-            _settings.ArrangeSoundEnabled = true;
-            _settings.ArrangeSoundAutoOffHours = 0;
-            _soundEnabledUntil = null;
-            _soundAutoOffTimer.Stop();
+            if (_settings.ArrangeSoundEnabled && _settings.ArrangeSoundAutoOffMinutes > 0)
+            {
+                _soundEnabledUntil = PeekDows.Core.Services.ArrangeSoundPlanning.ComputeAutoOffDeadline(
+                    DateTime.UtcNow, _settings.ArrangeSoundAutoOffMinutes);
+                _soundAutoOffTimer.Start();
+                _logger.Info($"ArrangeSound auto-off armed: {_settings.ArrangeSoundAutoOffMinutes}min (until={_soundEnabledUntil?.ToString("o")})");
+            }
+            else
+            {
+                _soundEnabledUntil = null;
+                _soundAutoOffTimer.Stop();
+            }
         }
-        else
+        catch (Exception ex)
         {
-            _settings.ArrangeSoundEnabled = true;
-            _settings.ArrangeSoundAutoOffHours = hours;
-            _soundEnabledUntil = PeekDows.Core.Services.ArrangeSoundPlanning.ComputeAutoOffDeadline(DateTime.UtcNow, hours);
-            _soundAutoOffTimer.Start();
+            _logger.Warn($"ArrangeSound auto-off refresh failed: {ex.Message}");
         }
-        _settingsService.Save(_settings);
-        _logger.Info($"ArrangeSound enabled for {hours}h (until={_soundEnabledUntil?.ToString("o") ?? "persistent"})");
-        OnSettingsChanged();
-        SoundChanged?.Invoke(true);
     }
 
     public void DisableArrangeSound(string reason)

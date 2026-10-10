@@ -154,7 +154,7 @@ public class RepositionMaximizedWindowsToggleTests
 
         public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
         public void ToggleArrangeSound() { CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled; }
-        public void EnableArrangeSoundForHours(int hours) { CurrentSettings.ArrangeSoundEnabled = true; }
+        public void RefreshArrangeSoundAutoOff() { }
         public void DisableArrangeSound(string reason) { CurrentSettings.ArrangeSoundEnabled = false; }
         public string[] GetUserSounds() => Array.Empty<string>();
         public string PickArrangeSoundFile() => "";

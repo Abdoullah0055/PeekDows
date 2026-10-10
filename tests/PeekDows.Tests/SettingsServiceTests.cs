@@ -458,7 +458,7 @@ public class SettingsServiceTests : IDisposable
 
         Assert.False(settings.ArrangeSoundEnabled);
         Assert.Equal("chime-soft", settings.ArrangeSoundName);
-        Assert.Equal(0, settings.ArrangeSoundAutoOffHours);
+        Assert.Equal(0, settings.ArrangeSoundAutoOffMinutes);
     }
 
     public void Dispose()

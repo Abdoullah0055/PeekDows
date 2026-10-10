@@ -3,12 +3,13 @@ namespace PeekDows.App.Settings;
 /// <summary>
 /// Beta draft keys (Agent C). Nullable = "untouched", camelCase JSON contract:
 /// focusHintMode (string, Off|Overlay), soundEnabled (bool),
-/// soundName (string), soundAutoOffHours (int, >=0).
+/// soundName (string), soundAutoOffMinutes (int total minutes, >=0,
+/// 0 = permanent).
 /// </summary>
 public sealed partial class SettingsDraft
 {
     public string? FocusHintMode { get; set; }
     public bool? SoundEnabled { get; set; }
     public string? SoundName { get; set; }
-    public int? SoundAutoOffHours { get; set; }
+    public int? SoundAutoOffMinutes { get; set; }
 }

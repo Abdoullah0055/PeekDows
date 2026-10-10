@@ -31,7 +31,7 @@ public interface IPeekDowsController
     void SetWindowSizePreset(WindowSizePreset preset);
     void SetFocusHintMode(string mode);
     void ToggleArrangeSound();
-    void EnableArrangeSoundForHours(int hours);
+    void RefreshArrangeSoundAutoOff();
     void DisableArrangeSound(string reason);
     string[] GetUserSounds();
     string PickArrangeSoundFile();

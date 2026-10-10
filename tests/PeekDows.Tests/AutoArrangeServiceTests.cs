@@ -348,7 +348,7 @@ public class AutoArrangeServiceTests : IDisposable
         public void ToggleAllowRepositionMaximizedWindows() { }
         public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
         public void ToggleArrangeSound() { CurrentSettingsValue.ArrangeSoundEnabled = !CurrentSettingsValue.ArrangeSoundEnabled; }
-        public void EnableArrangeSoundForHours(int hours) { CurrentSettingsValue.ArrangeSoundEnabled = true; }
+        public void RefreshArrangeSoundAutoOff() { }
         public void DisableArrangeSound(string reason) { CurrentSettingsValue.ArrangeSoundEnabled = false; }
         public string[] GetUserSounds() => Array.Empty<string>();
         public string PickArrangeSoundFile() => "";
