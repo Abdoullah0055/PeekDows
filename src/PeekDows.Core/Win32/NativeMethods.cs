@@ -297,4 +297,26 @@ public static class NativeMethods
     /// </summary>
     [DllImport("winmm.dll")]
     public static extern int mciSendString(string cmd, StringBuilder? ret, int retLen, IntPtr hwndCallback);
+
+    // --- Window icons (used by WindowIconService): WM_GETICON → class icon → ExtractIconEx. ---
+    // NOTE: GetClassLongPtr exists on 64-bit Windows only; PeekDows ships win-x64 only
+    // (see installer/PeekDows.iss + scripts/publish-windows.ps1), so no 32/64 wrapper is needed.
+    public const uint WM_GETICON = 0x7F;
+    public const int ICON_SMALL2 = 2;
+    public const int ICON_BIG = 1;
+    public const int GCLP_HICONSM = -34;
+    public const int GCLP_HICON = -14;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern UIntPtr GetClassLongPtr(IntPtr hWnd, int nIndex);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern uint ExtractIconEx(string szFileName, int nIconIndex, IntPtr[]? phIconLarge, IntPtr[]? phIconSmall, uint nIcons);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyIcon(IntPtr hIcon);
 }

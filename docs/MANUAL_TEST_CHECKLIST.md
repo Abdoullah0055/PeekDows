@@ -139,6 +139,8 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 ## Beta — Direction hints (pie overlay, Ctrl+Win hold)
 - [ ] Tray → Direction hints ▸ Off/Overlay : radio suit le mode, `settings.json:focusHintMode` suit après clic.
 - [ ] `Ctrl+Win` tenu → cercle en parts vers les slots occupés (2 apps en diagonale → 2 parts, 4 → 4, 8 → 8, trou central sur l'ancre) ; part active blanche + glow ; release d'une touche → disparition.
+- [ ] Beta → « Show app icons in wedges » coché (défaut) : chaque part affiche le logo de son app, part active en blanc ; console/sans icône → pastille avec initiale ; décoché → parts seules ; Save persiste, tray↔Beta en sync.
+- [ ] DPI 125/150 % : logos nets, pas flous ; gestes répétés : pas de fuite de handles GDI (compteur stable dans le Gestionnaire des tâches).
 - [ ] 3e touche pendant le tenu (`D`, flèches, `Tab`, lettre) → geste annulé aussitôt, la touche atteint sa cible (ex. `Ctrl+Win+D` crée un bureau, `Ctrl+Win+←/→` change de bureau).
 - [ ] `Win` relâché en dernier (seul) → noter si le menu Démarrer s'ouvre (cas à trancher — relâcher `Win` en premier en attendant).
 - [ ] `Esc` / clic pendant le tenu → annulation, pas d'activation surprise.

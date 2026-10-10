@@ -50,6 +50,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     // Focus hint overlay (Beta): created lazily on the UI thread, driven by
     // DirectionalFocusService gesture events. Never focusable/clickable.
     private HintOverlayForm? _hintOverlay;
+    private WindowIconService _iconService;
     private System.Drawing.Point _hintAnchor = System.Drawing.Point.Empty;
     private Rect _hintAnchorMonitor;
 
@@ -183,6 +184,11 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _directionalFocusService.GestureStarted += OnFocusHintGestureStarted;
         _directionalFocusService.GestureUpdated += OnFocusHintGestureUpdated;
         _directionalFocusService.GestureEnded += OnFocusHintGestureEnded;
+
+        // Window icon cache for the hint overlay wedges (Agent B). Owned here,
+        // disposed with the context; Bitmaps handed to the overlay stay owned
+        // by the service and are never disposed by the overlay.
+        _iconService = new WindowIconService(logger: _logger);
 
         if (_settings.DirectionalFocusEnabled)
         {
@@ -700,6 +706,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _logger.Info("PeekDows exiting");
         try { _animationService.SnapAllToTarget(); } catch { }
             HideFocusHints();
+            try { _iconService.Dispose(); } catch { }
             try { _kbWatchService.Dispose(); } catch { }
         _pauseCheckTimer.Stop();
         _pauseCheckTimer.Dispose();
@@ -801,11 +808,28 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             EnsureHintForms();
 
             var available = _directionalFocusRegistry.GetAvailableSlots(_hintAnchorMonitor);
-            var populated = new System.Collections.Generic.List<DirectionalFocusSlot>(available.Count);
-            foreach (var (s, _) in available)
-                populated.Add(s);
+            var populated = new System.Collections.Generic.List<(DirectionalFocusSlot Slot, System.Drawing.Bitmap? Icon, string Label)>(available.Count);
+            foreach (var (s, h) in available)
+            {
+                try
+                {
+                    if (_settings.OverlayShowAppIcons)
+                    {
+                        var (bmp, label) = _iconService.GetEntry(h);
+                        populated.Add((s, bmp, label));
+                    }
+                    else
+                    {
+                        populated.Add((s, null, ""));
+                    }
+                }
+                catch
+                {
+                    populated.Add((s, null, ""));
+                }
+            }
 
-            bool hasTarget = slot != null && populated.Contains(slot.Value);
+            bool hasTarget = slot != null && available.Any(a => a.Slot == slot.Value);
             var vm = FocusHintState.Resolve(_settings.FocusHintMode, slot, hasTarget);
 
             // Arrows-only overlay: show solely populated slots, no background, no text.
@@ -1129,6 +1153,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             catch { }
             HideFocusHints();
             try { _hintOverlay?.Dispose(); } catch { }
+            try { _iconService.Dispose(); } catch { }
             try { _kbWatchService.Dispose(); } catch { }
             _pauseCheckTimer.Stop();
             _pauseCheckTimer.Dispose();

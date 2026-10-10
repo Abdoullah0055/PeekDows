@@ -66,7 +66,7 @@ public sealed class SettingsBridgeBetaTests : IDisposable
         var data = doc.RootElement.GetProperty("data");
 
         Assert.True(data.TryGetProperty("focusHintMode", out _));
-        Assert.False(data.TryGetProperty("overlayShowIcons", out _));
+        Assert.True(data.TryGetProperty("overlayShowIcons", out _));
         Assert.False(data.TryGetProperty("spotlightOpacity", out _));
     }
 
@@ -156,7 +156,42 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     [Fact]
     public void Apply_RemovedBetaKeys_AreIgnored()
     {
-        _bridge.HandleMessage("""{"type":"apply","data":{"overlayShowIcons":false,"spotlightOpacity":60}}""");
+        _bridge.HandleMessage("""{"type":"apply","data":{"spotlightOpacity":60}}""");
+
+        Assert.Equal(0, _controller.OnSettingsChangedCount);
+    }
+
+    [Fact]
+    public void Snapshot_OverlayShowIcons_DefaultTrue()
+    {
+        using var doc = JsonDocument.Parse(_bridge.BuildSnapshotMessage());
+        var data = doc.RootElement.GetProperty("data");
+
+        Assert.True(data.GetProperty("overlayShowIcons").GetBoolean());
+    }
+
+    [Fact]
+    public void Apply_OverlayShowIconsFalse_PersistsNotifiesAndSnapshots()
+    {
+        Assert.True(_settings.OverlayShowAppIcons);
+
+        var response = _bridge.HandleMessage("""{"type":"apply","data":{"overlayShowIcons":false}}""");
+
+        Assert.False(_settings.OverlayShowAppIcons);
+        Assert.False(_settingsService.Load().OverlayShowAppIcons);
+        Assert.Equal(1, _controller.OnSettingsChangedCount);
+
+        using var doc = JsonDocument.Parse(response!);
+        Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.False(doc.RootElement.GetProperty("data").GetProperty("overlayShowIcons").GetBoolean());
+    }
+
+    [Fact]
+    public void Apply_SameOverlayShowIcons_DoesNotNotify()
+    {
+        _settings.OverlayShowAppIcons = true;
+
+        _bridge.HandleMessage("""{"type":"apply","data":{"overlayShowIcons":true}}""");
 
         Assert.Equal(0, _controller.OnSettingsChangedCount);
     }

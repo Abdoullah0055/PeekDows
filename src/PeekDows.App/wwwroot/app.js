@@ -7,6 +7,7 @@ const EDITABLE_KEYS = [
   "showTrayNotifications", "thresholdPx",
   "ignoredProcesses", "ignoredClasses", "hotkeys",
   "focusHintMode",
+  "overlayShowIcons",
   "soundEnabled", "soundName", "soundAutoOffMinutes",
 ];
 
@@ -51,6 +52,7 @@ function adoptSnapshot(data) {
   // Beta default on both copies: keeps dirty tracking exact even if an older
   // bridge ever omits this key (undefined vs default would read as dirty).
   state.snapshot.focusHintMode ??= "Overlay";
+  state.snapshot.overlayShowIcons ??= true;
   state.snapshot.soundName ??= "chime-soft";
   state.snapshot.soundAutoOffMinutes ??= 0;
   userSounds = data.userSounds ?? [];
@@ -59,6 +61,7 @@ function adoptSnapshot(data) {
   state.draft.ignoredClasses ??= [];
   state.draft.hotkeys ??= {};
   state.draft.focusHintMode ??= "Overlay";
+  state.draft.overlayShowIcons ??= true;
   state.draft.soundName ??= "chime-soft";
   state.draft.soundAutoOffMinutes ??= 0;
   setControlsFrom(data);

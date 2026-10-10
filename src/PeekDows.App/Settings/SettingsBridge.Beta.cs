@@ -15,6 +15,7 @@ public sealed partial class SettingsBridge
     {
         var s = _controller.CurrentSettings;
         data["focusHintMode"] = s.FocusHintMode ?? "Overlay";
+        data["overlayShowIcons"] = s.OverlayShowAppIcons;
         data["soundEnabled"] = s.ArrangeSoundEnabled;
         data["soundName"] = string.IsNullOrEmpty(s.ArrangeSoundName) ? "chime-soft" : s.ArrangeSoundName;
         data["soundAutoOffMinutes"] = s.ArrangeSoundAutoOffMinutes;
@@ -44,6 +45,12 @@ public sealed partial class SettingsBridge
         // controller persists and raises SoundChanged (tray + open settings stay in sync).
         if (draft.SoundEnabled is { } se && settings.ArrangeSoundEnabled != se)
             _controller.ToggleArrangeSound();
+
+        if (draft.OverlayShowIcons is { } oi && settings.OverlayShowAppIcons != oi)
+        {
+            settings.OverlayShowAppIcons = oi;
+            plainChanged = true;
+        }
 
         if (draft.SoundName is { } sn
             && !string.IsNullOrWhiteSpace(sn)

@@ -447,8 +447,16 @@ public class SettingsServiceTests : IDisposable
         var json = File.ReadAllText(_testSettingsPath);
 
         Assert.Contains("focusHintMode", json);
-        Assert.DoesNotContain("overlayShowIcons", json);
+        Assert.Contains("overlayShowIcons", json);
         Assert.DoesNotContain("spotlightOpacity", json);
+    }
+
+    [Fact]
+    public void AppSettings_OverlayShowAppIcons_DefaultIsTrue()
+    {
+        var settings = new AppSettings();
+
+        Assert.True(settings.OverlayShowAppIcons);
     }
 
     [Fact]

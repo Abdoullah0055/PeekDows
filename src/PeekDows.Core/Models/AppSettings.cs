@@ -55,6 +55,13 @@ public sealed class AppSettings
     [JsonPropertyName("focusHintMode")]
     public string FocusHintMode { get; set; } = "Overlay";
 
+    /// <summary>
+    /// When true (default), the focus-hint overlay shows per-app icons.
+    /// JSON name is "overlayShowIcons" (camelCase UI contract).
+    /// </summary>
+    [JsonPropertyName("overlayShowIcons")]
+    public bool OverlayShowAppIcons { get; set; } = true;
+
     [JsonPropertyName("soundEnabled")]
     public bool ArrangeSoundEnabled { get; set; } = false;
 

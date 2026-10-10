@@ -78,8 +78,8 @@ public sealed class HintOverlayForm : Form
         (DirectionalFocusSlot.TopRight, 315f),
     ];
 
-    private IReadOnlyList<DirectionalFocusSlot> _populated =
-        Array.Empty<DirectionalFocusSlot>();
+    private IReadOnlyList<(DirectionalFocusSlot Slot, Bitmap? Icon, string Label)> _populated =
+        Array.Empty<(DirectionalFocusSlot Slot, Bitmap? Icon, string Label)>();
     private DirectionalFocusSlot? _activeSlot;
     private DirectionalFocusSlot? _lastPaintedActive;
     private double _reveal; // 0..1 global fade-in
@@ -127,13 +127,17 @@ public sealed class HintOverlayForm : Form
     /// <summary>
     /// Shows pie wedges for populated slots only, centred on the gesture anchor
     /// (clamped to the working area). Restarts the fade-in when hidden.
+    /// Each entry carries its window icon (26px at mid-radius; letter-tile
+    /// fallback when Icon is null but Label is non-empty; nothing extra when
+    /// both are absent). Received Bitmaps are never disposed here — they are
+    /// owned by the WindowIconService cache.
     /// </summary>
     public void ShowAt(
         Point anchor,
-        IEnumerable<DirectionalFocusSlot> populatedSlots,
+        IReadOnlyList<(DirectionalFocusSlot Slot, Bitmap? Icon, string Label)> populated,
         DirectionalFocusSlot? activeSlot)
     {
-        _populated = populatedSlots?.ToArray() ?? Array.Empty<DirectionalFocusSlot>();
+        _populated = populated?.ToArray() ?? Array.Empty<(DirectionalFocusSlot Slot, Bitmap? Icon, string Label)>();
         if (_activeSlot != activeSlot)
         {
             _activeSlot = activeSlot;
@@ -344,14 +348,16 @@ public sealed class HintOverlayForm : Form
         if (_populated.Count == 0)
             return;
 
-        var set = new HashSet<DirectionalFocusSlot>(_populated);
+        var icons = new Dictionary<DirectionalFocusSlot, (Bitmap? Icon, string Label)>(_populated.Count);
+        foreach (var entry in _populated)
+            icons[entry.Slot] = (entry.Icon, entry.Label);
         // Active wedge pops outward; idle wedges rest at full radius immediately.
         float bonus = PieActiveBonus * (float)EaseOut(_pop) * scale;
         float sweep = 45f - PieGapDeg;
 
         foreach (var (slot, angle) in SlotAngles)
         {
-            if (!set.Contains(slot))
+            if (!icons.TryGetValue(slot, out var entry))
                 continue;
 
             bool isActive = _activeSlot == slot;
@@ -372,6 +378,51 @@ public sealed class HintOverlayForm : Form
                 using var brush = new SolidBrush(WedgeIdle);
                 g.FillPie(brush, cx - outer, cy - outer, outer * 2f, outer * 2f, start, sweep);
             }
+
+            PaintSlotIcon(g, cx, cy, scale, angle, entry.Icon, entry.Label);
+        }
+    }
+
+    /// <summary>
+    /// Draws the window icon centred at mid-radius on the slot angle (26px,
+    /// DPI-scaled). Letter-tile fallback when Icon is null but Label is
+    /// non-empty; nothing extra when both are absent (icons disabled → wedge
+    /// only). Received Bitmaps are never disposed here. Per-icon failures are
+    /// swallowed so one bad icon can never break the overlay paint.
+    /// </summary>
+    private static void PaintSlotIcon(Graphics g, float cx, float cy, float scale, float angleDeg, Bitmap? icon, string label)
+    {
+        try
+        {
+            float r = (PieInner + PieOuter) / 2f * scale;
+            double rad = angleDeg * Math.PI / 180.0;
+            float px = cx + r * (float)Math.Cos(rad);
+            float py = cy + r * (float)Math.Sin(rad);
+
+            if (icon != null)
+            {
+                float sz = 26f * scale;
+                g.DrawImage(icon, px - sz / 2f, py - sz / 2f, sz, sz);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(label))
+                return;
+
+            float pr = 13f * scale;
+            using (var tile = new SolidBrush(Color.FromArgb(150, 128, 128, 128)))
+                g.FillEllipse(tile, px - pr, py - pr, pr * 2f, pr * 2f);
+            using (var font = new Font("Segoe UI", 13f * scale, FontStyle.Regular, GraphicsUnit.Pixel))
+            using (var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            using (var brush = new SolidBrush(Color.White))
+            {
+                string initial = label[0].ToString().ToUpperInvariant();
+                g.DrawString(initial, font, brush, px, py, fmt);
+            }
+        }
+        catch
+        {
+            // Never throw from per-icon painting.
         }
     }
 
@@ -384,7 +435,7 @@ public sealed class HintOverlayForm : Form
             _animator.Tick -= OnAnimTick;
             _animator.Stop();
             _animator.Dispose();
-            _populated = Array.Empty<DirectionalFocusSlot>();
+            _populated = Array.Empty<(DirectionalFocusSlot Slot, Bitmap? Icon, string Label)>();
             _activeSlot = null;
         }
         base.Dispose(disposing);

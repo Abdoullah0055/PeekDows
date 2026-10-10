@@ -61,7 +61,7 @@ public class SettingsBridgeTests : IDisposable
         Assert.Equal(5, data.GetProperty("version").GetInt32());
         Assert.Equal("9.9.9", data.GetProperty("appVersion").GetString());
         Assert.Equal("Overlay", data.GetProperty("focusHintMode").GetString());
-        Assert.False(data.TryGetProperty("overlayShowIcons", out _));
+        Assert.True(data.GetProperty("overlayShowIcons").GetBoolean());
         Assert.False(data.TryGetProperty("spotlightOpacity", out _));
     }
 
