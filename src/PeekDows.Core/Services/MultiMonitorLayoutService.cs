@@ -114,7 +114,7 @@ public sealed class MultiMonitorLayoutService
 
             _logger?.Info($"Calculating placements for monitor workArea={monitorInfo.WorkArea}, windowCount={monitorWindows.Count}");
 
-            var placements = _layoutEngine.CalculateClassicPeekGridPlacements(monitorWindows, monitorInfo.WorkArea, settings);
+            var placements = _layoutEngine.CalculatePlacements(settings.LayoutMode, monitorWindows, monitorInfo.WorkArea, settings);
 
             // P-B4 fix: avoid LINQ alloc for small N (≤8). Manual HashSet.
             HashSet<IntPtr>? maximizedHwnds = null;

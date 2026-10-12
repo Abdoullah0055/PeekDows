@@ -10,17 +10,22 @@ public sealed partial class HotkeyService : IDisposable
 {
     private const int HOTKEY_ARRANGE_ID = 1;
     private const int HOTKEY_PAUSE_ID = 2;
+    private const int HOTKEY_UNDO_ID = 3;
+    private const uint VK_Z = 0x5A;
 
     private readonly Action _onArrangeNow;
     private readonly Action _onPauseResume;
+    private readonly Action _onUndo;
     private readonly HotkeyMessageWindow _messageWindow;
     private readonly FileLogger? _logger;
     private bool _arrangeRegistered;
     private bool _pauseRegistered;
+    private bool _undoRegistered;
     private bool _disposed;
 
     public event Action? ArrangeNowRequested;
     public event Action? PauseResumeRequested;
+    public event Action? UndoRequested;
 
     public HotkeyService() : this(null) { }
 
@@ -30,6 +35,7 @@ public sealed partial class HotkeyService : IDisposable
         _messageWindow = new HotkeyMessageWindow(this);
         _onArrangeNow = () => ArrangeNowRequested?.Invoke();
         _onPauseResume = () => PauseResumeRequested?.Invoke();
+        _onUndo = () => UndoRequested?.Invoke();
         _logger?.Info("HotkeyService created");
     }
 
@@ -81,6 +87,31 @@ public sealed partial class HotkeyService : IDisposable
         return _pauseRegistered;
     }
 
+    public bool RegisterUndoHotkey()
+    {
+        if (_undoRegistered) return true;
+
+        _logger?.Info("RegisterUndoHotkey called");
+
+        // Hardcodé par décision (pas de passage par les settings Hotkeys) : Ctrl+Win+Z.
+        uint modifiers = (uint)(NativeMethods.MOD_CONTROL | NativeMethods.MOD_WIN);
+        uint vk = VK_Z;
+
+        _undoRegistered = NativeMethods.RegisterHotKey(_messageWindow.Handle, HOTKEY_UNDO_ID, modifiers, vk);
+
+        if (_undoRegistered)
+        {
+            _logger?.Info("RegisterHotKey succeeded: Ctrl+Win+Z");
+        }
+        else
+        {
+            int win32Error = Marshal.GetLastWin32Error();
+            _logger?.Warn($"RegisterHotKey failed: Ctrl+Win+Z, win32Error={win32Error}");
+        }
+
+        return _undoRegistered;
+    }
+
     public void UnregisterAll()
     {
         if (_arrangeRegistered && _messageWindow.Handle != IntPtr.Zero)
@@ -95,6 +126,13 @@ public sealed partial class HotkeyService : IDisposable
             _logger?.Info("UnregisterHotKey called for pause");
             NativeMethods.UnregisterHotKey(_messageWindow.Handle, HOTKEY_PAUSE_ID);
             _pauseRegistered = false;
+        }
+
+        if (_undoRegistered && _messageWindow.Handle != IntPtr.Zero)
+        {
+            _logger?.Info("UnregisterHotKey called for undo");
+            NativeMethods.UnregisterHotKey(_messageWindow.Handle, HOTKEY_UNDO_ID);
+            _undoRegistered = false;
         }
     }
 
@@ -111,6 +149,11 @@ public sealed partial class HotkeyService : IDisposable
         {
             _logger?.Info("PauseResumeRequested event raised");
             _onPauseResume();
+        }
+        else if (id == HOTKEY_UNDO_ID)
+        {
+            _logger?.Info("UndoRequested event raised");
+            _onUndo();
         }
     }
 

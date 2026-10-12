@@ -28,6 +28,7 @@ public static class NativeMethods
     public const int MOD_ALT = 0x0001;
     public const int MOD_CONTROL = 0x0002;
     public const int MOD_SHIFT = 0x0004;
+    public const int MOD_WIN = 0x0008;
     public const int VK_SPACE = 0x20;
     public const int VK_P = 0x50;
 

@@ -55,6 +55,16 @@ public class TrayMenuBuilder
         arrangeNowItem.Click += (s, e) => _controller.ArrangeNow();
         menu.Items.Add(arrangeNowItem);
 
+        var undoArrangeItem = NewItem("Undo arrange", "undo");
+        undoArrangeItem.Click += (s, e) => _controller.UndoArrange();
+        menu.Items.Add(undoArrangeItem);
+        // Refresh undo availability on every open: enabled only when history exists.
+        menu.Opening += (_, _) =>
+        {
+            try { undoArrangeItem.Enabled = _controller.CanUndoArrange; }
+            catch { /* menu state is best-effort */ }
+        };
+
         var pauseResumeItem = NewItem("Pause", "pause");
         pauseResumeItem.Click += (s, e) => _controller.TogglePause();
         menu.Items.Add(pauseResumeItem);
@@ -168,6 +178,41 @@ public class TrayMenuBuilder
         };
         menu.Items.Add(focusHintMenu);
 
+        // Layout mode: radio submenu (AppSettings.LayoutMode, default "Grid").
+        var layoutMenu = NewItem("Layout", "layout");
+        var layoutGridItem = new ToolStripMenuItem("Grid");
+        var layoutHalvesItem = new ToolStripMenuItem("Halves");
+        var layoutThirdsItem = new ToolStripMenuItem("Thirds");
+        var layoutItems = new (ToolStripMenuItem Item, string Mode)[]
+        {
+            (layoutGridItem, "Grid"),
+            (layoutHalvesItem, "Halves"),
+            (layoutThirdsItem, "Thirds"),
+        };
+        foreach (var (item, mode) in layoutItems)
+        {
+            item.Checked = string.Equals(GetCurrentLayoutMode(), mode, StringComparison.OrdinalIgnoreCase);
+            var capturedMode = mode;
+            item.Click += (s, e) =>
+            {
+                _controller.SetLayoutMode(capturedMode);
+                // Instant refresh (same UI thread, no rebuild): update radio checks
+                // immediately so a reopened menu never shows a stale state.
+                foreach (var (sibling, siblingMode) in layoutItems)
+                    sibling.Checked = string.Equals(siblingMode, capturedMode, StringComparison.OrdinalIgnoreCase);
+            };
+            layoutMenu.DropDownItems.Add(item);
+        }
+        // Re-sync on open: covers changes made elsewhere (e.g. Settings window)
+        // while this ContextMenuStrip instance is alive.
+        layoutMenu.DropDownOpening += (s, e) =>
+        {
+            var current = GetCurrentLayoutMode();
+            foreach (var (item, mode) in layoutItems)
+                item.Checked = string.Equals(mode, current, StringComparison.OrdinalIgnoreCase);
+        };
+        menu.Items.Add(layoutMenu);
+
         menu.Items.Add(new ToolStripSeparator());
 
         var settingsItem = NewItem("Settings", "settings");
@@ -207,6 +252,40 @@ public class TrayMenuBuilder
         }
         catch { /* defensive read; fall through to default */ }
         return "Overlay";
+    }
+
+    /// <summary>
+    /// Resolves the current layout mode (AppSettings.LayoutMode, default "Grid").
+    /// </summary>
+    private string GetCurrentLayoutMode()
+    {
+        try
+        {
+            var normalized = NormalizeLayoutMode(_controller.CurrentSettings?.LayoutMode);
+            if (normalized != null)
+                return normalized;
+        }
+        catch { /* defensive read; fall through to default */ }
+        return "Grid";
+    }
+
+    private static string NormalizeLayoutMode(string? mode)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+            return "Grid";
+        switch (mode.Trim().ToLowerInvariant())
+        {
+            case "grid":
+            case "g":
+                return "Grid";
+            case "halves":
+            case "h":
+                return "Halves";
+            case "thirds":
+            case "t":
+                return "Thirds";
+            default: return "Grid";
+        }
     }
 
     private static string NormalizeFocusHintMode(string? mode)

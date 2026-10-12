@@ -40,6 +40,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private readonly UnstableWindowTracker _unstableWindowTracker;
     private readonly WindowAnimationService _animationService;
     private readonly LoneWindowMaximizePolicy _loneWindowMaximizePolicy;
+    private readonly ArrangeHistoryService _historyService;
     private readonly PeekDows.App.Sound.ArrangeSoundService _soundService;
     private readonly System.Windows.Forms.Timer _soundAutoOffTimer;
     private DateTime? _soundEnabledUntil;
@@ -79,6 +80,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
     public event Action<WindowSizePreset>? WindowSizePresetChanged;
     public event Action<bool>? SoundChanged;
+    public event Action<string>? LayoutModeChanged;
 
     public string LogFilePath => _logger.LogFilePath;
 
@@ -122,6 +124,8 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _hotkeyService = new HotkeyService(_logger);
         _hotkeyService.ArrangeNowRequested += OnArrangeNowRequested;
         _hotkeyService.PauseResumeRequested += OnPauseResumeRequested;
+        _hotkeyService.UndoRequested += OnUndoArrangeRequested;
+        _historyService = new ArrangeHistoryService(_logger);
 
         if (!_hotkeyService.RegisterArrangeHotkey())
         {
@@ -131,6 +135,11 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         if (!_hotkeyService.RegisterPauseHotkey())
         {
             _logger.Warn("Failed to register Ctrl+Alt+P hotkey. It may already be in use.");
+        }
+
+        if (!_hotkeyService.RegisterUndoHotkey())
+        {
+            _logger.Warn("Failed to register Ctrl+Win+Z hotkey. It may already be in use.");
         }
 
         _trayController = new TrayIconController(this, _logger, _settingsService);
@@ -421,6 +430,69 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             case "spotlight": return "Off";
             case "both": return "Overlay";
             default: return "Overlay";
+        }
+    }
+
+    /// <summary>
+    /// Sets the layout mode (Grid|Halves|Thirds). Normalizes null/unknown to
+    /// "Grid", persists via SettingsService, then notifies runtime. Raises
+    /// <see cref="LayoutModeChanged"/> so the open settings window can mirror
+    /// the tray change live (same pattern as the other Changed events).
+    /// </summary>
+    public void SetLayoutMode(string mode)
+    {
+        var normalized = NormalizeLayoutMode(mode);
+        if (string.Equals(_settings.LayoutMode, normalized, StringComparison.Ordinal))
+            return;
+
+        _settings.LayoutMode = normalized;
+        _settingsService.Save(_settings);
+        _logger.Info($"LayoutMode changed: {normalized}");
+        OnSettingsChanged();
+        LayoutModeChanged?.Invoke(normalized);
+    }
+
+    public bool CanUndoArrange
+    {
+        get
+        {
+            try { return _historyService.CanUndo; }
+            catch { return false; }
+        }
+    }
+
+    /// <summary>
+    /// Restores window positions from before the last arrange (F1).
+    /// </summary>
+    public void UndoArrange()
+    {
+        try
+        {
+            _logger.Info("UndoArrange requested");
+            _historyService.Undo();
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"UndoArrange failed: {ex.Message}");
+        }
+    }
+
+    private static string NormalizeLayoutMode(string? mode)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+            return "Grid";
+        switch (mode.Trim().ToLowerInvariant())
+        {
+            case "grid":
+            case "g":
+                return "Grid";
+            case "halves":
+            case "h":
+                return "Halves";
+            case "thirds":
+            case "t":
+                return "Thirds";
+            default: return "Grid";
         }
     }
 
@@ -878,6 +950,11 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         ArrangeNow();
     }
 
+    private void OnUndoArrangeRequested()
+    {
+        UndoArrange();
+    }
+
     /// <summary>
     /// Returns the hwnds of currently eligible windows (visible, on the current
     /// virtual desktop, not a system/shell window). Used by Directional Focus to
@@ -1049,6 +1126,29 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             _logger.Info($"Maximized windows skipped count={skippedMaximized.Count}");
             _logger.Info($"Arrangeable windows count after maximized filtering={arrangeable.Count}");
 
+            // F3: per-app rules pre-step — pinned (rule order) first, ignored
+            // removed. Pinned windows also get IsPinned so Grid's Take(8) keeps
+            // them when more than 8 windows are open.
+            try
+            {
+                var rules = AppRuleService.CleanRules(_settings.AppRules);
+                var sorted = AppRuleService.SortForArrange(arrangeable, rules);
+                arrangeable.Clear();
+                arrangeable.AddRange(sorted);
+                var pinnedNames = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+                foreach (var r in rules)
+                    if (r.Action.Equals("pin", System.StringComparison.OrdinalIgnoreCase))
+                        pinnedNames.Add(AppRuleService.NormalizeProcess(r.Process));
+                foreach (var w in arrangeable)
+                    if (pinnedNames.Contains(AppRuleService.NormalizeProcess(w.ProcessName)))
+                        w.IsPinned = true;
+                _logger.Info($"AppRules applied: rules={rules.Count}, arrangeable={arrangeable.Count}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"AppRules pre-step failed: {ex.Message}");
+            }
+
             if (arrangeable.Count == 0)
             {
                 _logger.Info("No arrangeable windows after maximized filtering");
@@ -1056,8 +1156,8 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             }
 
             var ratio = LayoutEngine.GetPresetRatio(_settings.WindowSizePreset);
-            _logger.Info($"ClassicPeekGrid layout selected per monitor: {ratio:P0} overlap ratio");
-            var placements = _multiMonitorLayoutService.CalculatePlacementsByMonitor(arrangeable, _settings);
+            _logger.Info($"{_settings.LayoutMode} layout selected per monitor: {ratio:P0} overlap ratio");
+            var placements = _multiMonitorLayoutService.CalculatePlacementsByMonitor(arrangeable, _settings).ToList();
             _logger.Info($"Placement count={placements.Count}");
 
             if (placements.Count == 0)
@@ -1080,6 +1180,28 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                     sb2.AppendLine($"  {p.SlotId}: hwnd={p.Hwnd}, title={t ?? "unknown"}, rect={p.TargetRect}, bringToFront={p.BringToFront}");
                 }
                 _logger.Info(sb2.ToString().TrimEnd());
+            }
+
+            // F3: seat rule-pinned windows on their exact Grid slots (rect swap).
+            try
+            {
+                var processByHwnd = new System.Collections.Generic.Dictionary<IntPtr, string>(arrangeable.Count);
+                foreach (var w in arrangeable) processByHwnd[w.Hwnd] = w.ProcessName;
+                AppRuleService.ApplyPinnedSlots(placements, processByHwnd, _settings.AppRules);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"AppRules post-swap failed: {ex.Message}");
+            }
+
+            // F1: snapshot pre-apply state for Undo Arrange.
+            try
+            {
+                _historyService.Push(arrangeable);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"Arrange history push failed: {ex.Message}");
             }
 
             var result = _placementService.ApplyPlacements(placements);

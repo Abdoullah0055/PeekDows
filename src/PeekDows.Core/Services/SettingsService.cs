@@ -138,6 +138,8 @@ public class SettingsService
     public AppSettings MigrateIfNeeded(AppSettings settings)
     {        settings.IgnoredProcesses ??= new List<string>();
         settings.IgnoredClasses ??= new List<string>();
+        settings.AppRules ??= new List<AppRule>();
+        settings.AppRules = AppRuleService.CleanRules(settings.AppRules);
         settings.Hotkeys ??= new Dictionary<string, string>();
 
         // --- Migration to schema v2: lower the gesture threshold default. ---

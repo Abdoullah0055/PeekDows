@@ -82,11 +82,19 @@
           <p class="sub">How windows are arranged on each monitor. Saving a preset re-arranges immediately.</p>
           <div class="card">
             <div class="row" style="border-top:none">
-              <div class="txt"><div class="t">Window size preset</div><div class="d">Size of every slot relative to the monitor work area.</div></div>
+              <div class="txt"><div class="t">Window size preset</div><div class="d">Size of every slot relative to the monitor work area (Grid mode).</div></div>
               <div class="segmented" id="preset">
                 <button class="seg" data-preset="Small">Small · 90%</button>
                 <button class="seg" data-preset="Medium">Medium · 95%</button>
                 <button class="seg" data-preset="Large">Large · 98%</button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="txt"><div class="t">Layout mode</div><div class="d">Grid = overlapping peek grid · Halves = left/right · Thirds = 3 columns.</div></div>
+              <div class="segmented" id="layoutmode">
+                <button class="seg" data-layoutmode="Grid">Grid</button>
+                <button class="seg" data-layoutmode="Halves">Halves</button>
+                <button class="seg" data-layoutmode="Thirds">Thirds</button>
               </div>
             </div>
           </div>
@@ -146,10 +154,16 @@
           <div class="card">
             <table class="table" id="windowsTable">
               <thead>
-                <tr><th>Title</th><th>Process</th><th>Eligible</th><th></th></tr>
+                <tr><th>Title</th><th>Process</th><th>Eligible</th><th>Pin</th><th></th></tr>
               </thead>
               <tbody></tbody>
             </table>
+          </div>
+          <div class="card">
+            <div class="row" style="display:block">
+              <div class="txt"><div class="t">Pinned &amp; ignored rules</div><div class="d">Applied on Save. Unpin removes the rule.</div></div>
+              <div id="appRulesList"></div>
+            </div>
           </div>
         </section>
 

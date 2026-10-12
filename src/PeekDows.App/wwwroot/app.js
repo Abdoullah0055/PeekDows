@@ -5,10 +5,9 @@ const EDITABLE_KEYS = [
   "enabled", "autoArrange", "animate", "directionalFocus", "startWithWindows",
   "allowRepositionMaximized", "preset", "arrangeOnStartup",
   "showTrayNotifications", "thresholdPx",
-  "ignoredProcesses", "ignoredClasses", "hotkeys",
+  "ignoredProcesses", "ignoredClasses", "hotkeys", "appRules",
   "focusHintMode",
-  "overlayShowIcons",
-  "soundEnabled", "soundName", "soundAutoOffMinutes",
+  "soundEnabled", "soundName", "soundAutoOffMinutes", "layoutMode",
 ];
 
 const state = { snapshot: null, draft: null, dirty: false };
@@ -52,6 +51,8 @@ function adoptSnapshot(data) {
   // Beta default on both copies: keeps dirty tracking exact even if an older
   // bridge ever omits this key (undefined vs default would read as dirty).
   state.snapshot.focusHintMode ??= "Overlay";
+  state.snapshot.layoutMode ??= "Grid";
+  state.snapshot.appRules ??= [];
   state.snapshot.overlayShowIcons ??= true;
   state.snapshot.soundName ??= "chime-soft";
   state.snapshot.soundAutoOffMinutes ??= 0;
@@ -61,6 +62,8 @@ function adoptSnapshot(data) {
   state.draft.ignoredClasses ??= [];
   state.draft.hotkeys ??= {};
   state.draft.focusHintMode ??= "Overlay";
+  state.draft.layoutMode ??= "Grid";
+  state.draft.appRules ??= [];
   state.draft.overlayShowIcons ??= true;
   state.draft.soundName ??= "chime-soft";
   state.draft.soundAutoOffMinutes ??= 0;
@@ -68,7 +71,9 @@ function adoptSnapshot(data) {
   markClean();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;
   renderPresetSelection(data.preset);
-  renderPreview(data.preset);
+  renderPreview(data.preset, state.draft.layoutMode);
+  renderLayoutModeSelection(state.draft.layoutMode);
+  renderAppRules();
   $("thresholdValue").textContent = `${data.thresholdPx} px`;
   renderHintModeSelection(state.draft.focusHintMode);
   renderSoundSelection(state.draft.soundName);
@@ -387,8 +392,67 @@ function renderWindowsRows() {
       addIgnored(w.process);
     });
     tdB.appendChild(btn);
-    tr.append(tdT, tdP, tdE, tdB);
+    const tdPin = document.createElement("td");
+    const sel = document.createElement("select");
+    for (const opt of ["Off", "A", "B", "C", "D", "E", "F", "G", "H"]) {
+      const o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt === "Off" ? "–" : opt;
+      sel.append(o);
+    }
+    sel.value = pinnedSlotFor(w.process);
+    sel.addEventListener("change", () => setPin(w.process, sel.value));
+    tdPin.appendChild(sel);
+    tr.append(tdT, tdP, tdE, tdPin, tdB);
     tb.appendChild(tr);
+  }
+}
+
+// ---------- per-app rules (pin to a Grid slot; arrays REPLACED, never mutated) ----------
+const PIN_SLOTS = ["A", "B", "C", "D", "E", "F", "G", "H"];
+
+function pinnedSlotFor(proc) {
+  const rule = (state.draft?.appRules ?? []).find((r) => sameProc(r.process, proc) && String(r.action).toLowerCase() === "pin");
+  const slot = rule ? String(rule.slot || "").toUpperCase() : "";
+  return PIN_SLOTS.includes(slot) ? slot : "Off";
+}
+
+function setPin(proc, slot) {
+  if (!state.draft || !proc) return;
+  const rest = (state.draft.appRules ?? []).filter((r) => !sameProc(r.process, proc));
+  state.draft.appRules = slot === "Off" ? rest : [...rest, { process: proc, action: "pin", slot }];
+  syncDirty();
+  renderAppRules();
+  renderWindowsRows();
+}
+
+function renderAppRules() {
+  const box = $("appRulesList");
+  if (!box || !state.draft) return;
+  box.innerHTML = "";
+  const list = [...(state.draft.appRules ?? [])].sort((a, b) => String(a.process).localeCompare(String(b.process)));
+  if (list.length === 0) {
+    box.innerHTML = '<div class="empty">No rules yet. Pin an app from the table above.</div>';
+    return;
+  }
+  for (const rule of list) {
+    const row = document.createElement("div");
+    row.className = "checkrow";
+    const txt = document.createElement("span");
+    txt.className = "txt";
+    txt.textContent = `${rule.process} → ${String(rule.action).toLowerCase() === "ignore" ? "ignored" : "slot " + rule.slot}`;
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = "Unpin";
+    btn.addEventListener("click", () => {
+      if (!confirm(`Remove rule for "${rule.process}"?`)) return;
+      state.draft.appRules = (state.draft.appRules ?? []).filter((r) => !sameProc(r.process, rule.process));
+      syncDirty();
+      renderAppRules();
+      renderWindowsRows();
+    });
+    row.append(txt, btn);
+    box.append(row);
   }
 }
 
@@ -401,7 +465,7 @@ for (const btn of document.querySelectorAll("#preset .seg")) {
   btn.addEventListener("click", () => {
     state.draft.preset = btn.dataset.preset;
     renderPresetSelection(btn.dataset.preset);
-    renderPreview(btn.dataset.preset);
+    renderPreview(btn.dataset.preset, state.draft?.layoutMode);
     syncDirty();
   });
 }
@@ -422,6 +486,21 @@ for (const btn of document.querySelectorAll("#hintmode .seg")) {
 function renderHintModeSelection(mode) {
   for (const b of document.querySelectorAll("#hintmode .seg"))
     b.classList.toggle("sel", b.dataset.hintmode === mode);
+}
+
+for (const btn of document.querySelectorAll("#layoutmode .seg")) {
+  btn.addEventListener("click", () => {
+    if (!state.draft) return;
+    state.draft.layoutMode = btn.dataset.layoutmode;
+    renderLayoutModeSelection(btn.dataset.layoutmode);
+    renderPreview(state.draft.preset, btn.dataset.layoutmode);
+    syncDirty();
+  });
+}
+
+function renderLayoutModeSelection(mode) {
+  for (const b of document.querySelectorAll("#layoutmode .seg"))
+    b.classList.toggle("sel", b.dataset.layoutmode === mode);
 }
 
 // ---------- arrange sound (beta) ----------
@@ -594,21 +673,45 @@ for (const nav of document.querySelectorAll(".navitem[data-page]")) {
 // ---------- live slot preview (same math as LayoutEngine.CreateSlotRectsUncached) ----------
 const PRESET_RATIO = { Small: 0.90, Medium: 0.95, Large: 0.98 };
 
-function renderPreview(preset) {
-  const ratio = PRESET_RATIO[preset] ?? 0.90;
-  const span = ratio * 100;
-  const off = 100 - span;
-  const pos = {
-    slotA: [0, 0], slotC: [off, 0], slotD: [0, off], slotB: [off, off],
-  };
-  for (const [id, [left, top]] of Object.entries(pos)) {
+function renderPreview(preset, mode) {
+  const show = (id, visible) => {
     const s = $(id);
+    if (s) s.style.display = visible ? "" : "none";
+  };
+  const place = (id, left, top, width, height) => {
+    const s = $(id);
+    if (!s) return;
     s.style.left = `${left}%`;
     s.style.top = `${top}%`;
-    s.style.width = `${span}%`;
-    s.style.height = `${span}%`;
+    s.style.width = `${width}%`;
+    s.style.height = `${height}%`;
+  };
+  let pct;
+  if (mode === "Halves") {
+    place("slotA", 0, 0, 50, 100);
+    place("slotB", 50, 0, 50, 100);
+    show("slotC", false);
+    show("slotD", false);
+    pct = 50;
+  } else if (mode === "Thirds") {
+    place("slotA", 0, 0, 100 / 3, 100);
+    place("slotB", 100 / 3, 0, 100 / 3, 100);
+    place("slotC", 200 / 3, 0, 100 / 3, 100);
+    show("slotD", false);
+    pct = 33;
+  } else {
+    const ratio = PRESET_RATIO[preset] ?? 0.90;
+    const span = ratio * 100;
+    const off = 100 - span;
+    const pos = {
+      slotA: [0, 0], slotC: [off, 0], slotD: [0, off], slotB: [off, off],
+    };
+    for (const [id, [left, top]] of Object.entries(pos)) {
+      show(id, true);
+      place(id, left, top, span, span);
+    }
+    pct = Math.round(ratio * 100);
   }
-  const pct = Math.round(ratio * 100);
   $("ratioLabel").textContent = pct;
   $("ratioLabel2").textContent = pct;
 }

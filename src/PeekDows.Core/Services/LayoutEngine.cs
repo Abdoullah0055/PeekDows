@@ -50,6 +50,103 @@ public class LayoutEngine
     }
 
     /// <summary>
+    /// F2 (Layouts Halves/Thirds): two side-by-side slots covering the full work-area
+    /// height at 50/50 width. Windows are assigned IN INPUT ORDER (no internal
+    /// re-sort) so F3 pins land first; Grid keeps its own priority sort.
+    /// Slot ids: "Left", "Right". Beyond 2 windows, slots cycle (i % 2) like Grid.
+    /// A single window takes "Left" (left half only); lone-window native maximize
+    /// stays upstream (MultiMonitorLayoutService + LoneWindowMaximizePolicy).
+    /// </summary>
+    public IReadOnlyList<WindowPlacement> CalculateHalvesPlacements(
+        IReadOnlyList<ManagedWindow> windows,
+        Rect workArea,
+        AppSettings settings)
+    {
+        var result = new List<WindowPlacement>();
+        if (windows.Count == 0) return result;
+
+        int halfW = Math.Max(1, workArea.Width / 2);
+        var leftRect = new Rect(workArea.Left, workArea.Top, halfW, workArea.Height);
+        var rightRect = new Rect(workArea.Left + halfW, workArea.Top, Math.Max(1, workArea.Width - halfW), workArea.Height);
+        Rect[] slotRects = [leftRect, rightRect];
+        string[] slotOrder = ["Left", "Right"];
+
+        for (int i = 0; i < windows.Count; i++)
+        {
+            int slot = i % slotOrder.Length;
+            result.Add(new WindowPlacement
+            {
+                Hwnd = windows[i].Hwnd,
+                SlotId = slotOrder[slot],
+                TargetRect = slotRects[slot],
+                BringToFront = false
+            });
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// F2 (Layouts Halves/Thirds): three equal columns covering the full work-area
+    /// height. Same input-order rule as <see cref="CalculateHalvesPlacements"/>.
+    /// Slot ids: "Col1", "Col2", "Col3". Beyond 3 windows, slots cycle (i % 3).
+    /// The last column absorbs any integer-remainder pixel (odd widths).
+    /// </summary>
+    public IReadOnlyList<WindowPlacement> CalculateThirdsPlacements(
+        IReadOnlyList<ManagedWindow> windows,
+        Rect workArea,
+        AppSettings settings)
+    {
+        var result = new List<WindowPlacement>();
+        if (windows.Count == 0) return result;
+
+        int thirdW = Math.Max(1, workArea.Width / 3);
+        var col1Rect = new Rect(workArea.Left, workArea.Top, thirdW, workArea.Height);
+        var col2Rect = new Rect(workArea.Left + thirdW, workArea.Top, thirdW, workArea.Height);
+        var col3Rect = new Rect(workArea.Left + (thirdW * 2), workArea.Top, Math.Max(1, workArea.Width - (thirdW * 2)), workArea.Height);
+        Rect[] slotRects = [col1Rect, col2Rect, col3Rect];
+        string[] slotOrder = ["Col1", "Col2", "Col3"];
+
+        for (int i = 0; i < windows.Count; i++)
+        {
+            int slot = i % slotOrder.Length;
+            result.Add(new WindowPlacement
+            {
+                Hwnd = windows[i].Hwnd,
+                SlotId = slotOrder[slot],
+                TargetRect = slotRects[slot],
+                BringToFront = false
+            });
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// F2 dispatcher: routes per-monitor placement by settings.LayoutMode.
+    /// "Halves" → halves, "Thirds" → thirds (both OrdinalIgnoreCase, trimmed);
+    /// null/empty/unknown (incl. "Grid") → ClassicPeekGrid. The engine is pure
+    /// (no logger), so the fallback is silent by design.
+    /// </summary>
+    public IReadOnlyList<WindowPlacement> CalculatePlacements(
+        string? mode,
+        IReadOnlyList<ManagedWindow> windows,
+        Rect workArea,
+        AppSettings settings)
+    {
+        if (!string.IsNullOrWhiteSpace(mode))
+        {
+            var normalized = mode.Trim();
+            if (string.Equals(normalized, "Halves", StringComparison.OrdinalIgnoreCase))
+                return CalculateHalvesPlacements(windows, workArea, settings);
+            if (string.Equals(normalized, "Thirds", StringComparison.OrdinalIgnoreCase))
+                return CalculateThirdsPlacements(windows, workArea, settings);
+        }
+
+        return CalculateClassicPeekGridPlacements(windows, workArea, settings);
+    }
+
+    /// <summary>
     /// Number of slots the ClassicPeekGrid layout can fill per monitor. The first four (A–D)
     /// are the original corner slots; E–H are the edge-centred slots added to support up to
     /// eight managed windows per screen.

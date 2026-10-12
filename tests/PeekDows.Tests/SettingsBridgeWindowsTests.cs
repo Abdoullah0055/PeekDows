@@ -116,6 +116,10 @@ public sealed class SettingsBridgeWindowsTests
         public void ToggleAnimateWindowTransitions() { }
         public void ToggleAllowRepositionMaximizedWindows() { }
         public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
+        public void UndoArrange() { }
+        public bool CanUndoArrange => false;
+        public void SetLayoutMode(string mode) { CurrentSettings.LayoutMode = mode; }
+        public event Action<string>? LayoutModeChanged;
         public void ToggleArrangeSound()
         {
             CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled;

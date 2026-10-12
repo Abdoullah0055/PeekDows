@@ -19,6 +19,9 @@ public interface IPeekDowsController
     DateTimeOffset? PauseUntil { get; }
     string? PauseDescription { get; }
     void ArrangeNow();
+    void UndoArrange();
+    bool CanUndoArrange { get; }
+    void SetLayoutMode(string mode);
     void TogglePause();
     void PauseFor(TimeSpan duration);
     void PauseUntilResumed();
@@ -60,5 +63,6 @@ public interface IPeekDowsController
     // Changed event when mutated, and SettingsHostForm MUST subscribe to it —
     // otherwise the open settings window stays stale (cf. FocusHintMode bug).
     event Action<string>? FocusHintModeChanged;
+    event Action<string>? LayoutModeChanged;
     event Action<bool>? SoundChanged;
 }

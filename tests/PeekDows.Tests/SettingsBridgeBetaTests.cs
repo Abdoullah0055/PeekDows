@@ -377,6 +377,11 @@ public sealed class SettingsBridgeBetaTests : IDisposable
             _settingsService.Save(CurrentSettings);
         }
 
+        public void UndoArrange() { }
+        public bool CanUndoArrange => false;
+        public void SetLayoutMode(string mode) { CurrentSettings.LayoutMode = mode; }
+        public event Action<string>? LayoutModeChanged;
+
         public void ToggleArrangeSound()
         {
             CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled;

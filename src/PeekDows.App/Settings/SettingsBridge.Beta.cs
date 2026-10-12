@@ -6,7 +6,8 @@ namespace PeekDows.App.Settings;
 
 /// <summary>
 /// Beta settings bridge (Agent C): focus hint mode (Off|Overlay) + arrange sound
-/// (soundEnabled/soundName/soundAutoOffMinutes/userSounds + pick/preview/delete).
+/// (soundEnabled/soundName/soundAutoOffMinutes/userSounds + pick/preview/delete)
+/// + layout mode (layoutMode) + per-app rules (appRules).
 /// Backed by Agent 1's AppSettings (FocusHintMode, ArrangeSound*).
 /// </summary>
 public sealed partial class SettingsBridge
@@ -15,6 +16,8 @@ public sealed partial class SettingsBridge
     {
         var s = _controller.CurrentSettings;
         data["focusHintMode"] = s.FocusHintMode ?? "Overlay";
+        data["layoutMode"] = s.LayoutMode ?? "Grid";
+        data["appRules"] = s.AppRules ?? new List<Core.Models.AppRule>();
         data["overlayShowIcons"] = s.OverlayShowAppIcons;
         data["soundEnabled"] = s.ArrangeSoundEnabled;
         data["soundName"] = string.IsNullOrEmpty(s.ArrangeSoundName) ? "chime-soft" : s.ArrangeSoundName;
@@ -66,6 +69,24 @@ public sealed partial class SettingsBridge
         {
             settings.ArrangeSoundAutoOffMinutes = minutes;
             plainChanged = true;
+        }
+
+        if (draft.LayoutMode is { } rawLayout
+            && TryNormalizeLayoutMode(rawLayout, out var layoutMode)
+            && !string.Equals(settings.LayoutMode, layoutMode, StringComparison.Ordinal))
+        {
+            settings.LayoutMode = layoutMode;
+            plainChanged = true;
+        }
+
+        if (draft.AppRules is { } rules)
+        {
+            var clean = Core.Services.AppRuleService.CleanRules(rules);
+            if (!Core.Services.AppRuleService.AreRulesEqual(settings.AppRules, clean))
+            {
+                settings.AppRules = clean;
+                plainChanged = true;
+            }
         }
     }
 
@@ -126,6 +147,15 @@ public sealed partial class SettingsBridge
             _logger?.Warn($"SettingsBridge: sound message '{type}' failed: {ex.Message}");
             return Error("sound-failed");
         }
+    }
+
+    private static bool TryNormalizeLayoutMode(string raw, out string mode)
+    {
+        if (string.Equals(raw, "Grid", StringComparison.OrdinalIgnoreCase) || string.Equals(raw, "g", StringComparison.OrdinalIgnoreCase)) { mode = "Grid"; return true; }
+        if (string.Equals(raw, "Halves", StringComparison.OrdinalIgnoreCase) || string.Equals(raw, "h", StringComparison.OrdinalIgnoreCase)) { mode = "Halves"; return true; }
+        if (string.Equals(raw, "Thirds", StringComparison.OrdinalIgnoreCase) || string.Equals(raw, "t", StringComparison.OrdinalIgnoreCase)) { mode = "Thirds"; return true; }
+        mode = string.Empty;
+        return false;
     }
 
     private static bool TryNormalizeHintMode(string raw, out string mode)

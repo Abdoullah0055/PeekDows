@@ -56,6 +56,13 @@ public sealed class AppSettings
     public string FocusHintMode { get; set; } = "Overlay";
 
     /// <summary>
+    /// Layout mode: Grid (default, ClassicPeekGrid) | Halves | Thirds.
+    /// JSON name is "layoutMode" (camelCase UI contract).
+    /// </summary>
+    [JsonPropertyName("layoutMode")]
+    public string LayoutMode { get; set; } = "Grid";
+
+    /// <summary>
     /// When true (default), the focus-hint overlay shows per-app icons.
     /// JSON name is "overlayShowIcons" (camelCase UI contract).
     /// </summary>
@@ -85,6 +92,13 @@ public sealed class AppSettings
     };
 
     public List<string> IgnoredClasses { get; set; } = new();
+
+    /// <summary>
+    /// Per-app rules (pin to a Grid slot, or ignore). Empty by default.
+    /// JSON name is "appRules" (camelCase UI contract).
+    /// </summary>
+    [JsonPropertyName("appRules")]
+    public List<AppRule> AppRules { get; set; } = new();
 
     public Dictionary<string, string> Hotkeys { get; set; } = new()
     {

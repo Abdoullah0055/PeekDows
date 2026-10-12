@@ -153,6 +153,10 @@ public class RepositionMaximizedWindowsToggleTests
         }
 
         public void SetFocusHintMode(string mode) { CurrentSettings.FocusHintMode = mode; }
+        public void UndoArrange() { }
+        public bool CanUndoArrange => false;
+        public void SetLayoutMode(string mode) { CurrentSettings.LayoutMode = mode; }
+        public event Action<string>? LayoutModeChanged;
         public void ToggleArrangeSound() { CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled; }
         public void RefreshArrangeSoundAutoOff() { }
         public void DisableArrangeSound(string reason) { CurrentSettings.ArrangeSoundEnabled = false; }
