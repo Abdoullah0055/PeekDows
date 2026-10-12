@@ -501,6 +501,10 @@ for (const btn of document.querySelectorAll("#layoutmode .seg")) {
 function renderLayoutModeSelection(mode) {
   for (const b of document.querySelectorAll("#layoutmode .seg"))
     b.classList.toggle("sel", b.dataset.layoutmode === mode);
+  // The size preset only applies to Grid mode: hide its card otherwise
+  // (the stored value is kept and re-applied when back on Grid).
+  const presetCard = $("presetCard");
+  if (presetCard) presetCard.style.display = mode === "Grid" ? "" : "none";
 }
 
 // ---------- arrange sound (beta) ----------

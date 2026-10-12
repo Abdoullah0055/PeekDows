@@ -435,9 +435,11 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
     /// <summary>
     /// Sets the layout mode (Grid|Halves|Thirds). Normalizes null/unknown to
-    /// "Grid", persists via SettingsService, then notifies runtime. Raises
-    /// <see cref="LayoutModeChanged"/> so the open settings window can mirror
-    /// the tray change live (same pattern as the other Changed events).
+    /// "Grid", persists via SettingsService, re-arranges immediately (like
+    /// SetWindowSizePreset — otherwise windows keep stale positions from the
+    /// previous mode, showing gaps and overlaps), then notifies runtime.
+    /// Raises <see cref="LayoutModeChanged"/> so the open settings window can
+    /// mirror the tray change live (same pattern as the other Changed events).
     /// </summary>
     public void SetLayoutMode(string mode)
     {
@@ -450,6 +452,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _logger.Info($"LayoutMode changed: {normalized}");
         OnSettingsChanged();
         LayoutModeChanged?.Invoke(normalized);
+        ArrangeNow();
     }
 
     public bool CanUndoArrange
@@ -1234,6 +1237,35 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             else
             {
                 _logger.Info($"Arrange completed successfully: {result.SucceededCount} window(s) placed");
+            }
+
+            // Post-arrange verification: re-read actual rects and name any window
+            // that is not where it was told to go (app clamped its min size, async
+            // restore still settling, ...). Maximized-origin windows are skipped.
+            try
+            {
+                var maximized = new System.Collections.Generic.HashSet<IntPtr>();
+                foreach (var w in arrangeable)
+                    if (w.IsMaximized) maximized.Add(w.Hwnd);
+                System.Func<IntPtr, Rect?> readRect = hwnd =>
+                {
+                    try
+                    {
+                        if (!NativeMethods.GetWindowRect(hwnd, out var nr)) return null;
+                        return new Rect(nr.left, nr.top, nr.right - nr.left, nr.bottom - nr.top);
+                    }
+                    catch { return null; }
+                };
+                var deviations = PlacementVerifier.FindDeviations(placements, readRect, maximized.Contains);
+                if (deviations.Count == 0)
+                    _logger.Info($"Placement verification clean: {placements.Count} window(s) on target");
+                else
+                    foreach (var d in deviations)
+                        _logger.Warn($"Placement deviation: hwnd={d.Hwnd}, expected={d.Expected}, actual={d.Actual}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"Placement verification failed: {ex.Message}");
             }
 
             if (result.SucceededHwnds.Count > 0 && _settings.ArrangeSoundEnabled)

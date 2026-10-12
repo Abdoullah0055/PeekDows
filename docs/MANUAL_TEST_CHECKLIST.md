@@ -161,27 +161,30 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 
 ## 16. Undo Arrange
 
-- [ ] Arrange Now avec 2+ fen�tres ? � Undo arrange � restaure chaque fen�tre pixel-identique (position + taille d'avant l'arrange)
-- [ ] 3 arranges successifs ? 3 undo successifs reviennent en arri�re niveau par niveau ; 4e undo = no-op sans crash
-- [ ] Fen�tre ferm�e entre l'arrange et l'undo ? skipp�e silencieusement, autres fen�tres restaur�es, pas de crash
-- [ ] Fen�tre maximis�e avant l'arrange ? apr�s undo elle est repos�e PUIS re-maximis�e
-- [ ] Ctrl+Win+Z � froid (sans geste) = undo seul, sans ouvrir le menu D�marrer ni changer de bureau
-- [ ] Ctrl+Win+Z en plein geste directionnel (Ctrl+Win tenu) = le geste meurt ET l'undo s'ex�cute
-- [ ] Hotkey d�j� pris par un autre programme ? warn dans le log, pas de crash
-- [ ] Item tray � Undo arrange � d�sactiv� quand aucun undo disponible, activ� apr�s un arrange
+- [ ] Arrange Now avec 2+ fenetres -> "Undo arrange" restaure chaque fenetre pixel-identique (position + taille d'avant l'arrange)
+- [ ] 3 arranges successifs -> 3 undo successifs reviennent en arriere niveau par niveau ; 4e undo = no-op sans crash
+- [ ] Fenetre fermee entre l'arrange et l'undo -> skippee silencieusement, autres fenetres restaurees, pas de crash
+- [ ] Fenetre maximisee avant l'arrange -> apres undo elle est reposee PUIS re-maximisee
+- [ ] Ctrl+Win+Z a froid (sans geste) = undo seul, sans ouvrir le menu Demarrer ni changer de bureau
+- [ ] Ctrl+Win+Z en plein geste directionnel (Ctrl+Win tenu) = le geste meurt ET l'undo s'execute
+- [ ] Hotkey deja pris par un autre programme -> warn dans le log, pas de crash
+- [ ] Item tray "Undo arrange" desactive quand aucun undo disponible, active apres un arrange
 
 ## 17. Layout Modes (Grid / Halves / Thirds)
 
-- [ ] Layout ? Halves : 2 fen�tres = gauche/droite 50/50 pleine hauteur ; 3e fen�tre ? Left,Right,Left
-- [ ] Layout ? Thirds : 3 colonnes �gales ; 4e fen�tre ? Col1
-- [ ] Preview Layout = r�alit� � l'�cran ; Save persiste layoutMode ; tray ? Beta en sync
-- [ ] Cercle directionnel coh�rent : 2 parts en Halves, 3 en Thirds
-- [ ] Mode invalide dans settings.json ? Grid, app d�marre
+- [ ] Layout -> Halves : 2 fenetres = gauche/droite 50/50 pleine hauteur ; 3e fenetre -> Left,Right,Left
+- [ ] Layout -> Thirds : 3 colonnes jointives SANS gap ni overlap (2/3/4 fenetres) ; log `Placement verification clean`
+- [ ] Si `Placement deviation` dans le log -> noter l'app + attendu vs reel (taille mini clampée ?)
+- [ ] Changer de mode (tray ou Save) = re-arrange immediat visible
+- [ ] Preview Layout = realite a l'ecran ; Save persiste layoutMode ; tray <-> Beta en sync
+- [ ] Cercle directionnel coherent : 2 parts en Halves, 3 en Thirds
+- [ ] Mode invalide dans settings.json -> Grid, app demarre
+- [ ] Page Layout : preset SOUS le mode ; preset visible en Grid uniquement, cache en Halves/Thirds ; retour Grid = ancienne valeur restauree
 
 ## 18. Per-App Rules (pin / ignore)
 
-- [ ] Notepad �pingl� en A ? 3 arranges successifs, Notepad reste en A (m�me � 9+ fen�tres)
-- [ ] 2 apps �pingl�es au m�me slot ? la 1re r�gle gagne + warn log
-- [ ] M�me process pin + ignore ? exclu (ignore prioritaire)
-- [ ] Save ? reload ? appRules intact dans settings.json
-- [ ] R�gles invalides (process vide, action inconnue, slot Z) ? rejet�es, le reste appliqu�
+- [ ] Notepad epingle en A -> 3 arranges successifs, Notepad reste en A (meme a 9+ fenetres)
+- [ ] 2 apps epinglees au meme slot -> la 1re regle gagne + warn log
+- [ ] Meme process pin + ignore -> exclu (ignore prioritaire)
+- [ ] Save -> reload -> appRules intact dans settings.json
+- [ ] Regles invalides (process vide, action inconnue, slot Z) -> rejetees, le reste applique

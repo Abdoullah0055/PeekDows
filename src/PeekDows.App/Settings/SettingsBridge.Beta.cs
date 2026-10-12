@@ -71,12 +71,13 @@ public sealed partial class SettingsBridge
             plainChanged = true;
         }
 
+        // Routed through the controller (like the sound toggle): single owner of
+        // the re-arrange-on-change behavior, so tray and desktop app agree.
         if (draft.LayoutMode is { } rawLayout
             && TryNormalizeLayoutMode(rawLayout, out var layoutMode)
             && !string.Equals(settings.LayoutMode, layoutMode, StringComparison.Ordinal))
         {
-            settings.LayoutMode = layoutMode;
-            plainChanged = true;
+            _controller.SetLayoutMode(layoutMode);
         }
 
         if (draft.AppRules is { } rules)
