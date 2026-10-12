@@ -47,7 +47,17 @@ public sealed class DirectionalFocusService : IDisposable
 
     private readonly System.Windows.Forms.Timer _timer;
 
+    /// <summary>
+    /// Consecutive end-requests (same reason) required before the gesture
+    /// actually ends. Kills single-tick sampling ghosts: a real release or key
+    /// stays visible across ticks, a one-tick dropout does not. Worst case adds
+    /// ~40ms of hide latency (the idle poll is already 100ms).
+    /// </summary>
+    private const int EndDebounceTicks = 2;
+
     private bool _gestureWasActive;
+    private int _inactiveStreak;
+    private string? _pendingEndReason;
     private Point _anchor;
     private Rect _anchorMonitor;
     private DirectionalFocusSlot? _lastTriggeredSlot;
@@ -134,7 +144,7 @@ public sealed class DirectionalFocusService : IDisposable
     {
         if (!_timer.Enabled) return;
         _timer.Stop();
-        EndGesture();
+        EndGesture("stop");
         _logger?.Info("DirectionalFocusService stopped");
     }
 
@@ -154,15 +164,21 @@ public sealed class DirectionalFocusService : IDisposable
 
     /// <summary>
     /// Ends the gesture if one is active: resets state, slows the timer and
-    /// hides the overlay via GestureEnded. No-op when idle.
+    /// hides the overlay via GestureEnded. No-op when idle. The reason names
+    /// the exact killer (release/shift/alt/esc/click/thirdkey:0xXX/stop) so a
+    /// flicker loop is diagnosable from the log in a single run.
     /// </summary>
-    private void EndGesture()
+    private void EndGesture(string reason)
     {
         if (!_gestureWasActive)
             return;
         _gestureWasActive = false;
+        _inactiveStreak = 0;
+        _pendingEndReason = null;
+        var anchor = _anchor;
         ResetState();
         _timer.Interval = TickIntervalMsIdle;
+        _logger?.Info($"Directional focus gesture ended: {reason} (anchor=({anchor.X},{anchor.Y}))");
         NotifyGestureEnded();
     }
 
@@ -188,15 +204,19 @@ public sealed class DirectionalFocusService : IDisposable
 
         bool gestureActive = _inputGate.IsGestureModifierActive(ctrlDown, shiftDown, altDown, lWinDown, rWinDown);
 
+        // End requests are debounced: the SAME reason must repeat on consecutive
+        // ticks before the gesture ends. A single-tick dropout (sampling ghost)
+        // is ignored; a real release or held key persists and ends promptly.
+        string? endReason = null;
         if (!gestureActive)
         {
-            EndGesture();
-            return;
+            endReason = "release";
         }
-
-        if (!_gestureWasActive)
+        else if (!_gestureWasActive)
         {
             _gestureWasActive = true;
+            _inactiveStreak = 0;
+            _pendingEndReason = null;
             _timer.Interval = TickIntervalMsActive;
             _anchor = Cursor.Position;
             // Pin the monitor at gesture START. For the whole hold we resolve
@@ -210,31 +230,51 @@ public sealed class DirectionalFocusService : IDisposable
             NotifyGestureStarted(_anchor, _anchorMonitor);
             return;
         }
+        else if (shiftDown)
+        {
+            endReason = "shift";
+        }
+        else if (altDown)
+        {
+            endReason = "alt";
+        }
+        else if (IsKeyDown(VkEscape))
+        {
+            endReason = "esc";
+        }
+        else if (IsKeyDown(VkLButton))
+        {
+            endReason = "click:L";
+        }
+        else if (IsKeyDown(VkRButton))
+        {
+            endReason = "click:R";
+        }
+        else if (IsKeyDown(VkMButton))
+        {
+            endReason = "click:M";
+        }
+        else if (TryGetThirdKeyDown(out int thirdVk))
+        {
+            endReason = $"thirdkey:0x{thirdVk:X2}";
+        }
 
-        // Third-key / cancel policy while held: Shift, Alt, Esc, mouse click
-        // or any other key ends the gesture immediately (its input passes
-        // through untouched — we never swallow anything). This keeps OS chords
-        // like Ctrl+Win+D/Arrows and app shortcuts working.
-        if (shiftDown || altDown)
+        if (endReason != null)
         {
-            EndGesture();
+            if (string.Equals(_pendingEndReason, endReason, StringComparison.Ordinal))
+                _inactiveStreak++;
+            else
+            {
+                _pendingEndReason = endReason;
+                _inactiveStreak = 1;
+            }
+            if (_inactiveStreak >= EndDebounceTicks)
+                EndGesture(endReason);
             return;
         }
-        if (IsKeyDown(VkEscape))
-        {
-            EndGesture();
-            return;
-        }
-        if (IsKeyDown(VkLButton) || IsKeyDown(VkRButton) || IsKeyDown(VkMButton))
-        {
-            EndGesture();
-            return;
-        }
-        if (IsThirdKeyDown())
-        {
-            EndGesture();
-            return;
-        }
+
+        _inactiveStreak = 0;
+        _pendingEndReason = null;
 
         // Flick detection: anchor → cursor vector against the pinned monitor.
         var current = Cursor.Position;
@@ -272,16 +312,15 @@ public sealed class DirectionalFocusService : IDisposable
     }
 
     /// <summary>
-    /// True when any non-chord key is physically down. Held ticks only: scans
-    /// VK 0x08-0xFE, skipping the chord modifiers (Ctrl 0x11/0xA2/0xA3, Win
+    /// True + the VK when any non-chord key is physically down. Held ticks only:
+    /// scans VK 0x08-0xFE, skipping the chord modifiers (Ctrl 0x11/0xA2/0xA3, Win
     /// 0x5B/0x5C) and Shift/Alt (generic + L/R, handled separately above).
     /// Mouse buttons (0x01-0x07) are outside the range (covered by the click
-    /// check). Any typed or OS-chord key (D, arrows, Tab, L...) ends the
-    /// gesture so the keystroke reaches its target untouched.
+    /// check). The VK is reported so the end reason names the exact killer.
     /// </summary>
-    private static bool IsThirdKeyDown()
+    private static bool TryGetThirdKeyDown(out int vk)
     {
-        for (int vk = 0x08; vk <= 0xFE; vk++)
+        for (vk = 0x08; vk <= 0xFE; vk++)
         {
             switch (vk)
             {
@@ -301,6 +340,7 @@ public sealed class DirectionalFocusService : IDisposable
             if (IsKeyDown(vk))
                 return true;
         }
+        vk = -1;
         return false;
     }
 

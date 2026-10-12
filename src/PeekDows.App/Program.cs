@@ -29,11 +29,20 @@ static class Program
         // DPI-unaware and Windows bitmap-scales the whole window on scaled
         // displays (>100%), making the UI look blurry. It also enables visual
         // styles, so the two legacy calls below are no longer needed.
-        ApplicationConfiguration.Initialize();
-
-        using (var context = new PeekDowsAppContext())
+        // Single instance: a second copy (dev build + installed build, double
+        // tray icon click, ...) would fight over hotkeys, gestures and the
+        // overlay, producing flicker and focus chaos. Exit silently.
+        using (var mutex = new System.Threading.Mutex(true, @"Global\PeekDows_SingleInstance", out bool createdNew))
         {
-            Application.Run(context);
+            if (!createdNew)
+                return;
+
+            ApplicationConfiguration.Initialize();
+
+            using (var context = new PeekDowsAppContext())
+            {
+                Application.Run(context);
+            }
         }
     }
 
