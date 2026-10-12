@@ -156,3 +156,31 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] DÃ©marrage : lignes `KB_TOGGLE_KEYS` + `KB_LAYOUTS fr-CA,...` prÃ©sentes (plus aucun hook installÃ© â€” traÃ§age passif uniquement).
 - [ ] Gestes rÃ©pÃ©tÃ©s (`Ctrl+Win` tenu) : `GESTURE_HKL_START/END` avec le mÃªme HKL, pas de `KB_LAYOUT_FLIP` liÃ© au geste.
 - [ ] Conflit connu assumÃ© : relÃ¢cher `Win` en dernier peut ouvrir DÃ©marrer (voir cas dÃ©diÃ© plus haut).
+
+
+## 16. Undo Arrange
+
+- [ ] Arrange Now avec 2+ fenêtres ? « Undo arrange » restaure chaque fenêtre pixel-identique (position + taille d'avant l'arrange)
+- [ ] 3 arranges successifs ? 3 undo successifs reviennent en arrière niveau par niveau ; 4e undo = no-op sans crash
+- [ ] Fenêtre fermée entre l'arrange et l'undo ? skippée silencieusement, autres fenêtres restaurées, pas de crash
+- [ ] Fenêtre maximisée avant l'arrange ? après undo elle est reposée PUIS re-maximisée
+- [ ] Ctrl+Win+Z à froid (sans geste) = undo seul, sans ouvrir le menu Démarrer ni changer de bureau
+- [ ] Ctrl+Win+Z en plein geste directionnel (Ctrl+Win tenu) = le geste meurt ET l'undo s'exécute
+- [ ] Hotkey déjà pris par un autre programme ? warn dans le log, pas de crash
+- [ ] Item tray « Undo arrange » désactivé quand aucun undo disponible, activé après un arrange
+
+## 17. Layout Modes (Grid / Halves / Thirds)
+
+- [ ] Layout ? Halves : 2 fenêtres = gauche/droite 50/50 pleine hauteur ; 3e fenêtre ? Left,Right,Left
+- [ ] Layout ? Thirds : 3 colonnes égales ; 4e fenêtre ? Col1
+- [ ] Preview Layout = réalité à l'écran ; Save persiste layoutMode ; tray ? Beta en sync
+- [ ] Cercle directionnel cohérent : 2 parts en Halves, 3 en Thirds
+- [ ] Mode invalide dans settings.json ? Grid, app démarre
+
+## 18. Per-App Rules (pin / ignore)
+
+- [ ] Notepad épinglé en A ? 3 arranges successifs, Notepad reste en A (même à 9+ fenêtres)
+- [ ] 2 apps épinglées au même slot ? la 1re règle gagne + warn log
+- [ ] Même process pin + ignore ? exclu (ignore prioritaire)
+- [ ] Save ? reload ? appRules intact dans settings.json
+- [ ] Règles invalides (process vide, action inconnue, slot Z) ? rejetées, le reste appliqué
