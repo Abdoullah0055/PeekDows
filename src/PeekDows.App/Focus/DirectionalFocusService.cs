@@ -312,7 +312,53 @@ public sealed class DirectionalFocusService : IDisposable
     }
 
     /// <summary>
-    /// True + the VK when any non-chord key is physically down. Held ticks only:
+    /// True for keys that must never end the gesture: media/volume keys, browser
+    /// and app-launch keys, and lock keys. None of them can form a meaningful OS
+    /// chord with the held Ctrl+Win (no layout toggle, no desktop switch, no
+    /// typing), but they are the usual stuck/phantom-key suspects (laptop Fn
+    /// layers, headset docks, crumbs) — a stuck Volume-Down once killed every
+    /// gesture in a flicker loop (log: thirdkey:0xAE). Pure, unit-tested.
+    /// </summary>
+    public static bool IsSilentKey(int vk)
+    {
+        switch (vk)
+        {
+            // Lock keys.
+            case 0x14: // VK_CAPITAL (CapsLock)
+            case 0x90: // VK_NUMLOCK
+            case 0x91: // VK_SCROLL
+                return true;
+            // Browser keys.
+            case 0xA6: // VK_BROWSER_BACK
+            case 0xA7: // VK_BROWSER_FORWARD
+            case 0xA8: // VK_BROWSER_REFRESH
+            case 0xA9: // VK_BROWSER_STOP
+            case 0xAA: // VK_BROWSER_SEARCH
+            case 0xAB: // VK_BROWSER_FAVORITES
+            case 0xAC: // VK_BROWSER_HOME
+                return true;
+            // Volume / media keys.
+            case 0xAD: // VK_VOLUME_MUTE
+            case 0xAE: // VK_VOLUME_DOWN
+            case 0xAF: // VK_VOLUME_UP
+            case 0xB0: // VK_MEDIA_NEXT_TRACK
+            case 0xB1: // VK_MEDIA_PREV_TRACK
+            case 0xB2: // VK_MEDIA_STOP
+            case 0xB3: // VK_MEDIA_PLAY_PAUSE
+                return true;
+            // App-launch keys.
+            case 0xB4: // VK_LAUNCH_MAIL
+            case 0xB5: // VK_LAUNCH_MEDIA_SELECT
+            case 0xB6: // VK_LAUNCH_APP1
+            case 0xB7: // VK_LAUNCH_APP2
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// True + the VK when any non-chord, non-silent key is physically down. Held ticks only:
     /// scans VK 0x08-0xFE, skipping the chord modifiers (Ctrl 0x11/0xA2/0xA3, Win
     /// 0x5B/0x5C) and Shift/Alt (generic + L/R, handled separately above).
     /// Mouse buttons (0x01-0x07) are outside the range (covered by the click
@@ -337,6 +383,8 @@ public sealed class DirectionalFocusService : IDisposable
                 case NativeMethods.VK_RMENU:
                     continue;
             }
+            if (IsSilentKey(vk))
+                continue;
             if (IsKeyDown(vk))
                 return true;
         }

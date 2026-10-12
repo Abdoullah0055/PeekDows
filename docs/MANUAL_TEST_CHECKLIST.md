@@ -143,6 +143,7 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] DPI 125/150 % : logos nets, pas flous ; gestes rÃ©pÃ©tÃ©s : pas de fuite de handles GDI (compteur stable dans le Gestionnaire des tÃ¢ches).
 - [ ] 3e touche pendant le tenu (`D`, flÃ¨ches, `Tab`, lettre) â†’ geste annulÃ© aussitÃ´t, la touche atteint sa cible (ex. `Ctrl+Win+D` crÃ©e un bureau, `Ctrl+Win+â†/â†’` change de bureau).
 - [ ] `Win` relÃ¢chÃ© en dernier (seul) â†’ noter si le menu DÃ©marrer s'ouvre (cas Ã  trancher â€” relÃ¢cher `Win` en premier en attendant).
+- [ ] Touches volume/mÃ©dia/majuscules-verrou tenues pendant le geste â†’ le geste survit (touches silencieuses) ; `D`/flÃ¨ches/`Tab`/lettres â†’ annulation toujours active.
 - [ ] `Esc` / clic pendant le tenu â†’ annulation, pas d'activation surprise.
 - [ ] Spam de gestes : jamais de flip de langue, jamais de majuscules fantÃ´mes (rien n'est avalÃ©, aucun hook installÃ©).
 - [ ] Typing normal (`Ctrl+C`, `Alt+Tab`, `Win+D` sans `Ctrl`) â†’ inchangÃ©.
@@ -160,27 +161,27 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 
 ## 16. Undo Arrange
 
-- [ ] Arrange Now avec 2+ fenêtres ? « Undo arrange » restaure chaque fenêtre pixel-identique (position + taille d'avant l'arrange)
-- [ ] 3 arranges successifs ? 3 undo successifs reviennent en arrière niveau par niveau ; 4e undo = no-op sans crash
-- [ ] Fenêtre fermée entre l'arrange et l'undo ? skippée silencieusement, autres fenêtres restaurées, pas de crash
-- [ ] Fenêtre maximisée avant l'arrange ? après undo elle est reposée PUIS re-maximisée
-- [ ] Ctrl+Win+Z à froid (sans geste) = undo seul, sans ouvrir le menu Démarrer ni changer de bureau
-- [ ] Ctrl+Win+Z en plein geste directionnel (Ctrl+Win tenu) = le geste meurt ET l'undo s'exécute
-- [ ] Hotkey déjà pris par un autre programme ? warn dans le log, pas de crash
-- [ ] Item tray « Undo arrange » désactivé quand aucun undo disponible, activé après un arrange
+- [ ] Arrange Now avec 2+ fenï¿½tres ? ï¿½ Undo arrange ï¿½ restaure chaque fenï¿½tre pixel-identique (position + taille d'avant l'arrange)
+- [ ] 3 arranges successifs ? 3 undo successifs reviennent en arriï¿½re niveau par niveau ; 4e undo = no-op sans crash
+- [ ] Fenï¿½tre fermï¿½e entre l'arrange et l'undo ? skippï¿½e silencieusement, autres fenï¿½tres restaurï¿½es, pas de crash
+- [ ] Fenï¿½tre maximisï¿½e avant l'arrange ? aprï¿½s undo elle est reposï¿½e PUIS re-maximisï¿½e
+- [ ] Ctrl+Win+Z ï¿½ froid (sans geste) = undo seul, sans ouvrir le menu Dï¿½marrer ni changer de bureau
+- [ ] Ctrl+Win+Z en plein geste directionnel (Ctrl+Win tenu) = le geste meurt ET l'undo s'exï¿½cute
+- [ ] Hotkey dï¿½jï¿½ pris par un autre programme ? warn dans le log, pas de crash
+- [ ] Item tray ï¿½ Undo arrange ï¿½ dï¿½sactivï¿½ quand aucun undo disponible, activï¿½ aprï¿½s un arrange
 
 ## 17. Layout Modes (Grid / Halves / Thirds)
 
-- [ ] Layout ? Halves : 2 fenêtres = gauche/droite 50/50 pleine hauteur ; 3e fenêtre ? Left,Right,Left
-- [ ] Layout ? Thirds : 3 colonnes égales ; 4e fenêtre ? Col1
-- [ ] Preview Layout = réalité à l'écran ; Save persiste layoutMode ; tray ? Beta en sync
-- [ ] Cercle directionnel cohérent : 2 parts en Halves, 3 en Thirds
-- [ ] Mode invalide dans settings.json ? Grid, app démarre
+- [ ] Layout ? Halves : 2 fenï¿½tres = gauche/droite 50/50 pleine hauteur ; 3e fenï¿½tre ? Left,Right,Left
+- [ ] Layout ? Thirds : 3 colonnes ï¿½gales ; 4e fenï¿½tre ? Col1
+- [ ] Preview Layout = rï¿½alitï¿½ ï¿½ l'ï¿½cran ; Save persiste layoutMode ; tray ? Beta en sync
+- [ ] Cercle directionnel cohï¿½rent : 2 parts en Halves, 3 en Thirds
+- [ ] Mode invalide dans settings.json ? Grid, app dï¿½marre
 
 ## 18. Per-App Rules (pin / ignore)
 
-- [ ] Notepad épinglé en A ? 3 arranges successifs, Notepad reste en A (même à 9+ fenêtres)
-- [ ] 2 apps épinglées au même slot ? la 1re règle gagne + warn log
-- [ ] Même process pin + ignore ? exclu (ignore prioritaire)
+- [ ] Notepad ï¿½pinglï¿½ en A ? 3 arranges successifs, Notepad reste en A (mï¿½me ï¿½ 9+ fenï¿½tres)
+- [ ] 2 apps ï¿½pinglï¿½es au mï¿½me slot ? la 1re rï¿½gle gagne + warn log
+- [ ] Mï¿½me process pin + ignore ? exclu (ignore prioritaire)
 - [ ] Save ? reload ? appRules intact dans settings.json
-- [ ] Règles invalides (process vide, action inconnue, slot Z) ? rejetées, le reste appliqué
+- [ ] Rï¿½gles invalides (process vide, action inconnue, slot Z) ? rejetï¿½es, le reste appliquï¿½
