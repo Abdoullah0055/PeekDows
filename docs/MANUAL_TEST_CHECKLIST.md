@@ -173,8 +173,8 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 ## 17. Layout Modes (Grid / Halves / Thirds)
 
 - [ ] Layout -> Halves : 2 fenetres = gauche/droite 50/50 pleine hauteur ; 3e fenetre -> Left,Right,Left
-- [ ] Layout -> Thirds : 3 colonnes jointives SANS gap ni overlap (2/3/4 fenetres) ; log `Placement verification clean`
-- [ ] Si `Placement deviation` dans le log -> noter l'app + attendu vs reel (taille mini clampée ?)
+- [ ] Layout -> Thirds : 3 colonnes jointives SANS gap ni overlap (2/3/4 fenetres) ; log `Placement verification clean` (post-animation, significatif)
+- [ ] Si `Placement deviation` stabilise dans le log -> noter l'app + attendu vs reel (taille mini clampée : cas documenté, pas force)
 - [ ] Changer de mode (tray ou Save) = re-arrange immediat visible
 - [ ] Preview Layout = realite a l'ecran ; Save persiste layoutMode ; tray <-> Beta en sync
 - [ ] Cercle directionnel coherent : 2 parts en Halves, 3 en Thirds

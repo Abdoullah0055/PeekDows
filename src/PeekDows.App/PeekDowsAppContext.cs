@@ -1197,6 +1197,21 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 _logger.Warn($"AppRules post-swap failed: {ex.Message}");
             }
 
+            // Frame compensation: inflate each target by the window's measured
+            // invisible DWM margins so VISIBLE areas tile edge-to-edge (no
+            // strips between columns). Zero-margin windows are untouched.
+            System.Collections.Generic.IReadOnlyList<WindowPlacement> effectivePlacements = placements;
+            try
+            {
+                effectivePlacements = FrameCompensation.WithCompensatedRects(
+                    placements, MeasureFrameMargins(placements));
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"Frame compensation failed, using uncompensated targets: {ex.Message}");
+                effectivePlacements = placements;
+            }
+
             // F1: snapshot pre-apply state for Undo Arrange.
             try
             {
@@ -1207,7 +1222,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 _logger.Warn($"Arrange history push failed: {ex.Message}");
             }
 
-            var result = _placementService.ApplyPlacements(placements);
+            var result = _placementService.ApplyPlacements(effectivePlacements);
 
             foreach (var p in result.SucceededHwnds)
             {
@@ -1240,32 +1255,32 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             }
 
             // Post-arrange verification: re-read actual rects and name any window
-            // that is not where it was told to go (app clamped its min size, async
-            // restore still settling, ...). Maximized-origin windows are skipped.
-            try
+            // that is not where it was told to go (app clamped its min size, ...).
+            // Compared against the COMPENSATED targets (what was actually requested).
+            // Maximized-origin windows are skipped (async restore still settling).
+            // With animation on, tweens settle ~150ms after apply: verify once
+            // settled instead of measuring mid-flight positions.
+            if (_settings.AnimateWindowTransitions)
             {
-                var maximized = new System.Collections.Generic.HashSet<IntPtr>();
-                foreach (var w in arrangeable)
-                    if (w.IsMaximized) maximized.Add(w.Hwnd);
-                System.Func<IntPtr, Rect?> readRect = hwnd =>
+                var verifyTargets = effectivePlacements;
+                var verifyArrangeable = arrangeable;
+                System.Windows.Forms.Timer? verifyTimer = null;
+                verifyTimer = new System.Windows.Forms.Timer { Interval = 400 };
+                verifyTimer.Tick += (s, e) =>
                 {
                     try
                     {
-                        if (!NativeMethods.GetWindowRect(hwnd, out var nr)) return null;
-                        return new Rect(nr.left, nr.top, nr.right - nr.left, nr.bottom - nr.top);
+                        verifyTimer?.Stop();
+                        verifyTimer?.Dispose();
                     }
-                    catch { return null; }
+                    catch { }
+                    RunPlacementVerification(verifyTargets, verifyArrangeable);
                 };
-                var deviations = PlacementVerifier.FindDeviations(placements, readRect, maximized.Contains);
-                if (deviations.Count == 0)
-                    _logger.Info($"Placement verification clean: {placements.Count} window(s) on target");
-                else
-                    foreach (var d in deviations)
-                        _logger.Warn($"Placement deviation: hwnd={d.Hwnd}, expected={d.Expected}, actual={d.Actual}");
+                verifyTimer.Start();
             }
-            catch (Exception ex)
+            else
             {
-                _logger.Warn($"Placement verification failed: {ex.Message}");
+                RunPlacementVerification(effectivePlacements, arrangeable);
             }
 
             if (result.SucceededHwnds.Count > 0 && _settings.ArrangeSoundEnabled)
@@ -1291,6 +1306,75 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             && windowRect.Top <= workArea.Top
             && windowRect.Right >= workArea.Right
             && windowRect.Bottom >= workArea.Bottom;
+    }
+
+    /// <summary>
+    /// Measures each window's invisible DWM frame margins (outer GetWindowRect
+    /// minus visible EXTENDED_FRAME_BOUNDS, per side, clamped to zero).
+    /// Failures yield zero margins (current behavior). Never throws.
+    /// </summary>
+    private System.Collections.Generic.Dictionary<IntPtr, FrameMargins> MeasureFrameMargins(
+        System.Collections.Generic.IReadOnlyList<WindowPlacement> placements)
+    {
+        var result = new System.Collections.Generic.Dictionary<IntPtr, FrameMargins>(placements.Count);
+        foreach (var p in placements)
+        {
+            try
+            {
+                if (!NativeMethods.GetWindowRect(p.Hwnd, out var outer))
+                    continue;
+                if (NativeMethods.DwmGetWindowAttribute(
+                        p.Hwnd,
+                        NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS,
+                        out var visible,
+                        System.Runtime.InteropServices.Marshal.SizeOf<PeekDows.Core.Win32.RECT>()) != 0)
+                    continue;
+                result[p.Hwnd] = FrameCompensation.Measure(
+                    new Rect(outer.left, outer.top, outer.right - outer.left, outer.bottom - outer.top),
+                    new Rect(visible.left, visible.top, visible.right - visible.left, visible.bottom - visible.top));
+            }
+            catch
+            {
+                // Unmeasurable window keeps zero margins.
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Compares requested targets with live rects and logs deviations.
+    /// Called synchronously (no animation) or ~400ms after apply (animated,
+    /// tweens settled). Never throws.
+    /// </summary>
+    private void RunPlacementVerification(
+        System.Collections.Generic.IReadOnlyList<WindowPlacement> targets,
+        System.Collections.Generic.IReadOnlyList<ManagedWindow> arrangeable)
+    {
+        try
+        {
+            var maximized = new System.Collections.Generic.HashSet<IntPtr>();
+            foreach (var w in arrangeable)
+                if (w.IsMaximized) maximized.Add(w.Hwnd);
+            System.Func<IntPtr, Rect?> readRect = hwnd =>
+            {
+                try
+                {
+                    if (!NativeMethods.GetWindowRect(hwnd, out var nr)) return null;
+                    return new Rect(nr.left, nr.top, nr.right - nr.left, nr.bottom - nr.top);
+                }
+                catch { return null; }
+            };
+            var deviations = PlacementVerifier.FindDeviations(targets, readRect, maximized.Contains);
+            if (deviations.Count == 0)
+                _logger.Info($"Placement verification clean: {targets.Count} window(s) on target");
+            else
+                foreach (var d in deviations)
+                    _logger.Warn($"Placement deviation: hwnd={d.Hwnd}, expected={d.Expected}, actual={d.Actual}");
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Placement verification failed: {ex.Message}");
+        }
     }
 
     protected override void Dispose(bool disposing)
