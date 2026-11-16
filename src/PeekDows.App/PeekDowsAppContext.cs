@@ -467,6 +467,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             _logger.Info("UndoArrange requested");
             if (!_historyService.CanUndo) return;
             _placementGeneration++;
+            _stackedZones = [];
             _historyService.Undo(_animationService.Cancel);
             _directionalFocusRegistry.UpdateFromPlacements([], _monitorService);
         }
@@ -491,6 +492,8 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             case "thirds":
             case "t":
                 return "Thirds";
+            case "custom":
+                return "Custom";
             default: return "Grid";
         }
     }
@@ -974,7 +977,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         return result;
     }
 
-    private void ExecuteArrange()
+    private void ExecuteArrange(bool preview = false)
     {
         // Reentrancy guard: ArrangeNow can be triggered by the hotkey, the tray menu and
         // AutoArrange while an earlier arrange is still running (an arrange can block for
@@ -988,7 +991,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
         try
         {
-            ExecuteArrangeCore();
+            ExecuteArrangeCore(preview);
         }
         finally
         {
@@ -996,7 +999,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         }
     }
 
-    private void ExecuteArrangeCore()
+    private void ExecuteArrangeCore(bool preview)
     {
         try
         {
@@ -1011,14 +1014,18 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             }
 
             _logger.Info("ExecuteArrange started");
+            if (!preview) _stackedZones = [];
 
             _logger.Info("Window discovery refresh started");
-            var diff = _discoveryService.Refresh(_classifier);
+            var discovery = preview ? _discoveryService.Fork() : _discoveryService;
+            var policy = preview ? _loneWindowMaximizePolicy.Fork() : _loneWindowMaximizePolicy;
+            var layout = preview ? new MultiMonitorLayoutService(_monitorService, _layoutEngine, policy) : _multiMonitorLayoutService;
+            var diff = discovery.Refresh(_classifier);
             var eligibleWindows = diff.Current;
 
             _logger.Info($"Window discovery: Added={diff.Added.Count}, Removed={diff.Removed.Count}, Current={diff.Current.Count}");
 
-            if (eligibleWindows.Count == 0)
+            if (eligibleWindows.Count == 0 && !preview)
             {
                 _logger.Info("No eligible windows found");
                 return;
@@ -1052,16 +1059,16 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             // B3 fix: prune against ALL known hwnds (not just eligible) so a PeekDows-
             // maximized window that became ineligible (cloaked/empty title) doesn't stay
             // tracked forever. Also pass handle-aware restore when possible.
-            var allKnownHwnds = _discoveryService.GetKnownWindows().Select(w => w.Hwnd).ToList();
+            var allKnownHwnds = discovery.GetKnownWindows().Select(w => w.Hwnd).ToList();
             var pruneSet = allKnownHwnds.Count > 0 ? allKnownHwnds : eligibleWindows.Select(w => w.Hwnd).ToList();
-            _loneWindowMaximizePolicy.PruneMaximizedSet(pruneSet);
+            policy.PruneMaximizedSet(pruneSet);
             foreach (var w in eligibleWindows)
             {
-                if (_loneWindowMaximizePolicy.WasMaximizedByPeekDows(w.Hwnd) && !w.IsMaximized)
+                if (policy.WasMaximizedByPeekDows(w.Hwnd) && !w.IsMaximized)
                 {
                     var restoredMonitor = GetCachedMonitor(w.Hwnd);
                     // Prefer handle-aware call so policy keys by stable handle.
-                    _loneWindowMaximizePolicy.NotifyUserRestored(w.Hwnd, restoredMonitor.Handle, restoredMonitor.WorkArea);
+                    policy.NotifyUserRestored(w.Hwnd, restoredMonitor.Handle, restoredMonitor.WorkArea);
                 }
             }
 
@@ -1097,7 +1104,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 // AllowRepositionMaximizedWindows is false — otherwise a lone window that
                 // was auto-maximized could never be un-maximized when a second window
                 // appears (spec §1, PeekDows-maximized tracking).
-                bool maximizedByPeekDows = _loneWindowMaximizePolicy.WasMaximizedByPeekDows(w.Hwnd);
+                bool maximizedByPeekDows = policy.WasMaximizedByPeekDows(w.Hwnd);
                 if (w.IsMaximized && !_settings.AllowRepositionMaximizedWindows && !maximizedByPeekDows)
                 {
                     skippedMaximized.Add(w.Hwnd);
@@ -1125,39 +1132,26 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             _logger.Info($"Maximized windows skipped count={skippedMaximized.Count}");
             _logger.Info($"Arrangeable windows count after maximized filtering={arrangeable.Count}");
 
-            // F3: per-app rules pre-step — pinned (rule order) first, ignored
-            // removed. Pinned windows also get IsPinned so Grid's Take(8) keeps
-            // them when more than 8 windows are open.
-            try
-            {
-                var rules = AppRuleService.CleanRules(_settings.AppRules);
-                var sorted = AppRuleService.SortForArrange(arrangeable, rules);
-                arrangeable.Clear();
-                arrangeable.AddRange(sorted);
-                var pinnedNames = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-                foreach (var r in rules)
-                    if (r.Action.Equals("pin", System.StringComparison.OrdinalIgnoreCase))
-                        pinnedNames.Add(AppRuleService.NormalizeProcess(r.Process));
-                foreach (var w in arrangeable)
-                    if (pinnedNames.Contains(AppRuleService.NormalizeProcess(w.ProcessName)))
-                        w.IsPinned = true;
-                _logger.Info($"AppRules applied: rules={rules.Count}, arrangeable={arrangeable.Count}");
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"AppRules pre-step failed: {ex.Message}");
-            }
-
-            if (arrangeable.Count == 0)
-            {
-                _logger.Info("No arrangeable windows after maximized filtering");
-                return;
-            }
-
             var ratio = LayoutEngine.GetPresetRatio(_settings.WindowSizePreset);
             _logger.Info($"{_settings.LayoutMode} layout selected per monitor: {ratio:P0} overlap ratio");
-            var placements = _multiMonitorLayoutService.CalculatePlacementsByMonitor(arrangeable, _settings).ToList();
+            var placements = layout.CalculatePlacementsByMonitor(arrangeable, _settings).ToList();
             _logger.Info($"Placement count={placements.Count}");
+
+            if (preview)
+            {
+                foreach (var placement in placements) GetCachedMonitor(placement.Hwnd);
+                var stamp = ReadPreviewStamp();
+                var accepted = ShowArrangePreview(placements, eligibleWindows, discovery.GetTopLevelWindows());
+                if (!accepted || IsPaused || !_settings.Enabled || placements.Count == 0)
+                    return;
+                if (ReadPreviewStamp() != stamp || !StillMatchesPreview(placements, arrangeable, monitorCache))
+                {
+                    MessageBox.Show("Windows or screens changed. Open the preview again.", "PeekDows",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                _loneWindowMaximizePolicy.Adopt(policy);
+            }
 
             if (placements.Count == 0)
             {
@@ -1197,6 +1191,8 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             }
 
             var generation = ++_placementGeneration;
+            var customMonitors = effectivePlacements.Where(p => IsCustomSlot(p.SlotId))
+                .ToDictionary(p => p.Hwnd, p => GetCachedMonitor(p.Hwnd));
             var targets = effectivePlacements.Select(p => p.Hwnd).ToHashSet();
             var snapshot = _historyService.Capture(arrangeable.Where(w => targets.Contains(w.Hwnd)));
             var result = _placementService.ApplyPlacements(effectivePlacements);
@@ -1216,6 +1212,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             }
 
             var succeededPlacements = placements.Where(p => result.SucceededHwnds.Contains(p.Hwnd)).ToList();
+            UpdateStackedZones(succeededPlacements, arrangeable, GetCachedMonitor);
             _directionalFocusRegistry.UpdateFromPlacements(succeededPlacements, _monitorService);
             _logger.Info($"DirectionalFocusRegistry updated from arrange placements (succeeded={succeededPlacements.Count} of {placements.Count})");
 
@@ -1238,9 +1235,10 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             // Maximized-origin windows are skipped (async restore still settling).
             // With animation on, tweens settle ~150ms after apply: verify once
             // settled instead of measuring mid-flight positions.
-            if (_settings.AnimateWindowTransitions)
+            if (_settings.AnimateWindowTransitions || effectivePlacements.Any(p => IsCustomSlot(p.SlotId)))
             {
-                var verifyTargets = effectivePlacements;
+                var verifyTargets = effectivePlacements.Where(p => !IsCustomSlot(p.SlotId) ||
+                    result.SucceededHwnds.Contains(p.Hwnd)).ToArray();
                 var verifyArrangeable = arrangeable;
                 System.Windows.Forms.Timer? verifyTimer = null;
                 verifyTimer = new System.Windows.Forms.Timer { Interval = 400 };
@@ -1253,13 +1251,13 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                     }
                     catch { }
                     if (generation == _placementGeneration)
-                        RunPlacementVerification(verifyTargets, verifyArrangeable);
+                        RunPlacementVerification(verifyTargets, verifyArrangeable, customMonitors);
                 };
                 verifyTimer.Start();
             }
             else
             {
-                RunPlacementVerification(effectivePlacements, arrangeable);
+                RunPlacementVerification(effectivePlacements, arrangeable, customMonitors);
             }
 
             if (result.SucceededHwnds.Count > 0 && _settings.ArrangeSoundEnabled)
@@ -1327,13 +1325,16 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     /// </summary>
     private void RunPlacementVerification(
         System.Collections.Generic.IReadOnlyList<WindowPlacement> targets,
-        System.Collections.Generic.IReadOnlyList<ManagedWindow> arrangeable)
+        System.Collections.Generic.IReadOnlyList<ManagedWindow> arrangeable,
+        IReadOnlyDictionary<IntPtr, MonitorInfo> customMonitors)
     {
         try
         {
+            var customWindows = targets.Where(p => IsCustomSlot(p.SlotId)).Select(p => p.Hwnd).ToHashSet();
             var maximized = new System.Collections.Generic.HashSet<IntPtr>();
             foreach (var w in arrangeable)
-                if (w.IsMaximized) maximized.Add(w.Hwnd);
+                if (w.IsMaximized && (!customWindows.Contains(w.Hwnd) || NativeMethods.IsZoomed(w.Hwnd)))
+                    maximized.Add(w.Hwnd);
             System.Func<IntPtr, Rect?> readRect = hwnd =>
             {
                 try
@@ -1344,6 +1345,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 catch { return null; }
             };
             var deviations = PlacementVerifier.FindDeviations(targets, readRect, maximized.Contains);
+            ApplyCustomZoneFallbacks(arrangeable, deviations, customMonitors);
             if (deviations.Count == 0)
                 _logger.Info($"Placement verification clean: {targets.Count} window(s) on target");
             else

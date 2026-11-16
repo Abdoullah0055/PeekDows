@@ -497,6 +497,7 @@ for (const btn of document.querySelectorAll("#layoutmode .seg")) {
     syncDirty();
   });
 }
+$("editLayoutProfiles")?.addEventListener("click", () => post({ type: "openLayoutProfiles" }));
 
 function renderLayoutModeSelection(mode) {
   for (const b of document.querySelectorAll("#layoutmode .seg"))
@@ -505,6 +506,8 @@ function renderLayoutModeSelection(mode) {
   // (the stored value is kept and re-applied when back on Grid).
   const presetCard = $("presetCard");
   if (presetCard) presetCard.style.display = mode === "Grid" ? "" : "none";
+  const legend = $("presetLegend");
+  if (legend) legend.style.display = mode === "Grid" ? "" : "none";
 }
 
 // ---------- arrange sound (beta) ----------
@@ -703,8 +706,10 @@ function renderPreview(preset, mode) {
     s.style.width = `${width}%`;
     s.style.height = `${height}%`;
   };
-  show("slotC", mode !== "Halves");
-  show("slotD", mode !== "Halves" && mode !== "Thirds");
+  const custom = state.snapshot?.customZones;
+  const grid = mode !== "Halves" && mode !== "Thirds" && mode !== "Custom";
+  show("slotC", grid || mode === "Thirds" || (mode === "Custom" && custom?.splitSecondary === true));
+  show("slotD", grid);
   let pct;
   if (mode === "Halves") {
     place("slotA", 0, 0, 50, 100);
@@ -715,6 +720,13 @@ function renderPreview(preset, mode) {
     place("slotB", 100 / 3, 0, 100 / 3, 100);
     place("slotC", 200 / 3, 0, 100 / 3, 100);
     pct = 33;
+  } else if (mode === "Custom") {
+    const left = Math.min(80, Math.max(20, custom?.widthPercent ?? 60));
+    const top = Math.min(80, Math.max(20, custom?.heightPercent ?? 50));
+    place("slotA", 0, 0, left, 100);
+    place("slotB", left, 0, 100 - left, custom?.splitSecondary ? top : 100);
+    if (custom?.splitSecondary) place("slotC", left, top, 100 - left, 100 - top);
+    pct = left;
   } else {
     const ratio = PRESET_RATIO[preset] ?? 0.90;
     const span = ratio * 100;

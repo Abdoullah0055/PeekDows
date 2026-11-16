@@ -23,6 +23,14 @@ public class WindowDiscoveryService
         return _windowSource();
     }
 
+    public WindowDiscoveryService Fork()
+    {
+        return new WindowDiscoveryService(_windowSource)
+        {
+            _knownWindows = _knownWindows.ToDictionary(entry => entry.Key, entry => entry.Value.Copy())
+        };
+    }
+
     public WindowDiff Refresh(WindowClassifier classifier)
     {
         var rawWindows = _windowSource();

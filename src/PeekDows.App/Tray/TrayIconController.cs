@@ -10,6 +10,9 @@ namespace PeekDows.App.Tray;
 
 public class TrayIconController : IDisposable
 {
+    internal void NotifyCustomFallback(int count) => _notifyIcon.ShowBalloonTip(4000, "PeekDows custom zones",
+        $"{count} window(s) could not fit their zones and used the full work area.", ToolTipIcon.Info);
+
     private readonly NotifyIcon _notifyIcon;
     private readonly TrayMenuBuilder _menuBuilder;
     private readonly IPeekDowsController _controller;

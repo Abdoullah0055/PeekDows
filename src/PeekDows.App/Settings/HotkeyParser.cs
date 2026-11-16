@@ -67,4 +67,9 @@ public static class HotkeyParser
         else parts.Add($"VK{vk:X}");
         return string.Join("+", parts);
     }
+
+    internal static bool AreEquivalent(string? first, string? second) =>
+        TryParse(first, out var firstModifiers, out var firstKey) &&
+        TryParse(second, out var secondModifiers, out var secondKey) &&
+        firstModifiers == secondModifiers && firstKey == secondKey;
 }

@@ -55,6 +55,14 @@ public class TrayMenuBuilder
         arrangeNowItem.Click += (s, e) => _controller.ArrangeNow();
         menu.Items.Add(arrangeNowItem);
 
+        var preview = NewItem("Preview arrange…", "arrange");
+        preview.Click += (_, _) => _controller.PreviewArrange();
+        menu.Items.Add(preview);
+
+        var nextWindow = new ToolStripMenuItem("Next window in zone");
+        nextWindow.Click += (_, _) => _controller.CycleZoneWindow();
+        menu.Items.Add(nextWindow);
+
         var undoArrangeItem = NewItem("Undo arrange", "undo");
         undoArrangeItem.Click += (s, e) => _controller.UndoArrange();
         menu.Items.Add(undoArrangeItem);
@@ -107,6 +115,12 @@ public class TrayMenuBuilder
         windowSizeMenu.DropDownItems.Add(largePresetItem);
 
         menu.Items.Add(windowSizeMenu);
+
+        var layouts = new ToolStripMenuItem("Layout profiles");
+        layouts.DropDownItems.Add("Edit profiles and zones…", null, (_, _) => _controller.OpenLayoutProfiles());
+        layouts.DropDownItems.Add("Export layout settings…", null, (_, _) => _controller.ExportLayoutSettings());
+        layouts.DropDownItems.Add("Import layout settings…", null, (_, _) => _controller.ImportLayoutSettings());
+        menu.Items.Add(layouts);
 
         var animateTransitionsItem = NewItem("Animate window transitions", "animate-transitions");
         animateTransitionsItem.Checked = _controller.IsAnimateWindowTransitionsEnabled;

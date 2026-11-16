@@ -6,6 +6,20 @@ namespace PeekDows.Core.Win32;
 
 public static class MonitorNativeMethods
 {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct DISPLAY_DEVICE
+    {
+        internal int Size;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] internal string Name;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] internal string Description;
+        internal int Flags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] internal string Id;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] internal string Key;
+    }
+
+    [DllImport("user32.dll", EntryPoint = "EnumDisplayDevicesW", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool EnumDisplayDevices(string device, uint index, ref DISPLAY_DEVICE display, uint flags);
     public const uint MONITOR_DEFAULTTOPRIMARY = 1;
     public const uint MONITOR_DEFAULTTONEAREST = 2;
 

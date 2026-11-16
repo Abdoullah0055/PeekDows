@@ -87,7 +87,12 @@
                 <button class="seg" data-layoutmode="Grid">Grid</button>
                 <button class="seg" data-layoutmode="Halves">Halves</button>
                 <button class="seg" data-layoutmode="Thirds">Thirds</button>
+                <button class="seg" data-layoutmode="Custom">Custom</button>
               </div>
+            </div>
+            <div class="row">
+              <div class="txt"><div class="t">Display profiles and custom zones</div><div class="d">Set a layout and app rules for each display.</div></div>
+              <button class="btn" id="editLayoutProfiles">Edit profiles</button>
             </div>
           </div>
           <div class="card" id="presetCard">
@@ -109,7 +114,7 @@
                 <div class="slot" id="slotD">D</div>
                 <div class="taskbar"></div>
               </div>
-              <div class="presetlegend">
+              <div class="presetlegend" id="presetLegend">
                 <div class="big"><span id="ratioLabel">90</span>%</div>
                 <div>Each window covers <b id="ratioLabel2">90</b>% of the work area. The remaining strip stays visible so every window can be "peeked".</div>
                 <div style="margin-top:auto; font-size:11px">A lone window on a monitor is natively maximized — unless you restored it manually.</div>

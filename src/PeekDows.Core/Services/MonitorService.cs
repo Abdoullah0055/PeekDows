@@ -36,6 +36,17 @@ public class MonitorService : IMonitorResolver
         return monitor.WorkArea;
     }
 
+    public static string GetProfileId(string deviceName)
+    {
+        const uint getDeviceInterfaceName = 1;
+        var display = new MonitorNativeMethods.DISPLAY_DEVICE
+        {
+            Size = Marshal.SizeOf<MonitorNativeMethods.DISPLAY_DEVICE>()
+        };
+        return MonitorNativeMethods.EnumDisplayDevices(deviceName, 0, ref display, getDeviceInterfaceName)
+            && !string.IsNullOrWhiteSpace(display.Id) ? display.Id : deviceName;
+    }
+
     private MonitorInfo BuildMonitorInfo(IntPtr hMonitor, bool assumePrimary)
     {
         var mi = new MonitorNativeMethods.MONITORINFOEX();
@@ -48,6 +59,7 @@ public class MonitorService : IMonitorResolver
             return new MonitorInfo
             {
                 Handle = hMonitor,
+                DeviceName = mi.szDevice,
                 WorkArea = new Rect(
                     mi.rcWork.left,
                     mi.rcWork.top,

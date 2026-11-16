@@ -62,6 +62,9 @@ public sealed class AppSettings
     [JsonPropertyName("layoutMode")]
     public string LayoutMode { get; set; } = "Grid";
 
+    public CustomZoneLayout CustomZones { get; set; } = new();
+    public Dictionary<string, MonitorLayoutProfile> MonitorProfiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// When true (default), the focus-hint overlay shows per-app icons.
     /// JSON name is "overlayShowIcons" (camelCase UI contract).

@@ -19,6 +19,11 @@ public interface IPeekDowsController
     DateTimeOffset? PauseUntil { get; }
     string? PauseDescription { get; }
     void ArrangeNow();
+    void PreviewArrange() { }
+    void CycleZoneWindow() { }
+    void OpenLayoutProfiles() { }
+    void ExportLayoutSettings() { }
+    void ImportLayoutSettings() { }
     void UndoArrange();
     bool CanUndoArrange { get; }
     void SetLayoutMode(string mode);

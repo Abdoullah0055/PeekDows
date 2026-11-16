@@ -43,6 +43,21 @@ public sealed class MultiMonitorLayoutService
         }
 
         var windowsByMonitor = GroupWindowsByMonitor(windows);
+        var profiles = new Dictionary<MonitorInfo, (string Mode, List<AppRule> Rules, CustomZoneLayout Zones)>();
+        foreach (var (monitor, group) in windowsByMonitor.ToArray())
+        {
+            var profile = MonitorLayoutSettings.Resolve(settings, monitor);
+            profiles.Add(monitor, profile);
+            if (profile.Rules.Count == 0) continue;
+            var pinned = profile.Rules.Where(rule => AppRuleService.IsPinAction(rule.Action))
+                .Select(rule => rule.Process).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            windowsByMonitor[monitor] = AppRuleService.SortForArrange(group, profile.Rules).Select(window =>
+            {
+                var copy = window.Copy();
+                copy.IsPinned = pinned.Contains(AppRuleService.NormalizeProcess(window.ProcessName));
+                return copy;
+            }).ToList();
+        }
 
         _logger?.Info($"Connected monitors count={windowsByMonitor.Count}");
 
@@ -72,6 +87,7 @@ public sealed class MultiMonitorLayoutService
         {
             var monitorInfo = group.Key;
             var monitorWindows = group.Value;
+            var profile = profiles[monitorInfo];
 
             if (monitorWindows.Count == 0)
             {
@@ -92,7 +108,7 @@ public sealed class MultiMonitorLayoutService
                 _logger?.Warn($"Lone window on monitor workArea={monitorInfo.WorkArea} but no LoneWindowMaximizePolicy wired; legacy layout used");
             }
 
-            if (monitorWindows.Count == 1 && _loneWindowPolicy is not null)
+            if (monitorWindows.Count == 1 && _loneWindowPolicy is not null && profile.Mode != "Custom")
             {
                 var only = monitorWindows[0];
                 if (_loneWindowPolicy.ShouldMaximizeLoneWindow(monitorInfo.Handle, monitorInfo.WorkArea))
@@ -114,13 +130,13 @@ public sealed class MultiMonitorLayoutService
 
             _logger?.Info($"Calculating placements for monitor workArea={monitorInfo.WorkArea}, windowCount={monitorWindows.Count}");
 
-            var placements = _layoutEngine.CalculatePlacements(settings.LayoutMode, monitorWindows, monitorInfo.WorkArea, settings).ToList();
-            if (settings.AppRules is { Count: > 0 })
+            var placements = _layoutEngine.CalculatePlacements(profile.Mode, monitorWindows, monitorInfo.WorkArea, settings, profile.Zones).ToList();
+            if (profile.Rules.Count > 0)
             {
                 var processes = new Dictionary<IntPtr, string>();
                 foreach (var window in monitorWindows)
                     processes[window.Hwnd] = window.ProcessName;
-                AppRuleService.ApplyPinnedSlots(placements, processes, settings.AppRules);
+                AppRuleService.ApplyPinnedSlots(placements, processes, profile.Rules);
             }
 
             // P-B4 fix: avoid LINQ alloc for small N (≤8). Manual HashSet.

@@ -88,6 +88,13 @@ The modern settings window (tray → Settings or double-click the tray icon) run
 A monitor with exactly **one** arrangeable window gets that window **natively maximized** (instead of a 90% slot). If you manually restore a window PeekDows had maximized, it is left alone until a window opens or closes on that monitor.
 
 
+## Layout tools
+
+- **Preview arrange** in the tray shows the proposed zones and windows left in place. Press Enter to apply the preview or Escape to close it. **Arrange Now** and its shortcut still apply immediately.
+- **Layout profiles → Edit profiles and zones** stores optional display-specific modes and app rules. Displays without a profile use the default layout and rules. **Custom** supports an adjustable left/right split and an optional split on the right. PeekDows can move a window that cannot fit to the full work area and shows a notification when it does.
+- **Next window in zone** cycles windows stacked by Halves and Thirds after a successful arrange. If PeekDows cannot infer the zone, it offers the available stacks.
+- **Layout profiles → Export / Import layout settings** transfers modes, zones, display profiles, app rules and shortcuts in versioned JSON. Import shows the proposed changes and backs up the current settings before applying them.
+
 ## Logs
 
 Log file: `%APPDATA%\PeekDows\logs\peekdows.log`

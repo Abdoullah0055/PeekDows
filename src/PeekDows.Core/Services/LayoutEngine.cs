@@ -132,7 +132,8 @@ public class LayoutEngine
         string? mode,
         IReadOnlyList<ManagedWindow> windows,
         Rect workArea,
-        AppSettings settings)
+        AppSettings settings,
+        CustomZoneLayout? customZones = null)
     {
         if (!string.IsNullOrWhiteSpace(mode))
         {
@@ -141,9 +142,31 @@ public class LayoutEngine
                 return CalculateHalvesPlacements(windows, workArea, settings);
             if (string.Equals(normalized, "Thirds", StringComparison.OrdinalIgnoreCase))
                 return CalculateThirdsPlacements(windows, workArea, settings);
+            if (string.Equals(normalized, "Custom", StringComparison.OrdinalIgnoreCase))
+            {
+                var zones = CalculateCustomZones(workArea, customZones ?? settings.CustomZones ?? new());
+                return windows.Select((window, index) => new WindowPlacement
+                {
+                    Hwnd = window.Hwnd,
+                    SlotId = $"Custom{index % zones.Count + 1}",
+                    TargetRect = zones[index % zones.Count]
+                }).ToArray();
+            }
         }
 
         return CalculateClassicPeekGridPlacements(windows, workArea, settings);
+    }
+
+    public static IReadOnlyList<Rect> CalculateCustomZones(Rect area, CustomZoneLayout layout)
+    {
+        if (area.Width < 2 || area.Height < 1) return [area];
+        var left = Math.Clamp((int)((long)area.Width * Math.Clamp(layout.WidthPercent, 20, 80) / 100), 1, area.Width - 1);
+        var primary = new Rect(area.Left, area.Top, left, area.Height);
+        var secondary = new Rect(area.Left + left, area.Top, area.Width - left, area.Height);
+        if (!layout.SplitSecondary || area.Height < 2) return [primary, secondary];
+        var top = Math.Clamp((int)((long)area.Height * Math.Clamp(layout.HeightPercent, 20, 80) / 100), 1, area.Height - 1);
+        return [primary, secondary with { Height = top },
+            secondary with { Top = secondary.Top + top, Height = area.Height - top }];
     }
 
     /// <summary>

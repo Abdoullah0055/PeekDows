@@ -149,6 +149,9 @@ public sealed partial class SettingsBridge
                 case "openSettingsFolder":
                     _openSettingsFolder?.Invoke();
                     return null;
+                case "openLayoutProfiles":
+                    _controller.OpenLayoutProfiles();
+                    return null;
                 case "dirtyChanged":
                     bool dirty = root.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.True;
                     DirtyChanged?.Invoke(dirty);

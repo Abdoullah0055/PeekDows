@@ -17,6 +17,7 @@ public sealed partial class SettingsBridge
         var s = _controller.CurrentSettings;
         data["focusHintMode"] = s.FocusHintMode ?? "Overlay";
         data["layoutMode"] = s.LayoutMode ?? "Grid";
+        data["customZones"] = s.CustomZones ?? new Core.Models.CustomZoneLayout();
         data["appRules"] = s.AppRules ?? new List<Core.Models.AppRule>();
         data["overlayShowIcons"] = s.OverlayShowAppIcons;
         data["soundEnabled"] = s.ArrangeSoundEnabled;
@@ -157,6 +158,7 @@ public sealed partial class SettingsBridge
 
     private static bool TryNormalizeLayoutMode(string raw, out string mode)
     {
+        if (string.Equals(raw, "Custom", StringComparison.OrdinalIgnoreCase)) { mode = "Custom"; return true; }
         if (string.Equals(raw, "Grid", StringComparison.OrdinalIgnoreCase) || string.Equals(raw, "g", StringComparison.OrdinalIgnoreCase)) { mode = "Grid"; return true; }
         if (string.Equals(raw, "Halves", StringComparison.OrdinalIgnoreCase) || string.Equals(raw, "h", StringComparison.OrdinalIgnoreCase)) { mode = "Halves"; return true; }
         if (string.Equals(raw, "Thirds", StringComparison.OrdinalIgnoreCase) || string.Equals(raw, "t", StringComparison.OrdinalIgnoreCase)) { mode = "Thirds"; return true; }

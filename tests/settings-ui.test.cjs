@@ -55,6 +55,21 @@ test("an unrelated save preserves a disabled overlay icon setting", () => {
   `);
 });
 
+test("custom preview draws the configured splits and clears inactive slots", () => {
+  runInSettingsPage(`
+    state.snapshot = { customZones: { widthPercent: 65, heightPercent: 45, splitSecondary: true } };
+    renderPreview("Small", "Custom");
+    assert.equal($("slotA").style.width, "65%");
+    assert.equal($("slotB").style.height, "45%");
+    assert.equal($("slotC").style.top, "45%");
+    assert.equal($("slotD").style.display, "none");
+    state.snapshot.customZones.splitSecondary = false;
+    renderPreview("Small", "Custom");
+    assert.equal($("slotB").style.height, "100%");
+    assert.equal($("slotC").style.display, "none");
+  `);
+});
+
 test("a sound import refreshes the library and keeps pending edits", () => {
   runInSettingsPage(`
     state.snapshot = { animate: true, soundName: "chime-soft" };

@@ -12,7 +12,7 @@ public sealed partial class HotkeyService
 
     internal bool IsRegistered(string name) => _registeredGestures.ContainsKey(IdForName(name));
 
-    public bool TryUpdateGestures(IReadOnlyDictionary<string, string> requested, out string error)
+    public bool TryUpdateGestures(IReadOnlyDictionary<string, string> requested, out string error, Action? commit = null)
     {
         error = "";
         var changes = new Dictionary<int, Gesture>();
@@ -49,18 +49,29 @@ public sealed partial class HotkeyService
         {
             if (!RegisterGesture(id, gesture))
             {
-                foreach (var added in registered)
-                {
-                    NativeMethods.UnregisterHotKey(_messageWindow.Handle, added);
-                    _registeredGestures.Remove(added);
-                }
-                RestoreGestures(replaced);
+                RollBack();
                 error = "hotkey-conflict";
                 return false;
             }
             registered.Add(id);
         }
+        try { commit?.Invoke(); }
+        catch
+        {
+            RollBack();
+            throw;
+        }
         return true;
+
+        void RollBack()
+        {
+            foreach (var added in registered)
+            {
+                NativeMethods.UnregisterHotKey(_messageWindow.Handle, added);
+                _registeredGestures.Remove(added);
+            }
+            RestoreGestures(replaced);
+        }
     }
 
     private void RestoreGestures(IEnumerable<KeyValuePair<int, Gesture>> previous)

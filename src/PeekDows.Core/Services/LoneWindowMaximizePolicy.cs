@@ -40,6 +40,31 @@ public sealed class LoneWindowMaximizePolicy
         _logger = logger;
     }
 
+    public LoneWindowMaximizePolicy Fork()
+    {
+        var copy = new LoneWindowMaximizePolicy();
+        copy.Adopt(this);
+        return copy;
+    }
+
+    public void Adopt(LoneWindowMaximizePolicy source)
+    {
+        Copy(source._userRestoredByHandle, _userRestoredByHandle);
+        Copy(source._workAreaByHandle, _workAreaByHandle);
+        Copy(source._lastCountByHandle, _lastCountByHandle);
+        Copy(source._userRestoredByRect, _userRestoredByRect);
+        Copy(source._lastCountByRect, _lastCountByRect);
+        _peekDowsMaximized.Clear();
+        _peekDowsMaximized.UnionWith(source._peekDowsMaximized);
+    }
+
+    private static void Copy<TKey, TValue>(Dictionary<TKey, TValue> source, Dictionary<TKey, TValue> target)
+        where TKey : notnull
+    {
+        target.Clear();
+        foreach (var pair in source) target.Add(pair.Key, pair.Value);
+    }
+
     private static Rect Normalize(Rect r) => new(r.Left & ~1, r.Top & ~1, r.Width & ~1, r.Height & ~1);
 
     // Existing API — Rect-only (tests, legacy callers). Delegates to handle-aware with IntPtr.Zero.

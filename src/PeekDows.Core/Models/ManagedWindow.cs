@@ -20,6 +20,8 @@ public sealed class ManagedWindow
     public string? AssignedSlotId { get; set; }
     public bool IsPinned { get; set; }
     public bool IsIgnored { get; set; }
+
+    internal ManagedWindow Copy() => (ManagedWindow)MemberwiseClone();
     
     public static ManagedWindow FromRaw(RawWindowInfo raw, DateTime now)
     {
