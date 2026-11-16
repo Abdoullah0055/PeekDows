@@ -6,6 +6,14 @@ namespace PeekDows.Core.Win32;
 
 public static class NativeMethods
 {
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetWindowPlacement(IntPtr hwnd, ref WINDOWPLACEMENT placement);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetWindowPlacement(IntPtr hwnd, in WINDOWPLACEMENT placement);
+
     public const int SWP_NOACTIVATE = 0x0010;
     public const int SWP_NOZORDER = 0x0004;
     public const int SWP_NOMOVE = 0x0002;

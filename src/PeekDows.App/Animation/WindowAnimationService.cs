@@ -218,6 +218,12 @@ public sealed class WindowAnimationService : IWindowAnimator, IDisposable
 
     public bool IsAnimating(IntPtr hwnd) => _tweens.ContainsKey(hwnd);
 
+    public void Cancel(IntPtr hwnd)
+    {
+        if (_tweens.Remove(hwnd) && _tweens.Count == 0)
+            _timer.Stop();
+    }
+
     public void SnapAllToTarget()
     {
         if (_tweens.Count == 0) return;

@@ -9,6 +9,27 @@ namespace PeekDows.Tests;
 
 public class MultiMonitorLayoutServiceTests
 {
+    [Fact]
+    public void PinUsesTheSlotOnTheWindowsOwnMonitor()
+    {
+        var left = new MonitorInfo { Handle = (IntPtr)1, WorkArea = new Rect(0, 0, 1200, 900) };
+        var right = new MonitorInfo { Handle = (IntPtr)2, WorkArea = new Rect(1200, 0, 1200, 900) };
+        var resolver = new FakeMonitorResolver(new() { [(IntPtr)1] = left, [(IntPtr)2] = left,
+            [(IntPtr)3] = right, [(IntPtr)4] = right }, left);
+        var windows = new[] { MakeWindow(1), MakeWindow(2), MakeWindow(3),
+            new ManagedWindow { Hwnd = (IntPtr)4, ProcessName = "notepad.exe" } };
+        var settings = new AppSettings
+        {
+            AppRules = [new AppRule { Process = "notepad.exe", Action = "pin", Slot = "A" }]
+        };
+
+        var placements = new MultiMonitorLayoutService(resolver, new LayoutEngine())
+            .CalculatePlacementsByMonitor(windows, settings);
+
+        Assert.Equal(1200, placements.Single(p => p.Hwnd == (IntPtr)4).TargetRect.Left);
+        Assert.All(placements.Where(p => p.Hwnd.ToInt32() < 3), p => Assert.True(p.TargetRect.Left < 1200));
+    }
+
     private sealed class FakeMonitorResolver : IMonitorResolver
     {
         private readonly Dictionary<IntPtr, MonitorInfo> _map;

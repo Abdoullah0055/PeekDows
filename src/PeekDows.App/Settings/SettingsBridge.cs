@@ -191,6 +191,11 @@ public sealed partial class SettingsBridge
         var settings = _controller.CurrentSettings;
         _logger?.Info("SettingsBridge: applying draft from settings UI");
 
+        string? hotkeyError = null;
+        ApplyHotkeysDraft(draft, ref hotkeyError);
+        if (hotkeyError is not null)
+            return Applied(ok: false, error: hotkeyError);
+
         // 1. Toggle-backed keys — only when the value differs. Each controller toggle
         //    persists and raises its *Changed event so the tray menu stays in sync.
         if (draft.AutoArrange is { } av && settings.AutoArrange != av)
@@ -222,10 +227,6 @@ public sealed partial class SettingsBridge
 
         ApplyIgnoredDraft(draft, settings, ref plainChanged);
         ApplyBetaDraft(draft, settings, ref plainChanged);
-        string? hotkeyError = null;
-        ApplyHotkeysDraft(draft, ref hotkeyError);
-        if (hotkeyError is not null)
-            return Applied(ok: false, error: hotkeyError);
 
         if (plainChanged)
         {

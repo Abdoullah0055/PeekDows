@@ -1,187 +1,140 @@
-using System;
-using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
 using PeekDows.Core.Models;
 using PeekDows.Core.Win32;
 
 namespace PeekDows.Core.Services;
 
-/// <summary>
-/// F1 — Undo Arrange. Bounded LIFO of pre-arrange snapshots (cap 3, oldest dropped).
-/// Push captures {hwnd, rect, wasMaximized} per arrangeable window; Undo restores the
-/// most recent snapshot best-effort: dead hwnds are skipped silently, each window is
-/// wrapped in its own try/catch so one failure never blocks the others, and Undo itself
-/// never throws.
-/// Testability seam: the liveness probe and logger are optional ctor dependencies
-/// (same pattern as DirectionalFocusRegistry); the positioner is injected per Undo
-/// call, never stored. The <see cref="IWindowPositioner"/>-typed overload is internal
-/// because that interface is internal to Core (a public signature would be CS0051);
-/// production callers (PeekDows.App) use the parameterless public Undo().
-/// </summary>
+/// <summary>Bounded history of window states captured before arranging.</summary>
 public sealed class ArrangeHistoryService
 {
     private const int MaxSnapshots = 3;
-
+    private const uint AsyncWindowPlacement = 0x0004;
     private readonly FileLogger? _logger;
     private readonly Func<IntPtr, bool> _isWindowValid;
-    private readonly List<IReadOnlyList<SnapshotEntry>> _history = new();
+    private readonly bool _useNativePlacement;
+    private readonly List<Entry[]> _history = new();
     private readonly object _lock = new();
+
+    public sealed class Snapshot
+    {
+        internal Snapshot(Entry[] entries) => Entries = entries;
+        internal Entry[] Entries { get; }
+    }
+
+    internal readonly record struct Entry(IntPtr Handle, Rect Rect, bool WasMaximized,
+        uint Process, uint Thread, string ClassName, WINDOWPLACEMENT? NativePlacement);
 
     public ArrangeHistoryService(FileLogger? logger = null, Func<IntPtr, bool>? isWindowValid = null)
     {
         _logger = logger;
-        _isWindowValid = isWindowValid ?? (hwnd => NativeMethods.IsWindow(hwnd));
+        _useNativePlacement = isWindowValid is null;
+        _isWindowValid = isWindowValid ?? NativeMethods.IsWindow;
     }
 
     public bool CanUndo
     {
-        get
-        {
-            lock (_lock)
-            {
-                return _history.Count > 0;
-            }
-        }
+        get { lock (_lock) return _history.Count > 0; }
     }
 
-    /// <summary>
-    /// Captures a snapshot of the windows about to be arranged. Call BEFORE applying
-    /// placements. Null/empty/Zero-hwnd inputs are ignored (logged, never thrown).
-    /// </summary>
-    public void Push(IReadOnlyList<ManagedWindow>? arrangeable)
+    public Snapshot Capture(IEnumerable<ManagedWindow> windows)
     {
-        try
+        var entries = new List<Entry>();
+        foreach (var window in windows)
         {
-            if (arrangeable == null || arrangeable.Count == 0)
+            if (window is null || window.Hwnd == IntPtr.Zero)
+                continue;
+
+            if (!_useNativePlacement)
             {
-                _logger?.Info("ArrangeHistory.Push skipped: no arrangeable windows");
-                return;
+                entries.Add(new Entry(window.Hwnd, window.CurrentRect, window.IsMaximized, 0, 0, "", null));
+                continue;
             }
 
-            var snapshot = new List<SnapshotEntry>(arrangeable.Count);
-            foreach (var w in arrangeable)
-            {
-                try
-                {
-                    if (w is null || w.Hwnd == IntPtr.Zero)
-                        continue;
-                    // Rect is a value type: captured by copy, later mutations of the
-                    // ManagedWindow cannot corrupt the snapshot.
-                    snapshot.Add(new SnapshotEntry(w.Hwnd, w.CurrentRect, w.IsMaximized));
-                }
-                catch (Exception ex)
-                {
-                    _logger?.Warn($"ArrangeHistory.Push capture failed for one window: {ex.Message}");
-                }
-            }
+            uint thread = NativeMethods.GetWindowThreadProcessId(window.Hwnd, out uint process);
+            if (thread == 0 || (window.ProcessId != 0 && process != (uint)window.ProcessId))
+                continue;
 
-            if (snapshot.Count == 0)
-            {
-                _logger?.Info("ArrangeHistory.Push skipped: snapshot empty after capture");
-                return;
-            }
-
-            lock (_lock)
-            {
-                _history.Add(snapshot);
-                while (_history.Count > MaxSnapshots)
-                    _history.RemoveAt(0); // drop oldest
-            }
-
-            _logger?.Info($"ArrangeHistory.Push: captured {snapshot.Count} window(s), depth={_history.Count}");
+            var native = new WINDOWPLACEMENT { Length = (uint)Marshal.SizeOf<WINDOWPLACEMENT>() };
+            if (!NativeMethods.GetWindowPlacement(window.Hwnd, ref native))
+                continue;
+            native.Flags |= AsyncWindowPlacement;
+            entries.Add(new Entry(window.Hwnd, window.CurrentRect, window.IsMaximized, process, thread,
+                ReadClass(window.Hwnd), native));
         }
-        catch (Exception ex)
-        {
-            _logger?.Warn($"ArrangeHistory.Push failed: {ex.Message}");
-        }
+        return new Snapshot(entries.ToArray());
     }
 
-    /// <summary>
-    /// Production entry point: restores the most recent snapshot using the default
-    /// Win32 positioner. Never throws.
-    /// </summary>
-    public void Undo()
+    public void Commit(Snapshot snapshot, IEnumerable<IntPtr> movedWindows)
     {
-        try
-        {
-            Undo(new Win32WindowPositioner());
-        }
-        catch (Exception ex)
-        {
-            _logger?.Warn($"ArrangeHistory.Undo failed: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Restores the most recent snapshot (LIFO — each Undo consumes one level, so up
-    /// to 3 consecutive undos walk back 3 arranges). Per window: skip dead hwnds
-    /// silently, re-pose at the captured rect FIRST, then re-maximize when the window
-    /// was maximized at capture time. Never throws.
-    /// </summary>
-    internal void Undo(IWindowPositioner positioner)
-    {
-        IReadOnlyList<SnapshotEntry>? snapshot;
-        try
-        {
-            if (positioner is null)
-            {
-                _logger?.Warn("ArrangeHistory.Undo skipped: null positioner");
-                return;
-            }
-
-            lock (_lock)
-            {
-                if (_history.Count == 0)
-                {
-                    _logger?.Info("ArrangeHistory.Undo skipped: history empty");
-                    return;
-                }
-                snapshot = _history[_history.Count - 1];
-                _history.RemoveAt(_history.Count - 1);
-            }
-
-            _logger?.Info($"ArrangeHistory.Undo: restoring {snapshot.Count} window(s), remaining depth={_history.Count}");
-        }
-        catch (Exception ex)
-        {
-            _logger?.Warn($"ArrangeHistory.Undo dequeue failed: {ex.Message}");
+        var moved = movedWindows.ToHashSet();
+        var entries = snapshot.Entries.Where(entry => moved.Contains(entry.Handle)).ToArray();
+        if (entries.Length == 0)
             return;
+
+        lock (_lock)
+        {
+            _history.Add(entries);
+            if (_history.Count > MaxSnapshots)
+                _history.RemoveAt(0);
+        }
+    }
+
+    public void Push(IReadOnlyList<ManagedWindow>? windows)
+    {
+        if (windows is null)
+            return;
+        var snapshot = Capture(windows);
+        Commit(snapshot, snapshot.Entries.Select(entry => entry.Handle));
+    }
+
+    public void Undo(Action<IntPtr>? beforeRestore = null) => Undo(new Win32WindowPositioner(), beforeRestore);
+
+    internal void Undo(IWindowPositioner positioner, Action<IntPtr>? beforeRestore = null)
+    {
+        Entry[] snapshot;
+        lock (_lock)
+        {
+            if (_history.Count == 0)
+                return;
+            snapshot = _history[^1];
+            _history.RemoveAt(_history.Count - 1);
         }
 
         foreach (var entry in snapshot)
         {
             try
             {
-                bool alive;
-                try
+                beforeRestore?.Invoke(entry.Handle);
+                if (!_isWindowValid(entry.Handle))
+                    continue;
+
+                if (entry.NativePlacement is { } native)
                 {
-                    alive = _isWindowValid(entry.Hwnd);
-                }
-                catch (Exception ex)
-                {
-                    _logger?.Warn($"ArrangeHistory.Undo liveness probe failed for hwnd={entry.Hwnd}: {ex.Message}");
+                    uint thread = NativeMethods.GetWindowThreadProcessId(entry.Handle, out uint process);
+                    if (thread != entry.Thread || process != entry.Process || ReadClass(entry.Handle) != entry.ClassName)
+                        continue;
+
+                    if (!NativeMethods.SetWindowPlacement(entry.Handle, in native))
+                        _logger?.Warn($"Undo placement failed for hwnd={entry.Handle}: {Marshal.GetLastWin32Error()}");
                     continue;
                 }
 
-                if (!alive)
-                {
-                    _logger?.Info($"ArrangeHistory.Undo skipped dead window: hwnd={entry.Hwnd}");
-                    continue;
-                }
-
-                // Re-pose FIRST at the captured rect, then re-maximize when needed —
-                // a maximize issued before the move would be overwritten by the move.
-                positioner.SetWindowPosition(entry.Hwnd, entry.Rect);
+                positioner.SetWindowPosition(entry.Handle, entry.Rect);
                 if (entry.WasMaximized)
-                    positioner.MaximizeWindow(entry.Hwnd);
-
-                _logger?.Info($"ArrangeHistory.Undo restored: hwnd={entry.Hwnd}, rect={entry.Rect}, wasMaximized={entry.WasMaximized}");
+                    positioner.MaximizeWindow(entry.Handle);
             }
             catch (Exception ex)
             {
-                _logger?.Warn($"ArrangeHistory.Undo failed for hwnd={entry.Hwnd}: {ex.Message}");
+                _logger?.Warn($"Undo failed for hwnd={entry.Handle}: {ex.Message}");
             }
         }
     }
 
-    private readonly record struct SnapshotEntry(IntPtr Hwnd, Rect Rect, bool WasMaximized);
+    private static string ReadClass(IntPtr hwnd)
+    {
+        var buffer = new StringBuilder(256);
+        NativeMethods.GetClassName(hwnd, buffer, buffer.Capacity);
+        return buffer.ToString();
+    }
 }

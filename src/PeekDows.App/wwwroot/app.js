@@ -6,7 +6,7 @@ const EDITABLE_KEYS = [
   "allowRepositionMaximized", "preset", "arrangeOnStartup",
   "showTrayNotifications", "thresholdPx",
   "ignoredProcesses", "ignoredClasses", "hotkeys", "appRules",
-  "focusHintMode",
+  "focusHintMode", "overlayShowIcons",
   "soundEnabled", "soundName", "soundAutoOffMinutes", "layoutMode",
 ];
 
@@ -654,7 +654,20 @@ function renderSoundDuration(totalMinutes) {
 }
 
 // ---------- footer actions ----------
-$("saveBtn").addEventListener("click", () => post({ type: "apply", data: state.draft }));
+$("saveBtn").addEventListener("click", () => {
+  const changes = {};
+  for (const key of EDITABLE_KEYS) {
+    const value = state.draft[key];
+    if (key === "hotkeys") {
+      const hotkeys = Object.fromEntries(Object.entries(value)
+        .filter(([name, gesture]) => gesture !== state.snapshot.hotkeys?.[name]));
+      if (Object.keys(hotkeys).length) changes.hotkeys = hotkeys;
+    } else if (JSON.stringify(value) !== JSON.stringify(state.snapshot[key])) {
+      changes[key] = value;
+    }
+  }
+  post({ type: "apply", data: changes });
+});
 $("cancelBtn").addEventListener("click", () => {
   markClean();
   window.close();   // SettingsHostForm maps WindowCloseRequested → Close()

@@ -45,6 +45,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private readonly System.Windows.Forms.Timer _soundAutoOffTimer;
     private DateTime? _soundEnabledUntil;
     private int _arrangeInProgress;
+    private int _placementGeneration;
 
     private AppSettings _settings;
 
@@ -127,15 +128,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _hotkeyService.UndoRequested += OnUndoArrangeRequested;
         _historyService = new ArrangeHistoryService(_logger);
 
-        if (!_hotkeyService.RegisterArrangeHotkey())
-        {
-            _logger.Warn("Failed to register Ctrl+Alt+Space hotkey. It may already be in use.");
-        }
-
-        if (!_hotkeyService.RegisterPauseHotkey())
-        {
-            _logger.Warn("Failed to register Ctrl+Alt+P hotkey. It may already be in use.");
-        }
+        RegisterConfiguredHotkeys();
 
         if (!_hotkeyService.RegisterUndoHotkey())
         {
@@ -472,7 +465,10 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         try
         {
             _logger.Info("UndoArrange requested");
-            _historyService.Undo();
+            if (!_historyService.CanUndo) return;
+            _placementGeneration++;
+            _historyService.Undo(_animationService.Cancel);
+            _directionalFocusRegistry.UpdateFromPlacements([], _monitorService);
         }
         catch (Exception ex)
         {
@@ -1185,18 +1181,6 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 _logger.Info(sb2.ToString().TrimEnd());
             }
 
-            // F3: seat rule-pinned windows on their exact Grid slots (rect swap).
-            try
-            {
-                var processByHwnd = new System.Collections.Generic.Dictionary<IntPtr, string>(arrangeable.Count);
-                foreach (var w in arrangeable) processByHwnd[w.Hwnd] = w.ProcessName;
-                AppRuleService.ApplyPinnedSlots(placements, processByHwnd, _settings.AppRules);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"AppRules post-swap failed: {ex.Message}");
-            }
-
             // Frame compensation: inflate each target by the window's measured
             // invisible DWM margins so VISIBLE areas tile edge-to-edge (no
             // strips between columns). Zero-margin windows are untouched.
@@ -1212,17 +1196,11 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 effectivePlacements = placements;
             }
 
-            // F1: snapshot pre-apply state for Undo Arrange.
-            try
-            {
-                _historyService.Push(arrangeable);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"Arrange history push failed: {ex.Message}");
-            }
-
+            var generation = ++_placementGeneration;
+            var targets = effectivePlacements.Select(p => p.Hwnd).ToHashSet();
+            var snapshot = _historyService.Capture(arrangeable.Where(w => targets.Contains(w.Hwnd)));
             var result = _placementService.ApplyPlacements(effectivePlacements);
+            _historyService.Commit(snapshot, result.SucceededHwnds);
 
             foreach (var p in result.SucceededHwnds)
             {
@@ -1274,7 +1252,8 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                         verifyTimer?.Dispose();
                     }
                     catch { }
-                    RunPlacementVerification(verifyTargets, verifyArrangeable);
+                    if (generation == _placementGeneration)
+                        RunPlacementVerification(verifyTargets, verifyArrangeable);
                 };
                 verifyTimer.Start();
             }

@@ -53,6 +53,24 @@ public sealed class ArrangeHistoryServiceTests
     }
 
     [Fact]
+    public void UndoCancelsOnlySuccessfulPlacementsBeforeRestoringOriginalState()
+    {
+        var history = LiveService();
+        var initial = new Rect(10, 20, 800, 600);
+        var target = Window(1, initial);
+        var snapshot = history.Capture([target, Window(2, initial)]);
+        target.CurrentRect = new Rect(0, 0, 500, 500);
+        history.Commit(snapshot, [(IntPtr)1]);
+        var fake = new FakeWindowPositioner();
+
+        var cancelled = new List<(IntPtr Handle, int MovesAlreadyMade)>();
+        history.Undo(fake, hwnd => cancelled.Add((hwnd, fake.Calls.Count)));
+
+        Assert.Equal(((IntPtr)1, 0), Assert.Single(cancelled));
+        Assert.Equal(initial, Assert.Single(fake.Calls).Rect);
+    }
+
+    [Fact]
     public void CanUndo_False_WhenEmpty()
     {
         var history = LiveService();

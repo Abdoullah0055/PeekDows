@@ -45,7 +45,7 @@ public interface IPeekDowsController
     void OpenLogsFolder();
     void OnSettingsChanged();
     void Exit();
-    bool TryUpdateHotkey(string name, string gesture, out string error)
+    bool TryUpdateHotkeys(IReadOnlyDictionary<string, string> changes, out string error)
     {
         error = "not-implemented";
         return false;

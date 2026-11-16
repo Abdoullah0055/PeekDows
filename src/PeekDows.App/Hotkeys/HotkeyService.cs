@@ -18,8 +18,6 @@ public sealed partial class HotkeyService : IDisposable
     private readonly Action _onUndo;
     private readonly HotkeyMessageWindow _messageWindow;
     private readonly FileLogger? _logger;
-    private bool _arrangeRegistered;
-    private bool _pauseRegistered;
     private bool _undoRegistered;
     private bool _disposed;
 
@@ -37,54 +35,6 @@ public sealed partial class HotkeyService : IDisposable
         _onPauseResume = () => PauseResumeRequested?.Invoke();
         _onUndo = () => UndoRequested?.Invoke();
         _logger?.Info("HotkeyService created");
-    }
-
-    public bool RegisterArrangeHotkey()
-    {
-        if (_arrangeRegistered) return true;
-
-        _logger?.Info("RegisterArrangeHotkey called");
-
-        uint modifiers = NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT;
-        uint vk = NativeMethods.VK_SPACE;
-
-        _arrangeRegistered = NativeMethods.RegisterHotKey(_messageWindow.Handle, HOTKEY_ARRANGE_ID, modifiers, vk);
-
-        if (_arrangeRegistered)
-        {
-            _logger?.Info("RegisterHotKey succeeded: Ctrl+Alt+Space");
-        }
-        else
-        {
-            int win32Error = Marshal.GetLastWin32Error();
-            _logger?.Warn($"RegisterHotKey failed: Ctrl+Alt+Space, win32Error={win32Error}");
-        }
-
-        return _arrangeRegistered;
-    }
-
-    public bool RegisterPauseHotkey()
-    {
-        if (_pauseRegistered) return true;
-
-        _logger?.Info("RegisterPauseHotkey called");
-
-        uint modifiers = NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT;
-        uint vk = NativeMethods.VK_P;
-
-        _pauseRegistered = NativeMethods.RegisterHotKey(_messageWindow.Handle, HOTKEY_PAUSE_ID, modifiers, vk);
-
-        if (_pauseRegistered)
-        {
-            _logger?.Info("Ctrl+Alt+P hotkey registered");
-        }
-        else
-        {
-            int win32Error = Marshal.GetLastWin32Error();
-            _logger?.Warn($"Failed to register Ctrl+Alt+P hotkey. It may already be in use. win32Error={win32Error}");
-        }
-
-        return _pauseRegistered;
     }
 
     public bool RegisterUndoHotkey()
@@ -114,19 +64,9 @@ public sealed partial class HotkeyService : IDisposable
 
     public void UnregisterAll()
     {
-        if (_arrangeRegistered && _messageWindow.Handle != IntPtr.Zero)
-        {
-            _logger?.Info("UnregisterHotKey called for arrange");
-            NativeMethods.UnregisterHotKey(_messageWindow.Handle, HOTKEY_ARRANGE_ID);
-            _arrangeRegistered = false;
-        }
-
-        if (_pauseRegistered && _messageWindow.Handle != IntPtr.Zero)
-        {
-            _logger?.Info("UnregisterHotKey called for pause");
-            NativeMethods.UnregisterHotKey(_messageWindow.Handle, HOTKEY_PAUSE_ID);
-            _pauseRegistered = false;
-        }
+        foreach (var id in _registeredGestures.Keys)
+            NativeMethods.UnregisterHotKey(_messageWindow.Handle, id);
+        _registeredGestures.Clear();
 
         if (_undoRegistered && _messageWindow.Handle != IntPtr.Zero)
         {

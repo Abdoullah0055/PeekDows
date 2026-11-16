@@ -114,7 +114,14 @@ public sealed class MultiMonitorLayoutService
 
             _logger?.Info($"Calculating placements for monitor workArea={monitorInfo.WorkArea}, windowCount={monitorWindows.Count}");
 
-            var placements = _layoutEngine.CalculatePlacements(settings.LayoutMode, monitorWindows, monitorInfo.WorkArea, settings);
+            var placements = _layoutEngine.CalculatePlacements(settings.LayoutMode, monitorWindows, monitorInfo.WorkArea, settings).ToList();
+            if (settings.AppRules is { Count: > 0 })
+            {
+                var processes = new Dictionary<IntPtr, string>();
+                foreach (var window in monitorWindows)
+                    processes[window.Hwnd] = window.ProcessName;
+                AppRuleService.ApplyPinnedSlots(placements, processes, settings.AppRules);
+            }
 
             // P-B4 fix: avoid LINQ alloc for small N (≤8). Manual HashSet.
             HashSet<IntPtr>? maximizedHwnds = null;

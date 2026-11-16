@@ -67,15 +67,16 @@ public sealed class SettingsBridgeHotkeysTests
         public event Action<string>? FocusHintModeChanged;
         public event Action<bool>? SoundChanged;
 
-        public bool TryUpdateHotkey(string name, string gesture, out string error)
+        public bool TryUpdateHotkeys(IReadOnlyDictionary<string, string> changes, out string error)
         {
             TryUpdateCallCount++;
-            if (string.Equals(gesture, "Ctrl+Alt+Conflict", StringComparison.OrdinalIgnoreCase))
+            if (changes.Values.Contains("Ctrl+Alt+Conflict", StringComparer.OrdinalIgnoreCase))
             {
                 error = "hotkey-conflict";
                 return false;
             }
-            CurrentSettings.Hotkeys[name] = gesture;
+            foreach (var (name, gesture) in changes)
+                CurrentSettings.Hotkeys[name] = gesture;
             error = "";
             return true;
         }
@@ -117,6 +118,16 @@ public sealed class SettingsBridgeHotkeysTests
         public void OpenLogsFolder() { }
         public void OnSettingsChanged() { }
         public void Exit() { }
+    }
+
+    [Fact]
+    public void Apply_ConflictLeavesPlainSettingsUntouched()
+    {
+        using var harness = new TempHotkeyScope();
+        var response = harness.Bridge.HandleMessage(
+            """{"type":"apply","data":{"enabled":false,"hotkeys":{"arrangeNow":"Ctrl+Alt+Conflict"}}}""");
+        Assert.Contains("hotkey-conflict", response);
+        Assert.True(harness.Controller.CurrentSettings.Enabled);
     }
 
     [Fact]
