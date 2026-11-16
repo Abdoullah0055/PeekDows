@@ -36,6 +36,7 @@
           Ignored apps
         </button>
         <button class="navitem" data-page="beta">🧪 Beta <span class="chip">BETA</span></button>
+        <button class="navitem" data-page="guide" lang="fr">Guide de démarrage</button>
         <div class="foot" id="statusFoot"><span class="dot"></span>Running</div>
       </nav>
 
@@ -44,6 +45,12 @@
         <section class="page active" id="page-general">
           <h2>General</h2>
           <p class="sub">Core behavior of PeekDows. Changes apply when you press Save.</p>
+          <div class="card" lang="fr">
+            <div class="row">
+              <div class="txt"><div class="t">Apprendre à utiliser PeekDows</div><div class="d">Découvrez les commandes et choisissez les réglages adaptés à vos habitudes.</div></div>
+              <button class="btn" id="openGuide">Ouvrir le guide</button>
+            </div>
+          </div>
           <div class="card">
             <div class="row">
               <div class="txt"><div class="t">Enable PeekDows</div><div class="d">Master switch. When off, nothing is ever moved.</div></div>
@@ -273,6 +280,34 @@
             </div>
           </div>
         </section>
+        <section class="page" id="page-guide" lang="fr">
+          <h2>Guide de démarrage</h2>
+          <p class="sub">Apprenez à ranger vos fenêtres, à retrouver une application et à adapter PeekDows à vos écrans.</p>
+          <div class="card guide-card" id="guideIntro">
+            <h3>Choisissez par où commencer</h3>
+            <p>Suivez le parcours complet ou ouvrez directement un chapitre. Le guide ne modifie aucun réglage.</p>
+            <button class="btn primary" id="guideStart">Démarrer le guide</button>
+            <button class="btn" id="guideResume" hidden>Reprendre</button>
+            <ol id="guideChapters" class="guide-chapters"></ol>
+          </div>
+          <div class="card guide-card" id="guideLesson" hidden>
+            <p id="guideProgress" class="guide-progress"></p>
+            <h3 id="guideTitle" tabindex="-1"></h3>
+            <ul id="guideDetails" class="guide-details"></ul>
+            <p id="guidePractice" class="guide-practice"></p>
+            <div id="guideLinks" class="guide-actions"></div>
+            <div class="guide-actions guide-pager">
+              <button class="btn" id="guideContents">Sommaire</button>
+              <button class="btn" id="guidePrevious">Précédent</button>
+              <button class="btn primary" id="guideNext">Suivant</button>
+            </div>
+          </div>
+          <div class="card guide-card" id="guideDone" hidden>
+            <h3 id="guideDoneTitle" tabindex="-1">Guide terminé</h3>
+            <p>Essayez votre configuration avec quelques fenêtres ouvertes. Le guide reste disponible dans Settings.</p>
+            <button class="btn" id="guideReview">Revoir les chapitres</button>
+          </div>
+        </section>
       </main>
     </div>
 
@@ -287,5 +322,6 @@
 
   <div class="banner" id="externalBanner" hidden>Settings were changed from the tray — review before saving.</div>
   <script src="app.js"></script>
+  <script src="guide.js"></script>
 </body>
 </html>

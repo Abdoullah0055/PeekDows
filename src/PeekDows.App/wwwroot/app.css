@@ -57,6 +57,18 @@ body {
 .content { flex: 1; overflow-y: auto; padding: 24px 28px 90px; }
 .page { display: none; animation: fade .18s ease; }
 .page.active { display: block; }
+.guide-card { padding: 18px; }
+.guide-card[hidden], .guide-card [hidden] { display: none; }
+.guide-card h3 { margin-bottom: 8px; }
+.guide-card p, .guide-details { line-height: 1.5; }
+.guide-card p { margin-bottom: 12px; color: var(--muted); }
+.guide-chapters, .guide-details { padding-left: 24px; margin: 14px 0; }
+.guide-chapters li, .guide-details li { margin-bottom: 8px; }
+.guide-card .guide-progress { color: var(--accent); font-size: 12px; }
+.guide-card .guide-practice { padding: 10px 12px; border-left: 2px solid var(--accent); background: var(--accent-dim); color: var(--text); }
+.guide-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.guide-pager { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.guide-pager #guideNext { margin-left: auto; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .page h2 { font-size: 18px; font-weight: 600; margin-bottom: 2px; }
 .page .sub { font-size: 12.5px; color: var(--muted); margin-bottom: 20px; }
