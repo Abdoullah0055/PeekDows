@@ -81,9 +81,9 @@ function adoptSnapshot(data) {
 }
 
 function onSoundFile(msg) {
-  // Import happens immediately on disk (C#-side copy); refresh the snapshot so
-  // the user-sounds list re-renders from the new source of truth.
-  if (msg.name) post({ type: "requestSnapshot" });
+  if (!Array.isArray(msg.userSounds)) return;
+  userSounds = msg.userSounds;
+  renderUserSounds();
 }
 
 function onExternalChange(data) {
@@ -703,18 +703,17 @@ function renderPreview(preset, mode) {
     s.style.width = `${width}%`;
     s.style.height = `${height}%`;
   };
+  show("slotC", mode !== "Halves");
+  show("slotD", mode !== "Halves" && mode !== "Thirds");
   let pct;
   if (mode === "Halves") {
     place("slotA", 0, 0, 50, 100);
     place("slotB", 50, 0, 50, 100);
-    show("slotC", false);
-    show("slotD", false);
     pct = 50;
   } else if (mode === "Thirds") {
     place("slotA", 0, 0, 100 / 3, 100);
     place("slotB", 100 / 3, 0, 100 / 3, 100);
     place("slotC", 200 / 3, 0, 100 / 3, 100);
-    show("slotD", false);
     pct = 33;
   } else {
     const ratio = PRESET_RATIO[preset] ?? 0.90;
@@ -724,7 +723,6 @@ function renderPreview(preset, mode) {
       slotA: [0, 0], slotC: [off, 0], slotD: [0, off], slotB: [off, off],
     };
     for (const [id, [left, top]] of Object.entries(pos)) {
-      show(id, true);
       place(id, left, top, span, span);
     }
     pct = Math.round(ratio * 100);

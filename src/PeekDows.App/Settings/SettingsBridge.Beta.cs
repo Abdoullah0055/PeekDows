@@ -22,16 +22,19 @@ public sealed partial class SettingsBridge
         data["soundEnabled"] = s.ArrangeSoundEnabled;
         data["soundName"] = string.IsNullOrEmpty(s.ArrangeSoundName) ? "chime-soft" : s.ArrangeSoundName;
         data["soundAutoOffMinutes"] = s.ArrangeSoundAutoOffMinutes;
-        string[] userSounds;
+        data["userSounds"] = ReadUserSounds();
+    }
+
+    private string[] ReadUserSounds()
+    {
         try
         {
-            userSounds = _controller.GetUserSounds() ?? Array.Empty<string>();
+            return _controller.GetUserSounds() ?? Array.Empty<string>();
         }
         catch
         {
-            userSounds = Array.Empty<string>();
+            return Array.Empty<string>();
         }
-        data["userSounds"] = userSounds;
     }
 
     private void ApplyBetaDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool plainChanged)
@@ -113,7 +116,9 @@ public sealed partial class SettingsBridge
                         _logger?.Warn($"SettingsBridge: pickSoundFile failed: {ex.Message}");
                         return Error("pick-failed");
                     }
-                    return JsonSerializer.Serialize(new { type = "soundFile", name }, WriteOptions);
+                    return name.Length == 0
+                        ? null
+                        : JsonSerializer.Serialize(new { type = "soundFile", name, userSounds = ReadUserSounds() }, WriteOptions);
                 }
                 case "previewSound":
                 {

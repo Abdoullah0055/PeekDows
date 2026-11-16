@@ -38,6 +38,28 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     }
 
     [Fact]
+    public void SoundImport_ReturnsUpdatedLibraryWithoutASnapshot()
+    {
+        _controller.PickedSound = "new.wav";
+        _controller.UserSounds = ["old.wav", "new.wav"];
+
+        var reply = _bridge.HandleMessage("""{"type":"pickSoundFile"}""");
+        using var document = JsonDocument.Parse(Assert.IsType<string>(reply));
+        var message = document.RootElement;
+
+        Assert.Equal("soundFile", message.GetProperty("type").GetString());
+        Assert.Equal("new.wav", message.GetProperty("name").GetString());
+        Assert.Equal(_controller.UserSounds, message.GetProperty("userSounds").Deserialize<string[]>());
+        Assert.False(message.TryGetProperty("data", out _));
+    }
+
+    [Fact]
+    public void SoundImport_CancelDoesNotRefreshSettings()
+    {
+        Assert.Null(_bridge.HandleMessage("""{"type":"pickSoundFile"}"""));
+    }
+
+    [Fact]
     public void Snapshot_NullHintMode_FallsBackToOverlay()
     {
         _settings.FocusHintMode = null!;
@@ -398,8 +420,10 @@ public sealed class SettingsBridgeBetaTests : IDisposable
             SoundChanged?.Invoke(false);
         }
 
-        public string[] GetUserSounds() => Array.Empty<string>();
-        public string PickArrangeSoundFile() => "";
+        public string[] UserSounds { get; set; } = [];
+        public string PickedSound { get; set; } = "";
+        public string[] GetUserSounds() => UserSounds;
+        public string PickArrangeSoundFile() => PickedSound;
         public void DeleteArrangeSoundFile(string name) { }
         public void PreviewArrangeSound(string name) { }
     }
