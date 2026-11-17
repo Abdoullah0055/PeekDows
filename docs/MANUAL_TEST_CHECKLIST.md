@@ -126,18 +126,18 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Un-ignore confirm: on the Ignored apps page uncheck an entry → a dark confirm modal names the app → "Keep ignoring" leaves it checked and untouched; "Stop ignoring" + Save removes it from `settings.json`.
 - [ ] Ignored classes stay collapsed under "Advanced: window classes" and still save one-entry-per-line.
 
-## Beta — Arrange sound (bibliothèque + auto-off)
-- [ ] Beta → Arrange sound : les 3 presets jouent en preview (sans Save) ; upload MP3/WAV → apparaît dans « Mes sons » ; fichier invalide/>5 Mo → refusé proprement.
+## Layout — Arrange sound (bibliothèque + auto-off)
+- [ ] Layout → Arrange sound : les 3 presets jouent en preview (sans Save) ; upload MP3/WAV → apparaît dans « Mes sons » ; fichier invalide/>5 Mo → refusé proprement.
 - [ ] Supprimer un son perso → confirmation + retour sur `chime-soft` si c'était le sélectionné ; presets d'usine non-supprimables.
 - [ ] Activer et enregistrer → Arrange Now avec fenêtres → son audible ; arrange vide/en pause → silence.
 - [ ] Auto-off : picker tambour heures (0-23) + minutes (00-59) style horloge iOS, scroll + clic, surbrillance suivie ; Save persiste le total en minutes (`soundAutoOffMinutes`).
 - [ ] Auto-off : activer avec 1 h 30 → passé l'échéance, extinction + Save ; Save arme désormais la deadline (bug corrigé : avant, elle ne s'armait jamais depuis les réglages).
 - [ ] Fichier son supprimé à la main → arrange silencieux + warn dans le log, pas de crash.
 
-## Beta — Direction hints (pie overlay, Ctrl+Win hold)
-- [ ] Settings → Beta → Focus hints : Off/Overlay suit le mode, `settings.json:focusHintMode` suit après Save.
+## General — Direction hints (pie overlay, Ctrl+Win hold)
+- [ ] Settings → General → Focus hints : Off/Overlay suit le mode, `settings.json:focusHintMode` suit après Save.
 - [ ] `Ctrl+Win` tenu → cercle en parts vers les slots occupés (2 apps en diagonale → 2 parts, 4 → 4, 8 → 8, trou central sur l'ancre) ; part active blanche + glow ; release d'une touche → disparition.
-- [ ] Beta → « Show app icons in wedges » coché (défaut) : chaque part affiche le logo de son app, part active en blanc ; console/sans icône → pastille avec initiale ; décoché → parts seules ; Save persiste.
+- [ ] General → « Show app icons in the overlay » coché (défaut) : chaque part affiche le logo de son app, part active en blanc ; console/sans icône → pastille avec initiale ; décoché → parts seules ; Save persiste.
 - [ ] DPI 125/150 % : logos nets, pas flous ; gestes répétés : pas de fuite de handles GDI (compteur stable dans le Gestionnaire des tâches).
 - [ ] 3e touche pendant le tenu (`D`, flèches, `Tab`, lettre) → geste annulé aussitôt, la touche atteint sa cible (ex. `Ctrl+Win+D` crée un bureau, `Ctrl+Win+←/→` change de bureau).
 - [ ] `Win` relâché en dernier (seul) → noter si le menu Démarrer s'ouvre (cas à trancher — relâcher `Win` en premier en attendant).

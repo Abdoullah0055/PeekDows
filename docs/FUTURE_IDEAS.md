@@ -15,8 +15,8 @@ dropped, `Spotlight`→`Off`, `Both`→`Overlay` migration).
 dispose friction (WFO1000 build friction), 4-mode confusion (`Off/Overlay/Spotlight/
 Both`), tray↔desktop sync gaps — and no time to fix them properly right now.
 
-**Re-entry criteria:** the arrows-only overlay (v5) is validated at 100% and promoted
-out of Beta first. Only then re-evaluate spotlight as an optional extra, with its own
+**Re-entry criteria:** the directional focus overlay stays validated in General after promotion
+from Beta. Re-evaluate spotlight as an optional extra, with its own
 Beta cycle and a mandatory `FocusHintModeChanged`-style live-sync event from day one.
 
 ## Dépannage — langue clavier & Task Manager

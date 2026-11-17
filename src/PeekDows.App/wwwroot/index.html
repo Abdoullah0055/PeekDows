@@ -35,7 +35,7 @@
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>
           Ignored apps
         </button>
-        <button class="navitem" data-page="beta">🧪 Beta <span class="chip">BETA</span></button>
+        <button class="navitem" data-page="beta">Beta</button>
         <button class="navitem" data-page="guide" lang="fr">Guide de démarrage</button>
         <div class="foot" role="status"><span class="dot" aria-hidden="true"></span><span id="statusFoot">—</span></div>
       </nav>
@@ -65,10 +65,6 @@
               <label class="switch"><input type="checkbox" data-key="animate"><span class="track"></span><span class="thumb"></span></label>
             </div>
             <div class="row">
-              <div class="txt"><div class="t">Directional focus</div><div class="d">Hold <span class="kbd">Ctrl</span>+<span class="kbd">Win</span> and flick the mouse toward a screen zone to focus that slot. Any other key cancels.</div></div>
-              <label class="switch"><input type="checkbox" data-key="directionalFocus"><span class="track"></span><span class="thumb"></span></label>
-            </div>
-            <div class="row">
               <div class="txt"><div class="t">Start with Windows</div><div class="d">Create a shortcut in the Startup folder.</div></div>
               <label class="switch"><input type="checkbox" data-key="startWithWindows"><span class="track"></span><span class="thumb"></span></label>
             </div>
@@ -92,6 +88,30 @@
               </select>
               <button class="btn" id="pauseFor" disabled>Pause</button>
               <button class="btn" id="resume" hidden>Resume</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="row">
+              <div class="txt"><div class="t">Directional focus</div><div class="d">Hold <span class="kbd">Ctrl</span>+<span class="kbd">Win</span> and flick the mouse toward a screen zone to focus that slot. Any other key cancels.</div></div>
+              <label class="switch"><input type="checkbox" data-key="directionalFocus"><span class="track"></span><span class="thumb"></span></label>
+            </div>
+            <div class="row">
+              <div class="txt"><div class="t">Directional focus threshold</div><div class="d">How far the mouse must travel (px) before a zone is triggered.</div></div>
+              <div class="slidercell">
+                <input type="range" min="20" max="150" step="5" data-key="thresholdPx" id="threshold">
+                <span class="kbd" id="thresholdValue">50 px</span>
+              </div>
+            </div>
+            <div class="row">
+              <div class="txt"><div class="t">Focus hints</div><div class="d">Show the directional focus overlay while holding Ctrl+Win.</div></div>
+              <div class="segmented" id="hintmode">
+                <button class="seg" data-hintmode="Off">Off</button>
+                <button class="seg" data-hintmode="Overlay">Overlay</button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="txt"><div class="t">Show app icons in the overlay</div><div class="d">Show the app icon or an initial in each direction.</div></div>
+              <label class="switch"><input type="checkbox" data-key="overlayShowIcons"><span class="track"></span><span class="thumb"></span></label>
             </div>
           </div>
         </section>
@@ -151,13 +171,6 @@
               <div class="txt"><div class="t">Reposition maximized windows</div><div class="d">When off (default), windows you maximized yourself are never touched.</div></div>
               <label class="switch"><input type="checkbox" data-key="allowRepositionMaximized"><span class="track"></span><span class="thumb"></span></label>
             </div>
-            <div class="row">
-              <div class="txt"><div class="t">Directional focus threshold</div><div class="d">How far the mouse must travel (px) before a zone is triggered.</div></div>
-              <div class="slidercell">
-                <input type="range" min="20" max="150" step="5" data-key="thresholdPx" id="threshold">
-                <span class="kbd" id="thresholdValue">50 px</span>
-              </div>
-            </div>
           </div>
           <div class="card">
             <div class="row">
@@ -167,6 +180,40 @@
             <div class="row">
               <div class="txt"><div class="t">Next window in zone</div><div class="d">Cycle stacked windows after using Halves or Thirds.</div></div>
               <button class="btn" id="cycleZoneWindow">Activate next</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="row" style="border-top:none">
+              <div class="txt"><div class="t">Arrange sound</div><div class="d">Short chime played after each successful arrange. Off by default.</div></div>
+              <label class="switch"><input type="checkbox" data-key="soundEnabled"><span class="track"></span><span class="thumb"></span></label>
+            </div>
+            <div class="row" style="display:block">
+              <div class="txt"><div class="t">Preset</div><div class="d">Factory chimes (click previews the sound).</div></div>
+              <div class="segmented" id="sounds">
+                <button class="seg" data-sound="chime-soft">Chime soft</button>
+                <button class="seg" data-sound="whoosh-wind">Whoosh wind</button>
+                <button class="seg" data-sound="pop-minimal">Pop minimal</button>
+              </div>
+            </div>
+            <div class="row" style="display:block">
+              <div class="txt"><div class="t">Mes sons</div><div class="d">MP3/WAV up to 5 MB, stored in %APPDATA%\PeekDows\sounds\.</div></div>
+              <div id="userSounds"></div>
+              <div style="margin-top:8px"><button class="btn" id="addSound">Ajouter un son</button></div>
+            </div>
+            <div class="row" style="display:block">
+              <div class="txt"><div class="t">Auto-off</div><div class="d">How long the sound stays on. 0 h 00 = permanent.</div></div>
+              <div class="dur" id="soundDur" role="group" aria-label="Auto-off duration">
+                <div class="dur-col">
+                  <div class="dur-wheel" id="durH" tabindex="0" aria-label="Hours"></div>
+                  <div class="dur-unit">h</div>
+                </div>
+                <div class="dur-sep">:</div>
+                <div class="dur-col">
+                  <div class="dur-wheel" id="durM" tabindex="0" aria-label="Minutes"></div>
+                  <div class="dur-unit">min</div>
+                </div>
+                <div class="dur-band" aria-hidden="true"></div>
+              </div>
             </div>
           </div>
         </section>
@@ -249,55 +296,7 @@
 
         <!-- BETA -->
         <section class="page" id="page-beta">
-          <h2>Beta Features</h2>
-          <p class="sub">En test — promu vers Layout quand validé. Changes apply when you press Save.</p>
-          <div class="card">
-            <div class="row" style="border-top:none">
-              <div class="txt"><div class="t">Focus hints</div><div class="d">Arrows-only overlay shown when directional focus triggers. Off disables all hints.</div></div>
-              <div class="segmented" id="hintmode">
-                <button class="seg" data-hintmode="Off">Off</button>
-                <button class="seg" data-hintmode="Overlay">Overlay</button>
-              </div>
-            </div>
-            <div class="row">
-              <div class="txt"><div class="t">Show app icons in wedges</div><div class="d">Window logo in each pie slice, letter tile fallback.</div></div>
-              <label class="switch"><input type="checkbox" data-key="overlayShowIcons"><span class="track"></span><span class="thumb"></span></label>
-            </div>
-          </div>
-          <div class="card">
-            <div class="row" style="border-top:none">
-              <div class="txt"><div class="t">Arrange sound</div><div class="d">Short chime played after each successful arrange. Off by default.</div></div>
-              <label class="switch"><input type="checkbox" data-key="soundEnabled"><span class="track"></span><span class="thumb"></span></label>
-            </div>
-            <div class="row" style="display:block">
-              <div class="txt"><div class="t">Preset</div><div class="d">Factory chimes (click previews the sound).</div></div>
-              <div class="segmented" id="sounds">
-                <button class="seg" data-sound="chime-soft">Chime soft</button>
-                <button class="seg" data-sound="whoosh-wind">Whoosh wind</button>
-                <button class="seg" data-sound="pop-minimal">Pop minimal</button>
-              </div>
-            </div>
-            <div class="row" style="display:block">
-              <div class="txt"><div class="t">Mes sons</div><div class="d">MP3/WAV up to 5 MB, stored in %APPDATA%\PeekDows\sounds\.</div></div>
-              <div id="userSounds"></div>
-              <div style="margin-top:8px"><button class="btn" id="addSound">Ajouter un son</button></div>
-            </div>
-            <div class="row" style="display:block">
-              <div class="txt"><div class="t">Auto-off</div><div class="d">How long the sound stays on. 0 h 00 = permanent.</div></div>
-              <div class="dur" id="soundDur" role="group" aria-label="Auto-off duration">
-                <div class="dur-col">
-                  <div class="dur-wheel" id="durH" tabindex="0" aria-label="Hours"></div>
-                  <div class="dur-unit">h</div>
-                </div>
-                <div class="dur-sep">:</div>
-                <div class="dur-col">
-                  <div class="dur-wheel" id="durM" tabindex="0" aria-label="Minutes"></div>
-                  <div class="dur-unit">min</div>
-                </div>
-                <div class="dur-band" aria-hidden="true"></div>
-              </div>
-            </div>
-          </div>
+          <h2>Beta</h2>
         </section>
         <section class="page" id="page-guide" lang="fr">
           <h2>Guide de démarrage</h2>

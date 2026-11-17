@@ -83,7 +83,7 @@ Settings are stored at `%APPDATA%\PeekDows\settings.json`.
 
 > **Note on `Hotkeys` / `OverflowBehavior`**: Hotkeys arrangeNow/pauseResume are editable from Settings → Hotkeys; `OverflowBehavior` is deprecated and has no effect — both are kept for backward compatibility.
 
-Open Settings from the tray menu or by double-clicking the tray icon. In the modern WebView2 window, preference changes apply when you press Save. **General** also shows the current status and lets you pause arranging for a set duration. **Beta** contains focus hints and arrange sounds, and **About** opens the logs. Without WebView2, the basic settings window provides these commands and the ignore lists.
+Open Settings from the tray menu or by double-clicking the tray icon. In the modern WebView2 window, preference changes apply when you press Save. **General** also shows the current status and lets you pause arranging for a set duration. **General** also contains directional focus and its overlay settings. **Layout** contains arrange sounds, and **About** opens the logs. Without WebView2, the basic settings window provides these commands and the ignore lists.
 
 A monitor with exactly **one** arrangeable window gets that window **natively maximized** (instead of a 90% slot). If you manually restore a window PeekDows had maximized, it is left alone until a window opens or closes on that monitor.
 

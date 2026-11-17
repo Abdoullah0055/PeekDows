@@ -54,7 +54,7 @@ function adoptSnapshot(data) {
   deferredSnapshot = null;
   $("externalBanner").hidden = true;
   state.snapshot = data;
-  // Beta default on both copies: keeps dirty tracking exact even if an older
+  // Preference defaults on both copies: keeps dirty tracking exact even if an older
   // bridge ever omits this key (undefined vs default would read as dirty).
   state.snapshot.focusHintMode ??= "Overlay";
   state.snapshot.layoutMode ??= "Grid";
@@ -661,7 +661,7 @@ function renderLayoutModeSelection(mode) {
   if (legend) legend.style.display = mode === "Grid" ? "" : "none";
 }
 
-// ---------- arrange sound (beta) ----------
+// ---------- arrange sound ----------
 for (const btn of document.querySelectorAll("#sounds .seg")) {
   btn.addEventListener("click", () => {
     if (!state.draft) return;
