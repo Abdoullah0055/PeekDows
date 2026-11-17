@@ -16,7 +16,7 @@
 ; ===========================================================================
 
 #define MyAppName        "PeekDows"
-#define MyAppVersion     "0.1.0"
+#define MyAppVersion     "0.2.0"
 #define MyAppPublisher   "PeekDows"
 #define MyAppExeName     "PeekDows.App.exe"
 #define MyAppURL         "https://github.com/Abdoullah0055/PeekDows"
