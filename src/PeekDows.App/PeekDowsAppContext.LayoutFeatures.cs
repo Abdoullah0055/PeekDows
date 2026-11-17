@@ -10,7 +10,6 @@ public partial class PeekDowsAppContext
     private sealed record ZoneWindow(IntPtr Handle, int Process, string Title);
     private sealed record StackedZone(Rect Area, ZoneWindow[] Windows);
     private StackedZone[] _stackedZones = [];
-    private IntPtr _lastCycledWindow;
 
     public void PreviewArrange()
     {
@@ -83,43 +82,47 @@ public partial class PeekDowsAppContext
             .Select(group => new StackedZone(group.Key.TargetRect, group.Select(placement =>
                 new ZoneWindow(placement.Hwnd, known[placement.Hwnd].ProcessId,
                     known[placement.Hwnd].Title)).ToArray())).ToArray();
-        _lastCycledWindow = IntPtr.Zero;
     }
 
     public void CycleZoneWindow()
     {
-        var foreground = NativeMethods.GetForegroundWindow();
-        var pointer = Cursor.Position;
-        var zone = _stackedZones.FirstOrDefault(stack => stack.Windows.Any(window => window.Handle == foreground))
-            ?? _stackedZones.FirstOrDefault(stack => stack.Area.Left <= pointer.X && pointer.X < stack.Area.Right &&
-                stack.Area.Top <= pointer.Y && pointer.Y < stack.Area.Bottom)
-            ?? _stackedZones.FirstOrDefault(stack => stack.Windows.Any(window => window.Handle == _lastCycledWindow));
-        if (zone is null && _stackedZones.Length == 1) zone = _stackedZones[0];
-        if (zone is null && _stackedZones.Length > 1) zone = SelectStackedZone();
+        // Settings owns focus and the pointer when this runs. Ask which stack
+        // to use when there are several, then find its topmost app window.
+        var choices = _stackedZones.Select(zone => zone with
+            { Windows = zone.Windows.Where(window => IsStillInZone(window, zone.Area)).ToArray() })
+            .Where(zone => zone.Windows.Length > 1).ToArray();
+        if (choices.Length == 0)
+        {
+            MessageBox.Show("Arrange at least two windows in the same Halves or Thirds zone first.",
+                "Next window in zone", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        var zone = choices.Length == 1 ? choices[0] : SelectStackedZone(choices);
         if (zone is null) return;
 
-        var available = zone.Windows.Where(window =>
-        {
-            if (!NativeMethods.IsWindow(window.Handle) || NativeMethods.IsIconic(window.Handle) ||
-                !_virtualDesktopService.IsWindowOnCurrentVirtualDesktop(window.Handle) ||
-                !NativeMethods.GetWindowRect(window.Handle, out var rect))
-                return false;
-            NativeMethods.GetWindowThreadProcessId(window.Handle, out uint pid);
-            var x = rect.left + (rect.right - rect.left) / 2;
-            var y = rect.top + (rect.bottom - rect.top) / 2;
-            return pid == (uint)window.Process && zone.Area.Left <= x && x < zone.Area.Right &&
-                zone.Area.Top <= y && y < zone.Area.Bottom;
-        }).ToArray();
+        var available = zone.Windows.Where(window => IsStillInZone(window, zone.Area)).ToArray();
         if (available.Length < 2) return;
-        var index = Array.FindIndex(available, window => window.Handle == foreground);
-        if (index < 0) index = Array.FindIndex(available, window => window.Handle == _lastCycledWindow);
-        _lastCycledWindow = available[(index + 1) % available.Length].Handle;
-        _windowActivationService.Activate(_lastCycledWindow);
+        var handles = available.Select(window => window.Handle).ToHashSet();
+        var topmost = _discoveryService.GetTopLevelWindows().FirstOrDefault(window => handles.Contains(window.Hwnd));
+        var index = topmost is null ? -1 : Array.FindIndex(available, window => window.Handle == topmost.Hwnd);
+        _windowActivationService.Activate(available[(index + 1) % available.Length].Handle);
     }
 
-    private StackedZone? SelectStackedZone()
+    private bool IsStillInZone(ZoneWindow window, Rect area)
     {
-        var choices = _stackedZones;
+        if (!NativeMethods.IsWindowVisible(window.Handle) || NativeMethods.IsIconic(window.Handle) ||
+            !_virtualDesktopService.IsWindowOnCurrentVirtualDesktop(window.Handle) ||
+            !NativeMethods.GetWindowRect(window.Handle, out var rect))
+            return false;
+        NativeMethods.GetWindowThreadProcessId(window.Handle, out uint pid);
+        var x = rect.left + (rect.right - rect.left) / 2;
+        var y = rect.top + (rect.bottom - rect.top) / 2;
+        return pid == (uint)window.Process && area.Left <= x && x < area.Right &&
+            area.Top <= y && y < area.Bottom;
+    }
+
+    private static StackedZone? SelectStackedZone(StackedZone[] choices)
+    {
         using var dialog = new Form { Text = "Next window in zone", Width = 500, Height = 250,
             ShowInTaskbar = false, StartPosition = FormStartPosition.CenterScreen };
         var list = new ListBox { Dock = DockStyle.Fill, AccessibleName = "Stacked zones" };

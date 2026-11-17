@@ -12,6 +12,7 @@ const EDITABLE_KEYS = [
 
 const state = { snapshot: null, draft: null, dirty: false };
 let deferredSnapshot = null;
+let runtimeStatus = null;
 
 // User-imported sounds (read-only list from snapshot, refreshed via requestSnapshot).
 let userSounds = [];
@@ -43,6 +44,7 @@ window.chrome?.webview?.addEventListener("message", (event) => {
   if (msg.type === "settings") adoptSnapshot(msg.data);
   else if (msg.type === "externalChange") onExternalChange(msg.data);
   else if (msg.type === "applied") onApplied(msg);
+  else if (msg.type === "runtimeStatus") updateRuntimeStatus(msg.data);
   else if (msg.type === "soundFile") onSoundFile(msg);
   else if (msg.type === "windows") { windowsRows = msg.data ?? []; renderWindowsRows(); }
 });
@@ -65,6 +67,7 @@ function adoptSnapshot(data) {
   state.snapshot.hotkeys ??= {};
   userSounds = data.userSounds ?? [];
   state.draft = pick(data);
+  updateRuntimeStatus(runtimeStatus ?? data.runtime);
   setControlsFrom(data);
   markClean();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;
@@ -88,6 +91,7 @@ function onSoundFile(msg) {
 }
 
 function onExternalChange(data) {
+  updateRuntimeStatus(data.runtime);
   if (state.dirty) {
     deferredSnapshot = data;
     $("externalBanner").hidden = false;
@@ -95,6 +99,21 @@ function onExternalChange(data) {
     $("externalBanner").hidden = true;
     adoptSnapshot(data);
   }
+}
+
+function updateRuntimeStatus(runtime) {
+  if (!runtime) return;
+  runtimeStatus = runtime;
+  $("statusFoot").textContent = runtime.isPaused ? runtime.pauseDescription ?? "Paused" : "Running";
+  $("statusFoot").parentElement.classList.toggle("paused", runtime.isPaused);
+  $("pauseFor").disabled = false;
+  $("resume").hidden = !runtime.isPaused;
+  syncLayoutActions();
+}
+
+function syncLayoutActions() {
+  for (const id of ["editLayoutProfiles", "importLayout"]) $(id).disabled = state.dirty;
+  $("previewArrange").disabled = state.dirty || !!runtimeStatus?.isPaused || !state.snapshot?.enabled;
 }
 
 function onApplied(msg) {
@@ -140,6 +159,7 @@ function markClean() {
   $("saveBtn").disabled = true;
   $("unsaved").style.visibility = "hidden";
   $("unsaved").textContent = "● Unsaved changes";
+  syncLayoutActions();
 }
 
 function syncDirty() {
@@ -151,6 +171,7 @@ function syncDirty() {
   $("saveBtn").disabled = !dirty;
   $("unsaved").textContent = "● Unsaved changes";
   $("unsaved").style.visibility = dirty ? "visible" : "hidden";
+  syncLayoutActions();
 }
 
 // ---------- control bindings ----------
@@ -622,6 +643,12 @@ for (const btn of document.querySelectorAll("#layoutmode .seg")) {
   });
 }
 $("editLayoutProfiles")?.addEventListener("click", () => post({ type: "openLayoutProfiles" }));
+$("exportLayout").addEventListener("click", () => post({ type: "exportLayoutSettings" }));
+$("importLayout").addEventListener("click", () => post({ type: "importLayoutSettings" }));
+$("previewArrange").addEventListener("click", () => post({ type: "previewArrange" }));
+$("cycleZoneWindow").addEventListener("click", () => post({ type: "cycleZoneWindow" }));
+$("pauseFor").addEventListener("click", () => post({ type: "pauseFor", duration: $("pauseDuration").value }));
+$("resume").addEventListener("click", () => post({ type: "resume" }));
 
 function renderLayoutModeSelection(mode) {
   for (const b of document.querySelectorAll("#layoutmode .seg"))

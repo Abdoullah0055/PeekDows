@@ -26,6 +26,7 @@ public sealed partial class SettingsBridge
     private readonly FileLogger? _logger;
     private readonly Func<string> _appVersionProvider;
     private readonly Action? _openSettingsFolder;
+    private readonly Action<Action> _runDialog;
     private Func<System.Collections.Generic.IReadOnlyList<WindowRow>>? _windowsProvider;
 
     /// <summary>Raised when the UI reports its dirty state flipped (Save/Cancel footer).</summary>
@@ -37,7 +38,8 @@ public sealed partial class SettingsBridge
         FileLogger? logger = null,
         Func<string>? appVersionProvider = null,
         Action? openSettingsFolder = null,
-        Func<System.Collections.Generic.IReadOnlyList<WindowRow>>? windowsProvider = null)
+        Func<System.Collections.Generic.IReadOnlyList<WindowRow>>? windowsProvider = null,
+        Action<Action>? runDialog = null)
     {
         _controller = controller;
         _settingsService = settingsService;
@@ -45,6 +47,7 @@ public sealed partial class SettingsBridge
         _appVersionProvider = appVersionProvider ?? DefaultAppVersion;
         _openSettingsFolder = openSettingsFolder;
         _windowsProvider = windowsProvider;
+        _runDialog = runDialog ?? (action => action());
     }
 
     /// <summary>Injection alternative du provider Windows (utilisée par SettingsHostForm).</summary>
@@ -80,6 +83,11 @@ public sealed partial class SettingsBridge
     public string BuildExternalChangeMessage()
         => JsonSerializer.Serialize(new { type = "externalChange", data = SnapshotData() }, WriteOptions);
 
+    public string BuildRuntimeStatusMessage()
+        => JsonSerializer.Serialize(new { type = "runtimeStatus", data = RuntimeStatus() }, WriteOptions);
+
+    private object RuntimeStatus() => new { isPaused = _controller.IsPaused, pauseDescription = _controller.PauseDescription };
+
     private object SnapshotData()
     {
         var s = _controller.CurrentSettings;
@@ -97,6 +105,7 @@ public sealed partial class SettingsBridge
             ["thresholdPx"] = s.DirectionalFocusThresholdPx,
             ["version"] = s.Version,
             ["appVersion"] = _appVersionProvider(),
+            ["runtime"] = RuntimeStatus(),
         };
         AugmentSnapshotIgnored(data);
         AugmentSnapshotHotkeys(data);
@@ -150,7 +159,34 @@ public sealed partial class SettingsBridge
                     _openSettingsFolder?.Invoke();
                     return null;
                 case "openLayoutProfiles":
-                    _controller.OpenLayoutProfiles();
+                    _runDialog(_controller.OpenLayoutProfiles);
+                    return null;
+                case "exportLayoutSettings":
+                    _runDialog(_controller.ExportLayoutSettings);
+                    return null;
+                case "importLayoutSettings":
+                    _runDialog(_controller.ImportLayoutSettings);
+                    return null;
+                case "previewArrange":
+                    _runDialog(_controller.PreviewArrange);
+                    return null;
+                case "cycleZoneWindow":
+                    _runDialog(_controller.CycleZoneWindow);
+                    return null;
+                case "pauseFor":
+                    if (!root.TryGetProperty("duration", out var duration) || duration.ValueKind != JsonValueKind.String)
+                        return Error("invalid-pause-duration");
+                    switch (duration.GetString())
+                    {
+                        case "5": _controller.PauseFor(TimeSpan.FromMinutes(5)); break;
+                        case "15": _controller.PauseFor(TimeSpan.FromMinutes(15)); break;
+                        case "60": _controller.PauseFor(TimeSpan.FromHours(1)); break;
+                        case "manual": _controller.PauseUntilResumed(); break;
+                        default: return Error("invalid-pause-duration");
+                    }
+                    return null;
+                case "resume":
+                    _controller.Resume();
                     return null;
                 case "dirtyChanged":
                     bool dirty = root.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.True;

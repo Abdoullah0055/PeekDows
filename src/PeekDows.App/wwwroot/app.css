@@ -7,7 +7,7 @@
   --muted: #A8A8A8;       /* ModernTrayPalette.Muted */
   --accent: #4CC2FF;      /* ModernTrayPalette.Accent */
   --accent-dim: rgba(76, 194, 255, .14);
-  --green: #6CCB5F;       /* ModernTrayPalette.StatusRunning */
+  --green: #6CCB5F;
   --radius: 10px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -51,6 +51,12 @@ body {
 .sidebar .foot .dot {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--green); margin-right: 6px;
+}
+.sidebar .foot.paused .dot { background: var(--muted); }
+#pauseDuration {
+  color-scheme: dark;
+  font: inherit; font-size: 13px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 7px; padding: 7px 8px;
 }
 
 /* Content */

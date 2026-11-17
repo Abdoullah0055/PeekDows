@@ -33,7 +33,7 @@ function runInSettingsPage(scenario) {
     },
   };
   const window = { addEventListener(name, callback) { this[name] = callback; }, chrome: { webview: {
-    addEventListener() {},
+    addEventListener(name, callback) { this[name] = callback; },
     postMessage(message) { sent.push(message); },
   } } };
   vm.runInNewContext(script + "\n" + scenario, { assert, document, sent, window, setTimeout: callback => callback() });
@@ -95,6 +95,31 @@ test("Cancel restores the latest external snapshot and keeps newly imported soun
     assert.equal(state.dirty, false);
     assert.equal(userSounds[1], "new.wav");
     assert.equal($("externalBanner").hidden, true);
+  `);
+});
+
+test("timed pause updates status without resetting an unsaved draft", () => {
+  runInSettingsPage(`
+    $("statusFoot").parentElement = { classList: { toggle() {} } };
+    const receive = data => window.chrome.webview.message({ data });
+    receive({ type: "settings", data: { enabled: true, animate: true, runtime: { isPaused: false } } });
+    state.draft.animate = false;
+    syncDirty();
+    $("pauseDuration").value = "15";
+    $("pauseFor").click();
+    assert.equal(JSON.stringify(sent.at(-1)), '{"type":"pauseFor","duration":"15"}');
+    receive({ type: "runtimeStatus", data: { isPaused: true, pauseDescription: "Paused until 14:30" } });
+    assert.equal($("statusFoot").textContent, "Paused until 14:30");
+    assert.equal($("resume").hidden, false);
+    assert.equal(state.draft.animate, false);
+    assert.equal($("externalBanner").hidden, true);
+    $("cancelBtn").click();
+    assert.equal($("statusFoot").textContent, "Paused until 14:30");
+    assert.equal($("previewArrange").disabled, true);
+    $("resume").click();
+    assert.equal(sent.at(-1).type, "resume");
+    receive({ type: "runtimeStatus", data: { isPaused: false } });
+    assert.equal($("previewArrange").disabled, false);
   `);
 });
 

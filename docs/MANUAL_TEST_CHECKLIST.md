@@ -11,8 +11,8 @@
 
 - [ ] Tray icon visible in system tray
 - [ ] Right-click shows context menu
-- [ ] Menu items in correct order: Status → Arrange Now → Pause → Pause for → **Separator** → Enable Auto Arrange → Start with Windows → **Separator** → Settings → Open Log File → Open Logs Folder → **Separator** → Exit
-- [ ] "Status: Running" is disabled (grayed out, non-clickable)
+- [ ] Menu order: Arrange Now → Undo arrange (when available) → Pause/Resume → **Separator** → Settings → **Separator** → Exit
+- [ ] The Settings sidebar shows the current status; the tray tooltip shows the pause state.
 
 ## 2. Arrange Now
 
@@ -22,29 +22,28 @@
 
 ## 3. Pause / Resume
 
-- [ ] Click "Pause" → status changes to "Status: Paused (until resumed)"
-- [ ] While paused, click "Arrange Now" → no arrangement occurs
-- [ ] While paused, click "Resume" (changed from "Pause") → status returns to "Status: Running"
+- [ ] Click "Pause" → status shows "Pause enabled until resumed"
+- [ ] While paused, "Arrange Now" is disabled
+- [ ] While paused, click "Resume" (changed from "Pause") → status returns to "Running"
 - [ ] After resume, auto-arrange resumes but does NOT trigger an immediate arrange
 
 ## 4. Pause for Duration
 
-- [ ] Click "Pause for → 5 minutes" → status shows "Status: Paused (5 min remaining)"
-- [ ] Click "Pause for → 15 minutes" → status updates accordingly
-- [ ] Click "Pause for → 1 hour" → status updates accordingly
-- [ ] Click "Pause for → Until manually resumed" → status shows "Status: Paused (until resumed)"
-- [ ] Pause expires automatically → status returns to "Status: Running", no surprise arrange
+- [ ] In Settings → General, select 5 minutes and click "Pause" → status shows the end time.
+- [ ] Repeat with 15 minutes and 1 hour → end time updates accordingly.
+- [ ] Select "Until manually resumed" and click "Pause" → status has no end time.
+- [ ] Timed pause expires automatically → status returns to "Running", no surprise arrange.
 
 ## 5. Auto Arrange Toggle
 
-- [ ] "Enable Auto Arrange" has checkmark when Auto Arrange is on
-- [ ] Click "Enable Auto Arrange" → checkmark toggles, auto-arrange service starts/stops
+- [ ] In Settings → General, "Auto arrange" matches the current setting.
+- [ ] Toggle "Auto arrange" and Save → auto-arrange service starts/stops.
 - [ ] State persists after app restart
 
 ## 6. Start with Windows
 
-- [ ] "Start with Windows" has checkmark when enabled
-- [ ] Click "Start with Windows" → shortcut created/removed in Startup folder
+- [ ] In Settings → General, "Start with Windows" matches the current setting.
+- [ ] Toggle "Start with Windows" and Save → shortcut created/removed in Startup folder.
 - [ ] Setting persists after app restart
 
 ## 7. Hotkeys
@@ -80,8 +79,8 @@
 
 ## 12. Log Files
 
-- [ ] Click "Open Log File" → log file opens in default text editor
-- [ ] Click "Open Logs Folder" → folder opens in Explorer
+- [ ] In Settings → About, open "Log file" → log opens in default text editor.
+- [ ] In Settings → About, open "Logs folder" → folder opens in Explorer.
 - [ ] Log file at `%APPDATA%\PeekDows\logs\peekdows.log` contains entries
 
 ## 13. Exit
@@ -112,16 +111,15 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Tray → Settings opens the dark WebView2 window; sidebar shows General / Layout / About active and Windows / Hotkeys / Ignored apps disabled with "v2" chips.
 - [ ] Every switch renders with the current settings values (compare with `%APPDATA%\PeekDows\settings.json`).
 - [ ] Editing any control shows "● Unsaved changes" and enables Save; reverting the edit hides it again (dirty tracking flips off).
-- [ ] Save applies and the tray reflects it: Auto Arrange label flips, Start with Windows checkbox follows, Window size preset radio moves.
+- [ ] Save applies Auto arrange, Start with Windows and the Window size preset.
 - [ ] Layout preset Small/Medium/Large animates the live preview; after Save the actual windows re-arrange at the new ratio.
 - [ ] Directional focus threshold slider updates the px chip while dragging; persisted after Save (check settings.json).
 - [ ] About tab: version line matches the app version; "Open" buttons open the log file, the logs folder and the settings folder respectively.
 - [ ] Close with unsaved changes → confirmation dialog; "No" keeps the window open.
-- [ ] While the window is open and the draft is clean, toggling from the tray updates the UI silently.
-- [ ] While the draft is dirty, a tray toggle shows the amber "changed from the tray" banner instead of clobbering.
+- [ ] Pause or resume from the tray with Settings open → the sidebar status updates without touching the draft or showing a settings change banner.
 - [ ] Cancel closes the window without applying anything (verify settings.json untouched).
 - [ ] DPI: repeat opening at 100%, 125% and 150% scaling — the window stays crisp and usable.
-- [ ] Fallback: temporarily break WebView2 (e.g. set env var `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to an invalid path), reopen Settings → legacy window opens and the log warns.
+- [ ] Fallback: temporarily break WebView2 (e.g. set env var `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to an invalid path), reopen Settings → basic General, Layout, About and Ignored apps tabs open and the log warns.
 - [ ] Ignored apps search-and-check: open a test app (e.g. Notepad), on the Ignored apps page type its name → it appears with a checkbox → check it → Save → it is in `%APPDATA%\PeekDows\settings.json`; close the app and PeekDows, reopen both → the entry is still listed (persistence).
 - [ ] Hotkeys: change Pause / resume from `Ctrl+Alt+P` to `Ctrl+Alt+O`, Save → the new combo toggles pause; then try a conflicting combo, Save → an error is shown and the previous combo still works.
 - [ ] Windows: open the Windows page, Refresh → rows are listed (title, process, eligibility); click "Ignorer ce process" on a row → the process appears checked in the Ignored apps list (Save still required to apply).
@@ -131,15 +129,15 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 ## Beta — Arrange sound (bibliothèque + auto-off)
 - [ ] Beta → Arrange sound : les 3 presets jouent en preview (sans Save) ; upload MP3/WAV → apparaît dans « Mes sons » ; fichier invalide/>5 Mo → refusé proprement.
 - [ ] Supprimer un son perso → confirmation + retour sur `chime-soft` si c'était le sélectionné ; presets d'usine non-supprimables.
-- [ ] Activer → Arrange Now avec fenêtres → son audible ; arrange vide/en pause → silence ; toggle tray suit, tray→Beta suit sans Save.
+- [ ] Activer et enregistrer → Arrange Now avec fenêtres → son audible ; arrange vide/en pause → silence.
 - [ ] Auto-off : picker tambour heures (0-23) + minutes (00-59) style horloge iOS, scroll + clic, surbrillance suivie ; Save persiste le total en minutes (`soundAutoOffMinutes`).
 - [ ] Auto-off : activer avec 1 h 30 → passé l'échéance, extinction + Save ; Save arme désormais la deadline (bug corrigé : avant, elle ne s'armait jamais depuis les réglages).
 - [ ] Fichier son supprimé à la main → arrange silencieux + warn dans le log, pas de crash.
 
 ## Beta — Direction hints (pie overlay, Ctrl+Win hold)
-- [ ] Tray → Direction hints ▸ Off/Overlay : radio suit le mode, `settings.json:focusHintMode` suit après clic.
+- [ ] Settings → Beta → Focus hints : Off/Overlay suit le mode, `settings.json:focusHintMode` suit après Save.
 - [ ] `Ctrl+Win` tenu → cercle en parts vers les slots occupés (2 apps en diagonale → 2 parts, 4 → 4, 8 → 8, trou central sur l'ancre) ; part active blanche + glow ; release d'une touche → disparition.
-- [ ] Beta → « Show app icons in wedges » coché (défaut) : chaque part affiche le logo de son app, part active en blanc ; console/sans icône → pastille avec initiale ; décoché → parts seules ; Save persiste, tray↔Beta en sync.
+- [ ] Beta → « Show app icons in wedges » coché (défaut) : chaque part affiche le logo de son app, part active en blanc ; console/sans icône → pastille avec initiale ; décoché → parts seules ; Save persiste.
 - [ ] DPI 125/150 % : logos nets, pas flous ; gestes répétés : pas de fuite de handles GDI (compteur stable dans le Gestionnaire des tâches).
 - [ ] 3e touche pendant le tenu (`D`, flèches, `Tab`, lettre) → geste annulé aussitôt, la touche atteint sa cible (ex. `Ctrl+Win+D` crée un bureau, `Ctrl+Win+←/→` change de bureau).
 - [ ] `Win` relâché en dernier (seul) → noter si le menu Démarrer s'ouvre (cas à trancher — relâcher `Win` en premier en attendant).
@@ -147,7 +145,6 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] `Esc` / clic pendant le tenu → annulation, pas d'activation surprise.
 - [ ] Spam de gestes : jamais de flip de langue, jamais de majuscules fantômes (rien n'est avalé, aucun hook installé).
 - [ ] Typing normal (`Ctrl+C`, `Alt+Tab`, `Win+D` sans `Ctrl`) → inchangé.
-- [ ] Settings → Beta : segmented Off/Overlay, Save → tray suit ; tray → Beta suit sans Save (bannière si draft dirty).
 - [ ] Overlay n'est jamais arrangé (classifier : titre `PeekDowsHintOverlay` exclu).
 - [ ] Overlay : disque de base à peine visible, parts grises semi-transparentes, active blanche + glow ; aucun flash à l'apparition, fade ~140ms.
 - [ ] Fonds clairs + sombres : pas de franges autour des parts ; 125%/150% DPI : cercle net et bien dimensionné.
@@ -168,15 +165,17 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] Ctrl+Win+Z a froid (sans geste) = undo seul, sans ouvrir le menu Demarrer ni changer de bureau
 - [ ] Ctrl+Win+Z en plein geste directionnel (Ctrl+Win tenu) = le geste meurt ET l'undo s'execute
 - [ ] Hotkey deja pris par un autre programme -> warn dans le log, pas de crash
-- [ ] Item tray "Undo arrange" desactive quand aucun undo disponible, active apres un arrange
+- [ ] Item tray "Undo arrange" masqué sans historique, visible après un arrange.
 
 ## 17. Layout Modes (Grid / Halves / Thirds)
 
 - [ ] Layout -> Halves : 2 fenetres = gauche/droite 50/50 pleine hauteur ; 3e fenetre -> Left,Right,Left
 - [ ] Layout -> Thirds : 3 colonnes jointives SANS gap ni overlap (2/3/4 fenetres) ; log `Placement verification clean` (post-animation, significatif)
 - [ ] Si `Placement deviation` stabilise dans le log -> noter l'app + attendu vs reel (taille mini clampée : cas documenté, pas force)
-- [ ] Changer de mode (tray ou Save) = re-arrange immediat visible
-- [ ] Preview Layout = realite a l'ecran ; Save persiste layoutMode ; tray <-> Beta en sync
+- [ ] Changer de mode dans Settings → Layout et sauvegarder = re-arrange immédiat visible.
+- [ ] Preview Layout = réalité à l'écran ; Save persiste layoutMode.
+- [ ] Settings → Layout : lancer « Preview arrange », puis Annuler ou Appliquer ; exporter puis importer un fichier de réglages.
+- [ ] Avec plusieurs zones empilées, « Next window in zone » demande quelle pile utiliser, même si Settings est affiché au-dessus d'une zone.
 - [ ] Cercle directionnel coherent : 2 parts en Halves, 3 en Thirds
 - [ ] Mode invalide dans settings.json -> Grid, app demarre
 - [ ] Page Layout : preset SOUS le mode ; preset visible en Grid uniquement, cache en Halves/Thirds ; retour Grid = ancienne valeur restauree

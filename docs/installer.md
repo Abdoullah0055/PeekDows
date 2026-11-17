@@ -91,13 +91,13 @@ launches `PeekDows.App.exe --enable-startup`, which reuses the app's existing
 
 1. Create `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\PeekDows.lnk`
    pointing at the **installed** executable (`Environment.ProcessPath`).
-2. Flip the `StartWithWindows` setting to `true` so the tray menu checkmark and
+2. Flip the `StartWithWindows` setting to `true` so the Settings switch and
    the shortcut stay in sync.
 
 The shortcut's `TargetPath` always points to the installed exe (never the dev
 build), and its icon is taken from the installed exe (`IconLocation = "<exe>,0"`).
 
-- If the user later **disables** "Start with Windows" from the tray, the
+- If the user later **disables** "Start with Windows" in Settings → General, the
   `StartupService` deletes the shortcut — same one the installer enabled.
 - If the user **re-enables** it, the shortcut is recreated pointing at the
   installed exe.
@@ -115,7 +115,7 @@ After generating `PeekDowsSetup-x64.exe`:
 5. Confirm the Startup shortcut points at the installed exe (right-click →
    Properties → Target).
 6. **Reboot Windows** → confirm PeekDows starts automatically.
-7. Disable "Start with Windows" from the tray → confirm the Startup shortcut is
+7. Disable "Start with Windows" in Settings → General and save → confirm the Startup shortcut is
    removed.
 8. Re-enable it → confirm the shortcut is recreated.
 9. Uninstall PeekDows (Settings → Apps, or the Start Menu shortcut) → confirm

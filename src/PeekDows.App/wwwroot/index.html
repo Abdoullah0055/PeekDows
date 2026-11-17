@@ -37,7 +37,7 @@
         </button>
         <button class="navitem" data-page="beta">🧪 Beta <span class="chip">BETA</span></button>
         <button class="navitem" data-page="guide" lang="fr">Guide de démarrage</button>
-        <div class="foot" id="statusFoot"><span class="dot"></span>Running</div>
+        <div class="foot" role="status"><span class="dot" aria-hidden="true"></span><span id="statusFoot">—</span></div>
       </nav>
 
       <main class="content">
@@ -81,6 +81,19 @@
               <label class="switch"><input type="checkbox" data-key="showTrayNotifications"><span class="track"></span><span class="thumb"></span></label>
             </div>
           </div>
+          <div class="card">
+            <div class="row">
+              <div class="txt"><div class="t">Pause arranging</div><div class="d">Pause immediately without changing saved settings.</div></div>
+              <select id="pauseDuration" aria-label="Pause duration">
+                <option value="5">5 minutes</option>
+                <option value="15">15 minutes</option>
+                <option value="60">1 hour</option>
+                <option value="manual">Until manually resumed</option>
+              </select>
+              <button class="btn" id="pauseFor" disabled>Pause</button>
+              <button class="btn" id="resume" hidden>Resume</button>
+            </div>
+          </div>
         </section>
 
         <!-- LAYOUT -->
@@ -100,6 +113,11 @@
             <div class="row">
               <div class="txt"><div class="t">Display profiles and custom zones</div><div class="d">Set a layout and app rules for each display.</div></div>
               <button class="btn" id="editLayoutProfiles">Edit profiles</button>
+            </div>
+            <div class="row">
+              <div class="txt"><div class="t">Layout settings file</div><div class="d">Transfer saved layouts, profiles, rules and shortcuts as JSON.</div></div>
+              <button class="btn" id="exportLayout">Export</button>
+              <button class="btn" id="importLayout">Import</button>
             </div>
           </div>
           <div class="card" id="presetCard">
@@ -139,6 +157,16 @@
                 <input type="range" min="20" max="150" step="5" data-key="thresholdPx" id="threshold">
                 <span class="kbd" id="thresholdValue">50 px</span>
               </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="row">
+              <div class="txt"><div class="t">Preview arrange</div><div class="d">Review the proposed arrangement using saved settings before applying it.</div></div>
+              <button class="btn" id="previewArrange" disabled>Preview</button>
+            </div>
+            <div class="row">
+              <div class="txt"><div class="t">Next window in zone</div><div class="d">Cycle stacked windows after using Halves or Thirds.</div></div>
+              <button class="btn" id="cycleZoneWindow">Activate next</button>
             </div>
           </div>
         </section>
@@ -321,7 +349,7 @@
               </div>
             </div>
           </div>
-  <div class="banner" id="externalBanner" hidden>Settings were changed from the tray — review before saving.</div>
+  <div class="banner" id="externalBanner" hidden>Settings changed while you were editing — review before saving.</div>
   <script src="app.js"></script>
   <script src="guide.js"></script>
 </body>

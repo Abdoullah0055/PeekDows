@@ -1,4 +1,3 @@
-using System;
 using System.Windows.Forms;
 using PeekDows.Core.Models;
 
@@ -7,12 +6,10 @@ namespace PeekDows.App.Tray;
 public class TrayMenuBuilder
 {
     private readonly IPeekDowsController _controller;
-    private readonly TrayIconController _trayIcon;
 
-    public TrayMenuBuilder(IPeekDowsController controller, TrayIconController trayIcon)
+    public TrayMenuBuilder(IPeekDowsController controller)
     {
         _controller = controller;
-        _trayIcon = trayIcon;
     }
 
     public ContextMenuStrip Build()
@@ -41,279 +38,35 @@ public class TrayMenuBuilder
             catch { /* visual only; rounded corners are best-effort */ }
         };
 
-        var statusItem = new ToolStripMenuItem("Status: Running")
-        {
-            Enabled = false,
-            // StatusTag lets the renderer draw the dot in the right color
-            // without any controller coupling. Initial color = running green.
-            Tag = new ModernTrayIcons.StatusTag(ModernTrayPalette.StatusRunning),
-        };
-        menu.Items.Add(statusItem);
-        menu.Items.Add(new ToolStripSeparator());
-
         var arrangeNowItem = NewItem("Arrange Now", "arrange");
-        arrangeNowItem.Click += (s, e) => _controller.ArrangeNow();
-        menu.Items.Add(arrangeNowItem);
-
-        var preview = NewItem("Preview arrange…", "arrange");
-        preview.Click += (_, _) => _controller.PreviewArrange();
-        menu.Items.Add(preview);
-
-        var nextWindow = new ToolStripMenuItem("Next window in zone");
-        nextWindow.Click += (_, _) => _controller.CycleZoneWindow();
-        menu.Items.Add(nextWindow);
+        arrangeNowItem.Click += (_, _) => _controller.ArrangeNow();
 
         var undoArrangeItem = NewItem("Undo arrange", "undo");
-        undoArrangeItem.Click += (s, e) => _controller.UndoArrange();
-        menu.Items.Add(undoArrangeItem);
-        // Refresh undo availability on every open: enabled only when history exists.
-        menu.Opening += (_, _) =>
-        {
-            try { undoArrangeItem.Enabled = _controller.CanUndoArrange; }
-            catch { /* menu state is best-effort */ }
-        };
+        undoArrangeItem.Click += (_, _) => _controller.UndoArrange();
 
         var pauseResumeItem = NewItem("Pause", "pause");
-        pauseResumeItem.Click += (s, e) => _controller.TogglePause();
-        menu.Items.Add(pauseResumeItem);
-
-        var pauseForMenu = NewItem("Pause for", "pause-for");
-
-        var pause5Item = new ToolStripMenuItem("5 minutes");
-        pause5Item.Click += (s, e) => _controller.PauseFor(TimeSpan.FromMinutes(5));
-        pauseForMenu.DropDownItems.Add(pause5Item);
-
-        var pause15Item = new ToolStripMenuItem("15 minutes");
-        pause15Item.Click += (s, e) => _controller.PauseFor(TimeSpan.FromMinutes(15));
-        pauseForMenu.DropDownItems.Add(pause15Item);
-
-        var pause1HourItem = new ToolStripMenuItem("1 hour");
-        pause1HourItem.Click += (s, e) => _controller.PauseFor(TimeSpan.FromHours(1));
-        pauseForMenu.DropDownItems.Add(pause1HourItem);
-
-        var pauseUntilResumedItem = new ToolStripMenuItem("Until manually resumed");
-        pauseUntilResumedItem.Click += (s, e) => _controller.PauseUntilResumed();
-        pauseForMenu.DropDownItems.Add(pauseUntilResumedItem);
-
-        menu.Items.Add(pauseForMenu);
-
-        var windowSizeMenu = NewItem("Window size", "window-size");
-
-        var smallPresetItem = new ToolStripMenuItem("Small — 90%");
-        smallPresetItem.Checked = _controller.CurrentWindowSizePreset == WindowSizePreset.Small;
-        smallPresetItem.Click += (s, e) => _controller.SetWindowSizePreset(WindowSizePreset.Small);
-        windowSizeMenu.DropDownItems.Add(smallPresetItem);
-
-        var mediumPresetItem = new ToolStripMenuItem("Medium — 95%");
-        mediumPresetItem.Checked = _controller.CurrentWindowSizePreset == WindowSizePreset.Medium;
-        mediumPresetItem.Click += (s, e) => _controller.SetWindowSizePreset(WindowSizePreset.Medium);
-        windowSizeMenu.DropDownItems.Add(mediumPresetItem);
-
-        var largePresetItem = new ToolStripMenuItem("Large — 98%");
-        largePresetItem.Checked = _controller.CurrentWindowSizePreset == WindowSizePreset.Large;
-        largePresetItem.Click += (s, e) => _controller.SetWindowSizePreset(WindowSizePreset.Large);
-        windowSizeMenu.DropDownItems.Add(largePresetItem);
-
-        menu.Items.Add(windowSizeMenu);
-
-        var layouts = new ToolStripMenuItem("Layout profiles");
-        layouts.DropDownItems.Add("Edit profiles and zones…", null, (_, _) => _controller.OpenLayoutProfiles());
-        layouts.DropDownItems.Add("Export layout settings…", null, (_, _) => _controller.ExportLayoutSettings());
-        layouts.DropDownItems.Add("Import layout settings…", null, (_, _) => _controller.ImportLayoutSettings());
-        menu.Items.Add(layouts);
-
-        var animateTransitionsItem = NewItem("Animate window transitions", "animate-transitions");
-        animateTransitionsItem.Checked = _controller.IsAnimateWindowTransitionsEnabled;
-        animateTransitionsItem.Click += (s, e) => _controller.ToggleAnimateWindowTransitions();
-        menu.Items.Add(animateTransitionsItem);
-
-        menu.Items.Add(new ToolStripSeparator());
-
-        var autoArrangeItem = NewItem("Enable Auto Arrange", "auto-arrange");
-        autoArrangeItem.Click += (s, e) => _controller.ToggleAutoArrange();
-        menu.Items.Add(autoArrangeItem);
-
-        var repositionMaximizedItem = NewItem("Reposition maximized windows", "reposition-maximized");
-        repositionMaximizedItem.Checked = _controller.CurrentSettings.AllowRepositionMaximizedWindows;
-        repositionMaximizedItem.Click += (s, e) => _controller.ToggleAllowRepositionMaximizedWindows();
-        menu.Items.Add(repositionMaximizedItem);
-
-        var startWithWindowsItem = NewItem("Start with Windows", "start-windows");
-        startWithWindowsItem.Checked = _controller.CurrentSettings.StartWithWindows;
-        startWithWindowsItem.Click += (s, e) => _controller.ToggleStartWithWindows();
-        menu.Items.Add(startWithWindowsItem);
-
-        var directionalFocusItem = NewItem("Enable Directional Focus", "directional-focus");
-        directionalFocusItem.Checked = _controller.CurrentSettings.DirectionalFocusEnabled;
-        directionalFocusItem.Click += (s, e) => _controller.ToggleDirectionalFocus();
-        menu.Items.Add(directionalFocusItem);
-
-        var arrangeSoundItem = NewItem("Arrange sound", "arrange-sound");
-        arrangeSoundItem.Checked = _controller.CurrentSettings.ArrangeSoundEnabled;
-        arrangeSoundItem.Click += (s, e) =>
-        {
-            _controller.ToggleArrangeSound();
-            arrangeSoundItem.Checked = _controller.CurrentSettings.ArrangeSoundEnabled;
-        };
-        menu.Items.Add(arrangeSoundItem);
-
-        // Direction hints: radio submenu (AppSettings.FocusHintMode, default "Overlay").
-        // Modes: Off | Overlay only (spotlight removed). Legacy values normalize
-        // like the v5 migration (Both→Overlay, Spotlight→Off).
-        var focusHintMenu = NewItem("Direction hints", "direction-hints");
-        var hintOffItem = new ToolStripMenuItem("Off");
-        var hintOverlayItem = new ToolStripMenuItem("Overlay");
-        var hintItems = new (ToolStripMenuItem Item, string Mode)[]
-        {
-            (hintOffItem, "Off"),
-            (hintOverlayItem, "Overlay"),
-        };
-        foreach (var (item, mode) in hintItems)
-        {
-            item.Checked = string.Equals(GetCurrentFocusHintMode(), mode, StringComparison.OrdinalIgnoreCase);
-            var capturedMode = mode;
-            item.Click += (s, e) =>
-            {
-                _controller.SetFocusHintMode(capturedMode);
-                // Instant refresh (same UI thread, no rebuild): update radio checks
-                // immediately so a reopened menu never shows a stale state.
-                foreach (var (sibling, siblingMode) in hintItems)
-                    sibling.Checked = string.Equals(siblingMode, capturedMode, StringComparison.OrdinalIgnoreCase);
-            };
-            focusHintMenu.DropDownItems.Add(item);
-        }
-        // Re-sync on open: covers changes made elsewhere (e.g. Settings window)
-        // while this ContextMenuStrip instance is alive.
-        focusHintMenu.DropDownOpening += (s, e) =>
-        {
-            var current = GetCurrentFocusHintMode();
-            foreach (var (item, mode) in hintItems)
-                item.Checked = string.Equals(mode, current, StringComparison.OrdinalIgnoreCase);
-        };
-        menu.Items.Add(focusHintMenu);
-
-        // Layout mode: radio submenu (AppSettings.LayoutMode, default "Grid").
-        var layoutMenu = NewItem("Layout", "layout");
-        var layoutGridItem = new ToolStripMenuItem("Grid");
-        var layoutHalvesItem = new ToolStripMenuItem("Halves");
-        var layoutThirdsItem = new ToolStripMenuItem("Thirds");
-        var layoutItems = new (ToolStripMenuItem Item, string Mode)[]
-        {
-            (layoutGridItem, "Grid"),
-            (layoutHalvesItem, "Halves"),
-            (layoutThirdsItem, "Thirds"),
-        };
-        foreach (var (item, mode) in layoutItems)
-        {
-            item.Checked = string.Equals(GetCurrentLayoutMode(), mode, StringComparison.OrdinalIgnoreCase);
-            var capturedMode = mode;
-            item.Click += (s, e) =>
-            {
-                _controller.SetLayoutMode(capturedMode);
-                // Instant refresh (same UI thread, no rebuild): update radio checks
-                // immediately so a reopened menu never shows a stale state.
-                foreach (var (sibling, siblingMode) in layoutItems)
-                    sibling.Checked = string.Equals(siblingMode, capturedMode, StringComparison.OrdinalIgnoreCase);
-            };
-            layoutMenu.DropDownItems.Add(item);
-        }
-        // Re-sync on open: covers changes made elsewhere (e.g. Settings window)
-        // while this ContextMenuStrip instance is alive.
-        layoutMenu.DropDownOpening += (s, e) =>
-        {
-            var current = GetCurrentLayoutMode();
-            foreach (var (item, mode) in layoutItems)
-                item.Checked = string.Equals(mode, current, StringComparison.OrdinalIgnoreCase);
-        };
-        menu.Items.Add(layoutMenu);
-
-        menu.Items.Add(new ToolStripSeparator());
+        pauseResumeItem.Click += (_, _) => _controller.TogglePause();
 
         var settingsItem = NewItem("Settings", "settings");
-        settingsItem.Click += (s, e) => _trayIcon.OpenSettings();
-        menu.Items.Add(settingsItem);
-
-        var openLogItem = NewItem("Open Log File", "log-file");
-        openLogItem.Click += (s, e) => _controller.OpenLogFile();
-        menu.Items.Add(openLogItem);
-
-        var openLogsFolderItem = NewItem("Open Logs Folder", "logs-folder");
-        openLogsFolderItem.Click += (s, e) => _controller.OpenLogsFolder();
-        menu.Items.Add(openLogsFolderItem);
-
-        menu.Items.Add(new ToolStripSeparator());
+        settingsItem.Click += (_, _) => _controller.OpenSettings();
 
         var exitItem = NewItem("Exit", "exit");
-        exitItem.Click += (s, e) => _controller.Exit();
-        menu.Items.Add(exitItem);
+        exitItem.Click += (_, _) => _controller.Exit();
 
-        _trayIcon.InitializeMenuReferences(statusItem, pauseResumeItem, autoArrangeItem, repositionMaximizedItem, startWithWindowsItem, directionalFocusItem, animateTransitionsItem, smallPresetItem, mediumPresetItem, largePresetItem);
+        menu.Items.AddRange([
+            arrangeNowItem, undoArrangeItem, pauseResumeItem,
+            new ToolStripSeparator(), settingsItem, new ToolStripSeparator(), exitItem
+        ]);
+        menu.Opening += (_, _) =>
+        {
+            var paused = _controller.State == RuntimeState.Paused;
+            arrangeNowItem.Enabled = !paused && _controller.CurrentSettings.Enabled;
+            undoArrangeItem.Available = _controller.CanUndoArrange;
+            pauseResumeItem.Text = paused ? "Resume" : "Pause";
+            pauseResumeItem.Tag = paused ? "resume" : "pause";
+        };
 
         return menu;
-    }
-
-    /// <summary>
-    /// Resolves the current focus-hint mode (AppSettings.FocusHintMode, default "Overlay").
-    /// Legacy values normalize like the v5 migration (Both→Overlay, Spotlight→Off).
-    /// </summary>
-    private string GetCurrentFocusHintMode()
-    {
-        try
-        {
-            var normalized = NormalizeFocusHintMode(_controller.CurrentSettings?.FocusHintMode);
-            if (normalized != null)
-                return normalized;
-        }
-        catch { /* defensive read; fall through to default */ }
-        return "Overlay";
-    }
-
-    /// <summary>
-    /// Resolves the current layout mode (AppSettings.LayoutMode, default "Grid").
-    /// </summary>
-    private string GetCurrentLayoutMode()
-    {
-        try
-        {
-            var normalized = NormalizeLayoutMode(_controller.CurrentSettings?.LayoutMode);
-            if (normalized != null)
-                return normalized;
-        }
-        catch { /* defensive read; fall through to default */ }
-        return "Grid";
-    }
-
-    private static string NormalizeLayoutMode(string? mode)
-    {
-        if (string.IsNullOrWhiteSpace(mode))
-            return "Grid";
-        switch (mode.Trim().ToLowerInvariant())
-        {
-            case "grid":
-            case "g":
-                return "Grid";
-            case "halves":
-            case "h":
-                return "Halves";
-            case "thirds":
-            case "t":
-                return "Thirds";
-            default: return "Grid";
-        }
-    }
-
-    private static string NormalizeFocusHintMode(string? mode)
-    {
-        if (string.IsNullOrWhiteSpace(mode))
-            return "Overlay";
-        switch (mode.Trim().ToLowerInvariant())
-        {
-            case "off": return "Off";
-            case "overlay": return "Overlay";
-            case "spotlight": return "Off";
-            case "both": return "Overlay";
-            default: return "Overlay";
-        }
     }
 
     /// <summary>

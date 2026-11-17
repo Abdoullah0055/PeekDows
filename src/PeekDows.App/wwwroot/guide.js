@@ -8,7 +8,7 @@ const guideLessons = [
       ["halves", "Aperçu", "Entrée / Échap"],
       ["spread", "Annuler", "Ctrl+Win+Z"],
     ],
-    details: ["Arrange Now · rangement immédiat ({arrange})", "Entrée applique · Échap ferme", "Undo · trois rangements"],
+    details: ["Arrange Now · rangement immédiat ({arrange})", "Layout → Preview arrange · Entrée applique, Échap ferme", "Undo · trois rangements"],
     practice: "Essaie avec deux fenêtres.",
     links: [["hotkeys", "Raccourcis"]],
   },
@@ -20,7 +20,7 @@ const guideLessons = [
       ["pause", "Pause", "5 min · 15 min · 1 h"],
     ],
     details: [
-      "Pause ou reprise · {pause}",
+      "Pause ou reprise · {pause} · durée dans General",
       "Démarrage Windows et rangement au lancement",
       "Animations, notifications et activation",
       "Save applique. Cancel annule le brouillon.",
@@ -91,12 +91,12 @@ const guideLessons = [
       ["import", "Importer", "Sauvegarde auto"],
     ],
     details: [
-      "Export · modes, profils, règles et raccourcis",
+      "Layout → Export · modes, profils, règles et raccourcis",
       "About · version, journaux et dossier des réglages",
-      "Menu PeekDows · état, Settings et Exit",
+      "État de PeekDows · en bas du menu latéral de Settings",
     ],
-    practice: "Exporte tes profils depuis le menu PeekDows.",
-    links: [["about", "About"]],
+    practice: "Exporte tes profils depuis Layout.",
+    links: [["layout", "Layout"]],
   },
 ];
 

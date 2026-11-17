@@ -59,7 +59,8 @@ public sealed class SettingsHostForm : Form
         _controller = controller;
         _settingsService = settingsService;
         _logger = logger;
-        _bridge = new SettingsBridge(controller, settingsService, logger, openSettingsFolder: OpenSettingsFolder);
+        _bridge = new SettingsBridge(controller, settingsService, logger, openSettingsFolder: OpenSettingsFolder,
+            runDialog: RunSettingsDialog);
         _bridge.SetWindowsProvider(() => _controller.GetWindowsSnapshot());
         _bridge.SetWindowsMessageHandler((type, root) => WindowsMessageHandler.TryHandle(type, root, () => _controller.GetWindowsSnapshot(), WindowsMessageHandler.CamelCase));
         _bridge.DirtyChanged += OnDirtyChanged;
@@ -125,7 +126,15 @@ public sealed class SettingsHostForm : Form
         }
     }
 
-    // ----- external changes (tray toggles while the window is open) -----
+    // WebView2 callbacks must return before a WinForms modal message loop starts.
+    private void RunSettingsDialog(Action action) => BeginInvoke(() =>
+    {
+        if (IsDisposed) return;
+        try { action(); }
+        catch (Exception ex) { _logger?.Error("SettingsHostForm: settings action failed", ex); }
+    });
+
+    // ----- external changes while the window is open -----
 
     private void SubscribeExternalEvents()
     {
@@ -160,14 +169,16 @@ public sealed class SettingsHostForm : Form
     private void OnExternalChange(bool _) => PostExternalChange();
     private void OnExternalPresetChange(WindowSizePreset _) => PostExternalChange();
     private void OnExternalHintModeChange(string _) => PostExternalChange();
-    private void OnExternalStateChange(RuntimeState _) => PostExternalChange();
+    private void OnExternalStateChange(RuntimeState _) => PostToPage(_bridge.BuildRuntimeStatusMessage);
 
-    private void PostExternalChange()
+    private void PostExternalChange() => PostToPage(_bridge.BuildExternalChangeMessage);
+
+    private void PostToPage(Func<string> buildMessage)
     {
         if (_webView?.CoreWebView2 == null) return;
         try
         {
-            _webView.CoreWebView2.PostWebMessageAsJson(_bridge.BuildExternalChangeMessage());
+            _webView.CoreWebView2.PostWebMessageAsJson(buildMessage());
         }
         catch (Exception ex)
         {

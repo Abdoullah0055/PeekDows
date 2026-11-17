@@ -4,8 +4,7 @@ namespace PeekDows.App.Tray;
 
 /// <summary>
 /// Centralized color palette for the modern dark tray menu.
-/// Single source of truth shared by the renderer, the icon generator and the
-/// status indicator so every surface stays visually consistent.
+/// Shared by the menu builder and renderer.
 /// </summary>
 internal static class ModernTrayPalette
 {
@@ -22,7 +21,4 @@ internal static class ModernTrayPalette
     // Accent (fixed Win11 blue) for modern checks / active toggles
     public static readonly Color Accent = Color.FromArgb(0x4C, 0xC2, 0xFF);
     public static readonly Color AccentForeground = Color.White;
-
-    // Status dot
-    public static readonly Color StatusRunning = Color.FromArgb(0x6C, 0xCB, 0x5F);
 }

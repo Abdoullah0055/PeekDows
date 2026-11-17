@@ -187,13 +187,6 @@ internal sealed class ModernTrayRenderer : ToolStripProfessionalRenderer
         float scale = ScaleFor(e.ToolStrip);
         var color = item.Enabled ? ModernTrayPalette.Text : ModernTrayPalette.Muted;
 
-        // Status row carries a StatusTag (dot color) instead of an icon key.
-        if (item.Tag is ModernTrayIcons.StatusTag statusTag)
-        {
-            ModernTrayIcons.DrawStatusDot(e.Graphics, cell, statusTag.Color, scale);
-            return;
-        }
-
         if (item.Tag is string tag && ModernTrayIcons.IsIconKey(tag))
         {
             ModernTrayIcons.DrawIconGlyph(e.Graphics, tag, cell, color, scale);

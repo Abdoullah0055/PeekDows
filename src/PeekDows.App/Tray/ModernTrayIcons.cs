@@ -25,24 +25,11 @@ internal static class ModernTrayIcons
         { "arrange",             0xE8B7 },
         // E769 = "Pause"
         { "pause",               0xE769 },
-        // E7AE = "Clock" (time-bounded pause)
-        { "pause-for",           0xE7AE },
-        // E72C = "RepeatAll" / auto cycle
-        { "auto-arrange",        0xE777 },
-        // E740 = "ChromeMaximize" (window going maximized)
-        { "reposition-maximized",0xE947 },
-        // E782 = Windows logo glyph
-        { "start-windows",       0xE782 },
-        // E7B0 = "Arrange" (directional layout)
-        { "directional-focus",   0xE7B0 },
-        // E768 = "Play" (motion/animation)
-        { "animate-transitions", 0xE768 },
+        // E768 = "Play", E7A7 = "Undo"
+        { "resume",              0xE768 },
+        { "undo",                0xE7A7 },
         // E713 = "Setting" (the canonical Win11 gear)
         { "settings",            0xE713 },
-        // E8A5 = "Document"
-        { "log-file",            0xE8A5 },
-        // ED25 = "FolderOpen"
-        { "logs-folder",         0xED25 },
         // E7E8 = "PowerButton"
         { "exit",                0xE7E8 },
     };
@@ -51,21 +38,9 @@ internal static class ModernTrayIcons
 
     /// <summary>
     /// True when the menu item key is a known glyph key handled by
-    /// <see cref="DrawIconGlyph"/>. The status row uses a different key ("status")
-    /// and is drawn separately.
+    /// <see cref="DrawIconGlyph"/>.
     /// </summary>
     public static bool IsIconKey(object? tag) => tag is string s && Glyphs.ContainsKey(s);
-
-    /// <summary>
-    /// Tag payload for the status-row item. Carries the dot color (which changes
-    /// with the runtime state: green when running, muted when paused) so the
-    /// renderer can paint it without knowing about the controller.
-    /// </summary>
-    public sealed class StatusTag
-    {
-        public StatusTag(Color color) { Color = color; }
-        public Color Color { get; set; }
-    }
 
     /// <summary>
     /// Draws the glyph for the given icon key directly into the target cell at the
@@ -105,37 +80,6 @@ internal static class ModernTrayIcons
         {
             g.TextRenderingHint = prevHint;
             format.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Draws the status indicator dot. Kept as a vector primitive (not a glyph)
-    /// because it is the only icon whose color changes at runtime and a flat
-    /// circle reads cleaner than any available Fluent dot glyph at this size.
-    /// </summary>
-    public static void DrawStatusDot(Graphics g, Rectangle bounds, Color color, float scale)
-    {
-        // Inset so the dot sits comfortably in the icon gutter.
-        float pad = 3f * scale;
-        float side = (bounds.Width - pad * 2f) * 0.6f;
-        if (side < 4f)
-        {
-            side = 4f;
-        }
-        var cx = bounds.X + bounds.Width / 2f;
-        var cy = bounds.Y + bounds.Height / 2f;
-        var rect = new RectangleF(cx - side / 2f, cy - side / 2f, side, side);
-
-        var prevMode = g.SmoothingMode;
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        try
-        {
-            using var brush = new SolidBrush(color);
-            g.FillEllipse(brush, rect);
-        }
-        finally
-        {
-            g.SmoothingMode = prevMode;
         }
     }
 
