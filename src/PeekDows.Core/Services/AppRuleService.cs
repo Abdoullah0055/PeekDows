@@ -290,7 +290,8 @@ public static class AppRuleService
     public static void ApplyPinnedSlots(
         IList<WindowPlacement> placements,
         IReadOnlyDictionary<IntPtr, string> processByHwnd,
-        IReadOnlyList<AppRule> rules)
+        IReadOnlyList<AppRule> rules,
+        IReadOnlyDictionary<string, Rect>? gridSlots = null)
     {
         try
         {
@@ -335,8 +336,8 @@ public static class AppRuleService
                 // Conflit même slot : premier arrivé gagne.
                 if (claimed.Contains(pin.Slot))
                     continue;
-                // Slot vide/inexistant : ne fait rien (le pré-tri a déjà bien positionné).
-                if (!slotRect.TryGetValue(pin.Slot, out var desired))
+                // Le plan Grid complet permet de viser une case encore vide.
+                if (!(gridSlots ?? slotRect).TryGetValue(pin.Slot, out var desired))
                     continue;
 
                 // Placement de la fenêtre épinglée (première correspondante).
@@ -386,12 +387,12 @@ public static class AppRuleService
                 {
                     var occupant = placements[occupantIdx]!;
                     var pinnedRect = pinned.TargetRect;
-                    placements[pinnedIdx] = WithRect(pinned, desired);
-                    placements[occupantIdx] = WithRect(occupant, pinnedRect);
+                    placements[pinnedIdx] = WithRect(pinned, desired, gridSlots is null ? null : pin.Slot);
+                    placements[occupantIdx] = WithRect(occupant, pinnedRect, gridSlots is null ? null : pinned.SlotId);
                 }
                 else
                 {
-                    placements[pinnedIdx] = WithRect(pinned, desired);
+                    placements[pinnedIdx] = WithRect(pinned, desired, gridSlots is null ? null : pin.Slot);
                 }
                 claimed.Add(pin.Slot);
             }
@@ -402,12 +403,12 @@ public static class AppRuleService
         }
     }
 
-    private static WindowPlacement WithRect(WindowPlacement placement, Rect rect)
+    private static WindowPlacement WithRect(WindowPlacement placement, Rect rect, string? slotId)
     {
         return new WindowPlacement
         {
             Hwnd = placement.Hwnd,
-            SlotId = placement.SlotId,
+            SlotId = slotId ?? placement.SlotId,
             TargetRect = rect,
             Activate = placement.Activate,
             PreserveZOrder = placement.PreserveZOrder,

@@ -131,12 +131,14 @@ public sealed class MultiMonitorLayoutService
             _logger?.Info($"Calculating placements for monitor workArea={monitorInfo.WorkArea}, windowCount={monitorWindows.Count}");
 
             var placements = _layoutEngine.CalculatePlacements(profile.Mode, monitorWindows, monitorInfo.WorkArea, settings, profile.Zones).ToList();
-            if (profile.Rules.Count > 0)
+            if (profile.Mode == "Grid" && profile.Rules.Any(rule => AppRuleService.IsPinAction(rule.Action)))
             {
                 var processes = new Dictionary<IntPtr, string>();
                 foreach (var window in monitorWindows)
                     processes[window.Hwnd] = window.ProcessName;
-                AppRuleService.ApplyPinnedSlots(placements, processes, profile.Rules);
+                var gridSlots = _layoutEngine.CalculateClassicPeekGridSlotRects(monitorInfo.WorkArea,
+                    LayoutEngine.GetPresetRatio(settings.WindowSizePreset));
+                AppRuleService.ApplyPinnedSlots(placements, processes, profile.Rules, gridSlots);
             }
 
             // P-B4 fix: avoid LINQ alloc for small N (≤8). Manual HashSet.

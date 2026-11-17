@@ -47,7 +47,7 @@
           <p class="sub">Core behavior of PeekDows. Changes apply when you press Save.</p>
           <div class="card" lang="fr">
             <div class="row">
-              <div class="txt"><div class="t">Apprendre à utiliser PeekDows</div><div class="d">Découvrez les commandes et choisissez les réglages adaptés à vos habitudes.</div></div>
+              <div class="txt"><div class="t">Guide de démarrage</div></div>
               <button class="btn" id="openGuide">Ouvrir le guide</button>
             </div>
           </div>
@@ -160,12 +160,12 @@
         <!-- WINDOWS (read-only snapshot) -->
         <section class="page" id="page-windows">
           <h2>Windows</h2>
-          <p class="sub">Read-only snapshot. Refresh to reload.</p>
+          <p class="sub">Choose a Grid position or ignore a process. Amber slots already have a pin rule. Changes apply on Save.</p>
           <div class="row">
             <input id="windowsFilter" type="text" placeholder="Filter by title or process…" />
             <button id="windowsRefresh" class="btn">Refresh</button>
           </div>
-          <div class="card">
+          <div class="card windows-table-wrap">
             <table class="table" id="windowsTable">
               <thead>
                 <tr><th>Title</th><th>Process</th><th>Eligible</th><th>Pin</th><th></th></tr>
@@ -175,7 +175,7 @@
           </div>
           <div class="card">
             <div class="row" style="display:block">
-              <div class="txt"><div class="t">Pinned &amp; ignored rules</div><div class="d">Applied on Save. Unpin removes the rule.</div></div>
+              <div class="txt"><div class="t">Pinned &amp; ignored rules</div><div class="d">These are default rules. Manage screen-specific rules in Layout.</div></div>
               <div id="appRulesList"></div>
             </div>
           </div>
@@ -184,10 +184,11 @@
         <!-- HOTKEYS -->
         <section class="page" id="page-hotkeys">
           <h2>Hotkeys</h2>
-          <p class="sub">Click a combo, press the new keys, then Save.</p>
+          <p class="sub">Click a shortcut, hold the modifiers, then press the final key. Save to apply.</p>
+          <p class="sub" id="hotkeyCaptureHint" role="status" hidden></p>
           <div class="card">
-            <div class="row"><span>Arrange now</span><button class="btn capture" data-hotkey="arrangeNow">Ctrl+Alt+Space</button></div>
-            <div class="row"><span>Pause / resume</span><button class="btn capture" data-hotkey="pauseResume">Ctrl+Alt+P</button></div>
+            <div class="row"><span>Arrange now</span><button class="btn capture" data-hotkey="arrangeNow" aria-pressed="false">Ctrl+Alt+Space</button></div>
+            <div class="row"><span>Pause / resume</span><button class="btn capture" data-hotkey="pauseResume" aria-pressed="false">Ctrl+Alt+P</button></div>
             <div class="row"><button class="btn" id="hotkeysReset">Reset defaults</button></div>
           </div>
         </section>
@@ -216,16 +217,6 @@
             </div>
           </details>
           <div class="card"><div class="row"><div class="txt"><div class="t">Always ignored (built-in)</div><div class="d">SearchHost.exe, StartMenuExperienceHost.exe, Shell_TrayWnd, Progman… (read-only)</div></div></div>
-          <div class="modalback" id="unignoreModalBack" hidden>
-            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="unignoreTitle">
-              <div class="t" id="unignoreTitle">Stop ignoring <span id="unignoreName"></span>?</div>
-              <div class="d">Its windows will be arranged again after Save.</div>
-              <div class="actions">
-                <button class="btn" id="unignoreCancel">Keep ignoring</button>
-                <button class="btn primary" id="unignoreConfirm">Stop ignoring</button>
-              </div>
-            </div>
-          </div>
         </section>
 
         <!-- BETA -->
@@ -282,10 +273,7 @@
         </section>
         <section class="page" id="page-guide" lang="fr">
           <h2>Guide de démarrage</h2>
-          <p class="sub">Apprenez à ranger vos fenêtres, à retrouver une application et à adapter PeekDows à vos écrans.</p>
           <div class="card guide-card" id="guideIntro">
-            <h3>Choisissez par où commencer</h3>
-            <p>Suivez le parcours complet ou ouvrez directement un chapitre. Le guide ne modifie aucun réglage.</p>
             <button class="btn primary" id="guideStart">Démarrer le guide</button>
             <button class="btn" id="guideResume" hidden>Reprendre</button>
             <ol id="guideChapters" class="guide-chapters"></ol>
@@ -293,9 +281,13 @@
           <div class="card guide-card" id="guideLesson" hidden>
             <p id="guideProgress" class="guide-progress"></p>
             <h3 id="guideTitle" tabindex="-1"></h3>
-            <ul id="guideDetails" class="guide-details"></ul>
+            <div class="guide-diagram" id="guideDiagram"></div>
             <p id="guidePractice" class="guide-practice"></p>
             <div id="guideLinks" class="guide-actions"></div>
+            <details id="guideMore" class="guide-more">
+              <summary>Aide</summary>
+              <ul id="guideDetails" class="guide-details"></ul>
+            </details>
             <div class="guide-actions guide-pager">
               <button class="btn" id="guideContents">Sommaire</button>
               <button class="btn" id="guidePrevious">Précédent</button>
@@ -304,7 +296,6 @@
           </div>
           <div class="card guide-card" id="guideDone" hidden>
             <h3 id="guideDoneTitle" tabindex="-1">Guide terminé</h3>
-            <p>Essayez votre configuration avec quelques fenêtres ouvertes. Le guide reste disponible dans Settings.</p>
             <button class="btn" id="guideReview">Revoir les chapitres</button>
           </div>
         </section>
@@ -315,11 +306,21 @@
       <span class="unsaved" id="unsaved">● Unsaved changes</span>
       <div style="flex:1"></div>
       <span class="saved" id="savedMsg">✓ Saved</span>
-      <button class="btn" id="cancelBtn">Cancel</button>
+      <button class="btn" id="cancelBtn" title="Discard unsaved changes">Cancel</button>
       <button class="btn primary" id="saveBtn" disabled>Save</button>
     </div>
   </div>
 
+          <div class="modalback" id="unignoreModalBack" hidden>
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="unignoreTitle">
+              <div class="t" id="unignoreTitle">Stop ignoring <span id="unignoreName"></span>?</div>
+              <div class="d">The process exclusion will be removed when you save.</div>
+              <div class="actions">
+                <button class="btn" id="unignoreCancel">Keep ignoring</button>
+                <button class="btn primary" id="unignoreConfirm">Stop ignoring</button>
+              </div>
+            </div>
+          </div>
   <div class="banner" id="externalBanner" hidden>Settings were changed from the tray — review before saving.</div>
   <script src="app.js"></script>
   <script src="guide.js"></script>

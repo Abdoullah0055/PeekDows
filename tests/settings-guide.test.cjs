@@ -18,6 +18,7 @@ function loadGuide() {
     append(...items) { this.children.push(...items); },
     replaceChildren(...items) { this.children = items; },
     addEventListener(name, callback) { this[name] = callback; },
+    setAttribute() {},
     focus() { this.focused = true; },
   });
   const get = id => {
@@ -62,7 +63,7 @@ test("chapters can be selected, resumed, completed and restarted", () => {
   assert.equal(get("guideResume").hidden, false);
   get("guideResume").click();
   get("guidePrevious").click();
-  assert.equal(get("guideTitle").textContent, "Personnaliser le son");
+  assert.equal(get("guideTitle").textContent, "Son du rangement");
   get("guideNext").click();
   get("guideNext").click();
   assert.equal(get("guideDone").hidden, false);
@@ -70,4 +71,23 @@ test("chapters can be selected, resumed, completed and restarted", () => {
   assert.equal(get("guideResume").hidden, true);
   get("guideStart").click();
   assert.equal(get("guideProgress").textContent, "Chapitre 1 sur 7");
+});
+
+test("each chapter has a diagram and keeps long instructions collapsed on entry", () => {
+  const { get } = loadGuide();
+  assert.match(html, /<details id="guideMore"[^>]*>/);
+  for (const chapter of get("guideChapters").children) {
+    get("guideMore").open = true;
+    chapter.children[0].click();
+    assert.ok(get("guideDiagram").children.length >= 2);
+    assert.equal(get("guideMore").open, false);
+    assert.ok(get("guidePractice").textContent.length <= 55);
+    assert.equal(get("guideLinks").children.length, 1);
+    assert.ok(get("guideDetails").children.every(item => item.textContent.length <= 60));
+  }
+  get("guideChapters").children[2].children[0].click();
+  const figures = get("guideDiagram").children;
+  assert.equal(figures.length, 4);
+  assert.deepEqual(figures.map(figure => figure.children[0].children.length), [3, 2, 3, 3]);
+  assert.ok(figures[3].children[0].className.includes("guide-graphic-custom"));
 });

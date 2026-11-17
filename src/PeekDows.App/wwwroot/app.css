@@ -66,6 +66,74 @@ body {
 .guide-chapters li, .guide-details li { margin-bottom: 8px; }
 .guide-card .guide-progress { color: var(--accent); font-size: 12px; }
 .guide-card .guide-practice { padding: 10px 12px; border-left: 2px solid var(--accent); background: var(--accent-dim); color: var(--text); }
+.guide-diagram {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 14px 0;
+}
+.guide-node {
+  position: relative;
+  min-width: 0;
+  padding: 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-deep);
+  text-align: center;
+}
+.guide-flow { gap: 24px; }
+.guide-flow .guide-node:not(:last-child)::after {
+  content: "→" / "";
+  position: absolute;
+  color: var(--accent);
+  right: -20px;
+  top: 33px;
+}
+.guide-graphic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(100%, 110px);
+  height: 60px;
+  margin: 0 auto 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 26px;
+}
+.guide-graphic span {
+  position: absolute;
+  border: 1px solid var(--accent);
+  border-top-width: 4px;
+  border-radius: 3px;
+  background: #24445a;
+}
+.guide-graphic-spread span { width: 49%; height: 47%; }
+.guide-graphic-spread span:nth-child(1) { left: 6%; top: 10%; }
+.guide-graphic-spread span:nth-child(2) { right: 5%; top: 25%; }
+.guide-graphic-spread span:nth-child(3) { left: 18%; bottom: 8%; }
+.guide-graphic-grid span { width: 77%; height: 73%; }
+.guide-graphic-grid span:nth-child(1) { left: 5%; top: 7%; }
+.guide-graphic-grid span:nth-child(2) { left: 11%; top: 13%; }
+.guide-graphic-grid span:nth-child(3) { left: 17%; top: 19%; }
+.guide-graphic-halves span, .guide-graphic-focus span { width: 44%; inset-block: 7%; }
+.guide-graphic-halves span:first-child, .guide-graphic-focus span:first-child { left: 5%; }
+.guide-graphic-halves span:last-child, .guide-graphic-focus span:last-child { right: 5%; }
+.guide-graphic-focus span:last-child { background: var(--accent); }
+.guide-graphic-thirds span { width: 28%; inset-block: 7%; }
+.guide-graphic-thirds span:nth-child(1) { left: 5%; }
+.guide-graphic-thirds span:nth-child(2) { left: 36%; }
+.guide-graphic-thirds span:nth-child(3) { right: 5%; }
+.guide-graphic-custom span:nth-child(1) { width: 54%; left: 5%; inset-block: 7%; }
+.guide-graphic-custom span:nth-child(2), .guide-graphic-custom span:nth-child(3) { width: 33%; right: 5%; height: 41%; }
+.guide-graphic-custom span:nth-child(2) { top: 7%; }
+.guide-graphic-custom span:nth-child(3) { bottom: 7%; }
+.guide-node figcaption { display: grid; gap: 4px; overflow-wrap: anywhere; }
+.guide-node figcaption span { color: var(--muted); font-size: 12px; }
+.guide-more { margin-top: 14px; }
+.guide-more summary { width: fit-content; color: var(--accent); cursor: pointer; }
 .guide-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .guide-pager { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
 .guide-pager #guideNext { margin-left: auto; }
@@ -188,6 +256,61 @@ body {
 .table thead th { border-top: none; color: var(--muted); font-weight: 600; font-size: 11.5px; }
 .table td .btn { padding: 4px 12px; font-size: 12px; }
 .capture { min-width: 150px; font-family: "Segoe UI", monospace; }
+.capture[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.windows-table-wrap { overflow-x: auto; }
+#windowsTable { table-layout: fixed; min-width: 478px; }
+#windowsTable th:nth-child(3) { width: 86px; }
+#windowsTable th:nth-child(4) { width: 118px; }
+#windowsTable th:nth-child(5) { width: 98px; }
+#windowsTable td { overflow-wrap: anywhere; }
+.pin-map { width: 94px; }
+.pin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  padding: 4px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.pin-cell {
+  min-height: 22px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.pin-cell:hover { background: var(--hover); color: var(--text); }
+.pin-cell.occupied {
+  position: relative;
+  color: #ffca77;
+  border-color: #8c6a3f;
+}
+.pin-cell.occupied::after {
+  content: "";
+  position: absolute;
+  right: 2px; top: 2px;
+  width: 4px; height: 4px;
+  background: #ffca77;
+  border-radius: 50%;
+}
+.pin-cell[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.pin-owners {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ffca77;
+}
+.pin-cell:focus-visible, .ignore-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#windowsTable .ignore-toggle { padding-inline: 6px; white-space: nowrap; }
+.ignore-toggle[aria-pressed="true"]:not(:disabled) {
+  color: #ffca77;
+  background: #3d3020;
+  border-color: #8c6a3f;
+}
 
 /* Ignored apps: search results + persistent list share the checkrow look */
 .checkrow {

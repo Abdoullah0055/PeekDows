@@ -6,6 +6,26 @@ namespace PeekDows.Tests;
 
 public sealed class AuditFeaturesTests
 {
+    [Fact]
+    public void GridPinCanUseAnEdgeSlotWithOnlyTwoWindows()
+    {
+        var area = new Rect(0, 0, 1000, 800);
+        var monitor = new MonitorInfo { Handle = (IntPtr)1, WorkArea = area };
+        var layout = new MultiMonitorLayoutService(new MonitorResolver(monitor, monitor), new());
+        var settings = new AppSettings
+        {
+            AppRules = [new() { Process = "editor.exe", Action = "pin", Slot = "H" }]
+        };
+        var result = layout.CalculatePlacementsByMonitor([
+            new() { Hwnd = (IntPtr)1, ProcessName = "editor.exe" },
+            new() { Hwnd = (IntPtr)2, ProcessName = "notes.exe" }
+        ], settings);
+
+        var pinned = result.Single(placement => placement.Hwnd == (IntPtr)1);
+        Assert.Equal("H", pinned.SlotId);
+        Assert.Equal(new Rect(0, 40, 900, 720), pinned.TargetRect);
+    }
+
     [Theory]
     [InlineData("Ctrl+Alt+P", "Alt+Control+p", true)]
     [InlineData("Ctrl+Alt+P", "Ctrl+Alt+O", false)]

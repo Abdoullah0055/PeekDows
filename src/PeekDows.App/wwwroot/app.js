@@ -11,6 +11,7 @@ const EDITABLE_KEYS = [
 ];
 
 const state = { snapshot: null, draft: null, dirty: false };
+let deferredSnapshot = null;
 
 // User-imported sounds (read-only list from snapshot, refreshed via requestSnapshot).
 let userSounds = [];
@@ -47,6 +48,9 @@ window.chrome?.webview?.addEventListener("message", (event) => {
 });
 
 function adoptSnapshot(data) {
+  stopHotkeyCapture();
+  deferredSnapshot = null;
+  $("externalBanner").hidden = true;
   state.snapshot = data;
   // Beta default on both copies: keeps dirty tracking exact even if an older
   // bridge ever omits this key (undefined vs default would read as dirty).
@@ -56,17 +60,11 @@ function adoptSnapshot(data) {
   state.snapshot.overlayShowIcons ??= true;
   state.snapshot.soundName ??= "chime-soft";
   state.snapshot.soundAutoOffMinutes ??= 0;
+  state.snapshot.ignoredProcesses ??= [];
+  state.snapshot.ignoredClasses ??= [];
+  state.snapshot.hotkeys ??= {};
   userSounds = data.userSounds ?? [];
   state.draft = pick(data);
-  state.draft.ignoredProcesses ??= [];
-  state.draft.ignoredClasses ??= [];
-  state.draft.hotkeys ??= {};
-  state.draft.focusHintMode ??= "Overlay";
-  state.draft.layoutMode ??= "Grid";
-  state.draft.appRules ??= [];
-  state.draft.overlayShowIcons ??= true;
-  state.draft.soundName ??= "chime-soft";
-  state.draft.soundAutoOffMinutes ??= 0;
   setControlsFrom(data);
   markClean();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;
@@ -74,6 +72,7 @@ function adoptSnapshot(data) {
   renderPreview(data.preset, state.draft.layoutMode);
   renderLayoutModeSelection(state.draft.layoutMode);
   renderAppRules();
+  renderWindowsRows();
   $("thresholdValue").textContent = `${data.thresholdPx} px`;
   renderHintModeSelection(state.draft.focusHintMode);
   renderSoundSelection(state.draft.soundName);
@@ -83,11 +82,14 @@ function adoptSnapshot(data) {
 function onSoundFile(msg) {
   if (!Array.isArray(msg.userSounds)) return;
   userSounds = msg.userSounds;
+  if (state.snapshot) state.snapshot.userSounds = userSounds;
+  if (deferredSnapshot) deferredSnapshot.userSounds = userSounds;
   renderUserSounds();
 }
 
 function onExternalChange(data) {
   if (state.dirty) {
+    deferredSnapshot = data;
     $("externalBanner").hidden = false;
   } else {
     $("externalBanner").hidden = true;
@@ -97,7 +99,9 @@ function onExternalChange(data) {
 
 function onApplied(msg) {
   if (!msg.ok) {
-    $("unsaved").textContent = "⚠ Save failed — see log";
+    $("unsaved").textContent = msg.error === "hotkey-conflict"
+      ? "⚠ Shortcut already in use"
+      : msg.error === "bad-gesture" ? "⚠ Unsupported shortcut" : "⚠ Save failed — see log";
     $("unsaved").style.visibility = "visible";
     return;
   }
@@ -135,6 +139,7 @@ function markClean() {
   state.dirty = false;
   $("saveBtn").disabled = true;
   $("unsaved").style.visibility = "hidden";
+  $("unsaved").textContent = "● Unsaved changes";
 }
 
 function syncDirty() {
@@ -144,6 +149,7 @@ function syncDirty() {
     post({ type: "dirtyChanged", value: dirty });
   }
   $("saveBtn").disabled = !dirty;
+  $("unsaved").textContent = "● Unsaved changes";
   $("unsaved").style.visibility = dirty ? "visible" : "hidden";
 }
 
@@ -185,8 +191,16 @@ const BUILTIN_PROCESSES = new Set([
 
 const sameProc = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
-function isIgnored(proc) {
+function isIgnoredInList(proc) {
   return (state.draft?.ignoredProcesses ?? []).some((p) => sameProc(p, proc));
+}
+
+function isIgnoreRule(rule, proc) {
+  return sameProc(rule.process, proc) && String(rule.action).toLowerCase() === "ignore";
+}
+
+function isIgnored(proc) {
+  return isIgnoredInList(proc) || (state.draft?.appRules ?? []).some(rule => isIgnoreRule(rule, proc));
 }
 
 function addIgnored(proc) {
@@ -195,22 +209,27 @@ function addIgnored(proc) {
   syncDirty();
   renderIgnoredList();
   renderIgnoredSearch();
+  renderWindowsRows();
 }
 
 let pendingUnignore = null; // { proc } while the confirm modal is open
 
-function askUnignore(proc) {
-  pendingUnignore = { proc };
+function askUnignore(proc, trigger) {
+  pendingUnignore = { proc, trigger };
   $("unignoreName").textContent = proc;
   $("unignoreModalBack").hidden = false;
+  $("unignoreCancel").focus();
 }
 
-function closeUnignoreModal() {
+function closeUnignoreModal(restoreFocus = true) {
+  const trigger = pendingUnignore?.trigger;
   pendingUnignore = null;
   $("unignoreModalBack").hidden = true;
-  // Re-render: the unchecked box returns to checked since the draft never changed.
-  renderIgnoredList();
-  renderIgnoredSearch();
+  if (restoreFocus && trigger) {
+    if (trigger.type === "checkbox") trigger.checked = true;
+    const control = (trigger.id && $(trigger.id)) || trigger;
+    control.focus();
+  }
 }
 
 function onIgnoredCheck(proc, checkbox) {
@@ -218,7 +237,7 @@ function onIgnoredCheck(proc, checkbox) {
   if (checkbox.checked) addIgnored(proc);
   else {
     // Keep the box visually unchecked under the modal; Cancel re-renders it checked.
-    askUnignore(proc);
+    askUnignore(proc, checkbox);
   }
 }
 
@@ -301,56 +320,98 @@ if (unignoreConfirm) unignoreConfirm.addEventListener("click", () => {
     const proc = pendingUnignore.proc;
     state.draft.ignoredProcesses =
       (state.draft.ignoredProcesses ?? []).filter((p) => !sameProc(p, proc));
+    state.draft.appRules = (state.draft.appRules ?? []).filter(rule => !isIgnoreRule(rule, proc));
     syncDirty();
+    renderIgnoredList();
+    renderIgnoredSearch();
+    renderAppRules();
+    renderWindowsRows();
   }
   closeUnignoreModal();
 });
 const unignoreCancel = $("unignoreCancel");
-if (unignoreCancel) unignoreCancel.addEventListener("click", closeUnignoreModal);
+if (unignoreCancel) unignoreCancel.addEventListener("click", () => closeUnignoreModal());
 const unignoreBack = $("unignoreModalBack");
 if (unignoreBack) unignoreBack.addEventListener("click", (e) => {
   if (e.target === unignoreBack) closeUnignoreModal();
 });
+if (unignoreBack) unignoreBack.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeUnignoreModal();
+});
 
-// ---------- hotkeys (capture next keydown as "Ctrl+Alt+X") ----------
-function buildGesture(e) {
+// ---------- hotkeys ----------
+const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta", "AltGraph"]);
+let hotkeyCapture = null;
+
+function gestureModifiers(e) {
   const parts = [];
   if (e.ctrlKey) parts.push("Ctrl");
   if (e.altKey) parts.push("Alt");
   if (e.shiftKey) parts.push("Shift");
   if (e.metaKey) parts.push("Win");
+  return parts;
+}
+
+function buildGesture(e) {
+  const parts = gestureModifiers(e);
+  if (!parts.length || e.isComposing || e.location === 3 || e.getModifierState?.("AltGraph")) return null;
   const k = e.key;
-  if (k === "Control" || k === "Alt" || k === "Shift" || k === "Meta") return null;
   let last;
   if (k === " " || k === "Spacebar") last = "Space";
-  else if (typeof k === "string" && k.length === 1) last = k.toUpperCase();
-  else if (typeof k === "string" && /^F\d{1,2}$/i.test(k)) last = k.toUpperCase();
-  else last = k;
-  if (parts.length === 0) return null;
+  else if (/^(?:[a-z0-9]|F(?:[1-9]|1[0-2]))$/i.test(k ?? "")) last = k.toUpperCase();
+  else if (/^Digit[0-9]$/.test(e.code ?? "")) last = e.code.at(-1);
+  else return null;
   parts.push(last);
   return parts.join("+");
 }
 
+function stopHotkeyCapture() {
+  if (!hotkeyCapture) return;
+  const { button, previous } = hotkeyCapture;
+  hotkeyCapture = null;
+  button.textContent = state.draft?.hotkeys?.[button.dataset.hotkey] ?? previous;
+  button.setAttribute("aria-pressed", "false");
+  $("hotkeyCaptureHint").hidden = true;
+}
+
+function beginHotkeyCapture(button) {
+  if (!state.draft) return;
+  stopHotkeyCapture();
+  hotkeyCapture = { button, previous: button.textContent };
+  button.setAttribute("aria-pressed", "true");
+  button.textContent = "Press keys…";
+  $("hotkeyCaptureHint").textContent = "Hold Ctrl, Alt, Shift or Win, then press a letter, digit, Space or F1–F12. Esc cancels.";
+  $("hotkeyCaptureHint").hidden = false;
+}
+
+window.addEventListener("keydown", (e) => {
+  if (!hotkeyCapture) return;
+  if (e.key === "Tab") { stopHotkeyCapture(); return; }
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.key === "Escape") { stopHotkeyCapture(); return; }
+  if (e.repeat) return;
+  const { button } = hotkeyCapture;
+  if (MODIFIER_KEYS.has(e.key)) {
+    button.textContent = [...gestureModifiers(e), "…"].join("+");
+    return;
+  }
+  const gesture = buildGesture(e);
+  if (!gesture) {
+    $("hotkeyCaptureHint").textContent = "Use a modifier with a letter, digit, Space or F1–F12. Esc cancels.";
+    return;
+  }
+  state.draft.hotkeys ??= {};
+  state.draft.hotkeys[button.dataset.hotkey] = gesture;
+  stopHotkeyCapture();
+  syncDirty();
+}, true);
+window.addEventListener("blur", stopHotkeyCapture);
+
 for (const btn of document.querySelectorAll("button[data-hotkey]")) {
-  btn.addEventListener("click", () => {
-    if (!state.draft) return;
-    const name = btn.dataset.hotkey;
-    const prev = btn.textContent;
-    btn.textContent = "Press keys…";
-    const onKey = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const gesture = buildGesture(e);
-      if (gesture) {
-        state.draft.hotkeys ??= {};
-        state.draft.hotkeys[name] = gesture;
-        btn.textContent = gesture;
-        syncDirty();
-      } else {
-        btn.textContent = prev;
-      }
-    };
-    window.addEventListener("keydown", onKey, { once: true, capture: true });
+  btn.addEventListener("click", () => beginHotkeyCapture(btn));
+  btn.addEventListener("blur", () => {
+    if (hotkeyCapture?.button === btn) stopHotkeyCapture();
   });
 }
 
@@ -358,6 +419,7 @@ const hotkeysReset = $("hotkeysReset");
 if (hotkeysReset) {
   hotkeysReset.addEventListener("click", () => {
     if (!state.draft) return;
+    stopHotkeyCapture();
     state.draft.hotkeys ??= {};
     state.draft.hotkeys.arrangeNow = "Ctrl+Alt+Space";
     state.draft.hotkeys.pauseResume = "Ctrl+Alt+P";
@@ -376,40 +438,98 @@ function renderWindowsRows() {
   const tb = document.querySelector("#windowsTable tbody");
   if (!tb) return;
   tb.innerHTML = "";
+  const occupied = collectPinnedSlots();
   for (const w of windowsRows) {
     if (q && !((w.title + " " + w.process).toLowerCase().includes(q))) continue;
     const tr = document.createElement("tr");
     const tdT = document.createElement("td"); tdT.textContent = w.title;
     const tdP = document.createElement("td"); tdP.textContent = w.process;
-    const tdE = document.createElement("td"); tdE.textContent = w.eligible ? "yes" : (w.reason || "no");
+    const tdE = document.createElement("td");
+    tdE.textContent = isIgnored(w.process) ? "Ignored" :
+      w.reason === "ignored-process" && !BUILTIN_PROCESSES.has(String(w.process).toLowerCase())
+        ? "Check after Save" : w.eligible ? "Yes" : (w.reason || "No");
     const tdB = document.createElement("td");
-    const btn = document.createElement("button");
-    btn.className = "btn";
-    btn.textContent = "Ignorer ce process";
-    btn.addEventListener("click", () => {
-      // Adds to the ignored-apps draft (persistent on Save) and refreshes that
-      // page if visible — user presses Save to apply.
-      addIgnored(w.process);
-    });
-    tdB.appendChild(btn);
+    tdB.append(renderIgnoreButton(w));
     const tdPin = document.createElement("td");
-    const sel = document.createElement("select");
-    for (const opt of ["Off", "A", "B", "C", "D", "E", "F", "G", "H"]) {
-      const o = document.createElement("option");
-      o.value = opt;
-      o.textContent = opt === "Off" ? "–" : opt;
-      sel.append(o);
-    }
-    sel.value = pinnedSlotFor(w.process);
-    sel.addEventListener("change", () => setPin(w.process, sel.value));
-    tdPin.appendChild(sel);
+    if (w.process && !BUILTIN_PROCESSES.has(String(w.process).toLowerCase()) && w.reason !== "system")
+      tdPin.append(renderPinMap(w.process, occupied, w.hwnd));
     tr.append(tdT, tdP, tdE, tdPin, tdB);
     tb.appendChild(tr);
   }
 }
 
+function renderIgnoreButton(w) {
+  const locked = !w.process || BUILTIN_PROCESSES.has(String(w.process).toLowerCase()) || w.reason === "system";
+  const ignored = locked ? !!w.process : isIgnored(w.process);
+  const button = document.createElement("button");
+  if (w.hwnd) button.id = `ignore-${w.hwnd}`;
+  button.className = "btn ignore-toggle";
+  button.disabled = locked;
+  button.textContent = locked ? (ignored ? "System" : "—") : ignored ? "Ignored ↶" : "Ignore";
+  button.title = locked ? "Protected or unavailable process" :
+    ignored ? "Stop ignoring this process" : "Ignore this process";
+  button.setAttribute("aria-label", `${button.title}: ${w.process}`);
+  button.setAttribute("aria-pressed", String(ignored));
+  button.addEventListener("click", () => {
+    if (locked) return;
+    if (isIgnored(w.process)) askUnignore(w.process, button);
+    else addIgnored(w.process);
+  });
+  return button;
+}
+
 // ---------- per-app rules (pin to a Grid slot; arrays REPLACED, never mutated) ----------
 const PIN_SLOTS = ["A", "B", "C", "D", "E", "F", "G", "H"];
+const PIN_MAP_ORDER = ["A", "E", "C", "H", "Off", "G", "D", "F", "B"];
+
+function collectPinnedSlots() {
+  const occupied = new Map();
+  for (const rule of state.draft?.appRules ?? []) {
+    const slot = String(rule.slot ?? "").toUpperCase();
+    if (String(rule.action).toLowerCase() !== "pin" || !PIN_SLOTS.includes(slot)) continue;
+    if (!occupied.has(slot)) occupied.set(slot, []);
+    occupied.get(slot).push(rule.process);
+  }
+  return occupied;
+}
+
+function renderPinMap(proc, occupied, hwnd) {
+  const map = document.createElement("div");
+  map.className = "pin-map";
+  const grid = document.createElement("div");
+  grid.className = "pin-grid";
+  grid.setAttribute("role", "group");
+  grid.setAttribute("aria-label", `Grid pin for ${proc}`);
+  const selected = pinnedSlotFor(proc);
+  for (const slot of PIN_MAP_ORDER) {
+    const button = document.createElement("button");
+    const others = (occupied.get(slot) ?? []).filter(name => !sameProc(name, proc));
+    const description = slot === "Off" ? "Unpin" :
+      others.length ? `Slot ${slot} · pinned to ${others.join(", ")}` : `Slot ${slot}`;
+    button.className = others.length ? "pin-cell occupied" : "pin-cell";
+    button.textContent = slot === "Off" ? "×" : slot;
+    button.title = description;
+    button.setAttribute("aria-label", description);
+    button.setAttribute("aria-pressed", String(selected === slot));
+    if (hwnd) button.id = `pin-${hwnd}-${slot}`;
+    button.addEventListener("click", () => {
+      setPin(proc, slot);
+      if (hwnd) $(button.id)?.focus();
+    });
+    grid.append(button);
+  }
+  map.append(grid);
+  const reserved = [...occupied].filter(([, owners]) => owners.some(name => !sameProc(name, proc)));
+  if (reserved.length) {
+    const caption = document.createElement("small");
+    caption.className = "pin-owners";
+    caption.textContent = reserved.map(([slot, owners]) =>
+      `${slot} · ${owners.filter(name => !sameProc(name, proc)).join(", ")}`).join(" / ");
+    caption.title = caption.textContent;
+    map.append(caption);
+  }
+  return map;
+}
 
 function pinnedSlotFor(proc) {
   const rule = (state.draft?.appRules ?? []).find((r) => sameProc(r.process, proc) && String(r.action).toLowerCase() === "pin");
@@ -419,9 +539,12 @@ function pinnedSlotFor(proc) {
 
 function setPin(proc, slot) {
   if (!state.draft || !proc) return;
+  if (pinnedSlotFor(proc) === slot) return;
   const rest = (state.draft.appRules ?? []).filter((r) => !sameProc(r.process, proc));
   state.draft.appRules = slot === "Off" ? rest : [...rest, { process: proc, action: "pin", slot }];
   syncDirty();
+  renderIgnoredList();
+  renderIgnoredSearch();
   renderAppRules();
   renderWindowsRows();
 }
@@ -443,8 +566,9 @@ function renderAppRules() {
     txt.textContent = `${rule.process} → ${String(rule.action).toLowerCase() === "ignore" ? "ignored" : "slot " + rule.slot}`;
     const btn = document.createElement("button");
     btn.className = "btn";
-    btn.textContent = "Unpin";
+    btn.textContent = isIgnoreRule(rule, rule.process) ? "Stop ignoring" : "Unpin";
     btn.addEventListener("click", () => {
+      if (isIgnoreRule(rule, rule.process)) { askUnignore(rule.process, btn); return; }
       if (!confirm(`Remove rule for "${rule.process}"?`)) return;
       state.draft.appRules = (state.draft.appRules ?? []).filter((r) => !sameProc(r.process, rule.process));
       syncDirty();
@@ -672,8 +796,9 @@ $("saveBtn").addEventListener("click", () => {
   post({ type: "apply", data: changes });
 });
 $("cancelBtn").addEventListener("click", () => {
-  markClean();
-  window.close();   // SettingsHostForm maps WindowCloseRequested → Close()
+  stopHotkeyCapture();
+  if (pendingUnignore) closeUnignoreModal(false);
+  if (state.snapshot) adoptSnapshot(deferredSnapshot ?? state.snapshot);
 });
 
 $("openLog").addEventListener("click", () => post({ type: "openLogFile" }));
@@ -687,6 +812,7 @@ for (const nav of document.querySelectorAll(".navitem[data-page]")) {
     nav.classList.add("active");
     document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
     $(`page-${nav.dataset.page}`).classList.add("active");
+    if (nav.dataset.page === "windows" && windowsRows.length === 0) post({ type: "requestWindows" });
   });
 }
 
