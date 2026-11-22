@@ -7,6 +7,7 @@ namespace PeekDows.Core.Services;
 public interface IVirtualDesktopService
 {
     bool IsWindowOnCurrentVirtualDesktop(IntPtr hwnd);
+    bool IsWindowOnCurrentVirtualDesktopNow(IntPtr hwnd) => IsWindowOnCurrentVirtualDesktop(hwnd);
 }
 
 public sealed class VirtualDesktopService : IVirtualDesktopService
@@ -54,7 +55,16 @@ public sealed class VirtualDesktopService : IVirtualDesktopService
         _logger = logger;
     }
 
-    public bool IsWindowOnCurrentVirtualDesktop(IntPtr hwnd)
+    public void InvalidateCache()
+    {
+        lock (_cacheLock) _cache.Clear();
+    }
+
+    public bool IsWindowOnCurrentVirtualDesktop(IntPtr hwnd) => IsWindowOnCurrentVirtualDesktop(hwnd, fresh: false);
+
+    public bool IsWindowOnCurrentVirtualDesktopNow(IntPtr hwnd) => IsWindowOnCurrentVirtualDesktop(hwnd, fresh: true);
+
+    private bool IsWindowOnCurrentVirtualDesktop(IntPtr hwnd, bool fresh)
     {
         if (hwnd == IntPtr.Zero) return false;
 
@@ -63,7 +73,7 @@ public sealed class VirtualDesktopService : IVirtualDesktopService
         long ttlTicks = CacheTtlMs * System.Diagnostics.Stopwatch.Frequency / 1000;
         lock (_cacheLock)
         {
-            if (_cache.TryGetValue(hwnd, out var entry) && (nowTicks - entry.Ticks) < ttlTicks)
+            if (!fresh && _cache.TryGetValue(hwnd, out var entry) && (nowTicks - entry.Ticks) < ttlTicks)
                 return entry.Value;
         }
 

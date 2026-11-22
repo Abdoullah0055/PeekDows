@@ -136,8 +136,7 @@ public sealed class MultiMonitorLayoutService
                 var processes = new Dictionary<IntPtr, string>();
                 foreach (var window in monitorWindows)
                     processes[window.Hwnd] = window.ProcessName;
-                var gridSlots = _layoutEngine.CalculateClassicPeekGridSlotRects(monitorInfo.WorkArea,
-                    LayoutEngine.GetPresetRatio(settings.WindowSizePreset));
+                var gridSlots = _layoutEngine.GetSlotRects(profile.Mode, monitorInfo.WorkArea, settings, profile.Zones);
                 AppRuleService.ApplyPinnedSlots(placements, processes, profile.Rules, gridSlots);
             }
 

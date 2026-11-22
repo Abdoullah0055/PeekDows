@@ -37,7 +37,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private readonly ForegroundWatchService _kbWatchService;
     private readonly DirectionalFocusRegistry _directionalFocusRegistry;
     private readonly DirectionalFocusLayoutSnapshotService _directionalFocusSnapshotService;
-    private readonly IVirtualDesktopService _virtualDesktopService;
+    private readonly VirtualDesktopService _virtualDesktopService;
     private readonly WindowActivationService _windowActivationService;
     private readonly UnstableWindowTracker _unstableWindowTracker;
     private readonly WindowAnimationService _animationService;
@@ -152,7 +152,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         }
 
         _directionalFocusRegistry = new DirectionalFocusRegistry(
-            hwnd => NativeMethods.IsWindow(hwnd),
+            IsDirectionalFocusWindowAvailable,
             hwnd => _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd),
             _logger);
         var gestureDetector = new DirectionalFocusGestureDetector();
@@ -160,17 +160,9 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
         _directionalFocusSnapshotService = new DirectionalFocusLayoutSnapshotService(
             _monitorService,
-            _layoutEngine,
-            hwnd =>
-            {
-                if (NativeMethods.GetWindowRect(hwnd, out var nativeRect))
-                {
-                    return new Rect(nativeRect.left, nativeRect.top, nativeRect.right - nativeRect.left, nativeRect.bottom - nativeRect.top);
-                }
-                return default;
-            },
-            hwnd => _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd),
-            () => LayoutEngine.GetPresetRatio(_settings.WindowSizePreset),
+            GetDirectionalFocusWindowRect,
+            hwnd => IsDirectionalFocusWindowAvailable(hwnd) && _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd),
+            GetDirectionalFocusSlotRects,
             logger: _logger);
 
         _directionalFocusService = new DirectionalFocusService(
@@ -471,7 +463,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             _placementGeneration++;
             _stackedZones = [];
             _historyService.Undo(_animationService.Cancel);
-            _directionalFocusRegistry.UpdateFromPlacements([], _monitorService);
+            _directionalFocusService.InvalidateLayout();
         }
         catch (Exception ex)
         {
@@ -533,6 +525,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
         _settings.WindowSizePreset = preset;
         _settingsService.Save(_settings);
+        _directionalFocusService.InvalidateLayout();
         _logger.Info($"WindowSizePreset changed: {preset} = {LayoutEngine.GetPresetRatio(preset):P0}");
         WindowSizePresetChanged?.Invoke(preset);
         ArrangeNow();
@@ -812,6 +805,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     public void OnSettingsChanged()
     {
         _classifier.UpdateSettings(_settings);
+        _directionalFocusService.InvalidateLayout();
         if (string.Equals(_settings.FocusHintMode, "Off", StringComparison.OrdinalIgnoreCase)
             || !_settings.DirectionalFocusEnabled)
         {
@@ -935,17 +929,47 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     /// </summary>
     private IReadOnlyList<IntPtr> GetDirectionalFocusCandidateWindows()
     {
-        var rawWindows = _discoveryService.GetTopLevelWindows();
+        // A desktop switch can occur within the virtual desktop cache's TTL.
+        _virtualDesktopService.InvalidateCache();
+        var rawWindows = _discoveryService.GetDirectionalFocusWindows();
         var result = new List<IntPtr>(rawWindows.Count);
+        var rulesByMonitor = new Dictionary<IntPtr, List<AppRule>>();
         foreach (var raw in rawWindows)
         {
-            if (_classifier.IsEligible(raw))
-            {
+            if (!_classifier.IsEligibleForDirectionalFocus(raw)) continue;
+
+            var monitor = _monitorService.GetMonitorForWindow(raw.Hwnd);
+            if (monitor.IsFallback) continue;
+            if (!rulesByMonitor.TryGetValue(monitor.Handle, out var rules))
+                rulesByMonitor[monitor.Handle] = rules = MonitorLayoutSettings.Resolve(_settings, monitor).Rules;
+            if (!AppRuleService.IsProcessExcluded(rules, raw.ProcessName))
                 result.Add(raw.Hwnd);
-            }
         }
         _logger?.Info($"Directional focus candidate windows: discovered={rawWindows.Count}, eligible={result.Count}");
         return result;
+    }
+
+    private IReadOnlyDictionary<string, Rect> GetDirectionalFocusSlotRects(MonitorInfo monitor)
+    {
+        var profile = MonitorLayoutSettings.Resolve(_settings, monitor);
+        return _layoutEngine.GetSlotRects(profile.Mode, monitor.WorkArea, _settings, profile.Zones);
+    }
+
+    private static bool IsDirectionalFocusWindowAvailable(IntPtr hwnd)
+        => NativeMethods.IsWindowVisible(hwnd) && !NativeMethods.IsIconic(hwnd) &&
+           (MonitorNativeMethods.DwmGetWindowAttribute(hwnd, MonitorNativeMethods.DWMWA_CLOAKED,
+               out int cloaked, sizeof(int)) != 0 || cloaked == 0);
+
+    private static Rect GetDirectionalFocusWindowRect(IntPtr hwnd)
+    {
+        if (NativeMethods.DwmGetWindowAttribute(hwnd, NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS,
+                out var rect, System.Runtime.InteropServices.Marshal.SizeOf<PeekDows.Core.Win32.RECT>()) == 0 &&
+            rect.right > rect.left && rect.bottom > rect.top)
+            return new Rect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+
+        return NativeMethods.GetWindowRect(hwnd, out rect)
+            ? new Rect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+            : default;
     }
 
     private void ExecuteArrange(bool preview = false)
@@ -1184,7 +1208,14 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
             var succeededPlacements = placements.Where(p => result.SucceededHwnds.Contains(p.Hwnd)).ToList();
             UpdateStackedZones(succeededPlacements, arrangeable, GetCachedMonitor);
-            _directionalFocusRegistry.UpdateFromPlacements(succeededPlacements, _monitorService);
+            var topToBottom = new List<IntPtr>(succeededPlacements.Count);
+            NativeMethods.EnumWindows((hwnd, _) =>
+            {
+                if (result.SucceededHwnds.Contains(hwnd)) topToBottom.Add(hwnd);
+                return true;
+            }, IntPtr.Zero);
+            _directionalFocusRegistry.UpdateFromPlacements(succeededPlacements, _monitorService,
+                topToBottom, GetDirectionalFocusSlotRects);
             _logger.Info($"DirectionalFocusRegistry updated from arrange placements (succeeded={succeededPlacements.Count} of {placements.Count})");
 
             if (result.FailedCount > 0)

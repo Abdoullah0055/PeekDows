@@ -79,6 +79,83 @@ public class DirectionalFocusServiceRebuildTests
         => new LayoutEngine().CalculateClassicPeekGridSlotRects(WorkArea)[slotId];
 
     [Fact]
+    public void GestureStartRefreshesStackHeadEvenBetweenRapidGestures()
+    {
+        var resolver = new FakeMonitorResolver(WorkArea);
+        var engine = new LayoutEngine();
+        var settings = new AppSettings();
+        var slots = engine.GetSlotRects("Halves", WorkArea, settings);
+        var placements = engine.CalculatePlacements("Halves", Enumerable.Range(1, 3)
+            .Select(id => new ManagedWindow { Hwnd = (IntPtr)id }).ToArray(), WorkArea, settings);
+        var rectangles = placements.ToDictionary(p => p.Hwnd, p => p.TargetRect);
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        registry.UpdateFromPlacements(placements, resolver, [(IntPtr)1, (IntPtr)3, (IntPtr)2], _ => slots);
+        var snapshot = new DirectionalFocusLayoutSnapshotService(resolver, hwnd => rectangles[hwnd], _ => true, _ => slots);
+        IReadOnlyList<IntPtr> order = [(IntPtr)1, (IntPtr)3, (IntPtr)2];
+        using var service = CreateService(registry, snapshot, () => order);
+
+        service.RefreshGestureSlots(WorkArea);
+        Assert.Equal((IntPtr)1, service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleLeft));
+
+        order = [(IntPtr)3, (IntPtr)1, (IntPtr)2];
+        service.RefreshGestureSlots(WorkArea);
+        Assert.Equal((IntPtr)3, service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleLeft));
+        Assert.Contains((DirectionalFocusSlot.MiddleLeft, (IntPtr)3), registry.GetAvailableSlots(WorkArea));
+
+        order = [];
+        service.RefreshGestureSlots(WorkArea);
+        Assert.Empty(registry.GetAvailableSlots(WorkArea));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void HeldDirectionAttemptsNewTargetOnceAfterRefresh(bool hadTarget)
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var slots = new LayoutEngine().GetSlotRects("Halves", WorkArea, new AppSettings());
+        var snapshot = new DirectionalFocusLayoutSnapshotService(new FakeMonitorResolver(WorkArea),
+            _ => slots["Left"], _ => true, _ => slots);
+        IReadOnlyList<IntPtr> candidates = hadTarget ? [(IntPtr)1] : [];
+        using var service = CreateService(registry, snapshot, () => candidates);
+        var direction = DirectionalFocusSlot.MiddleLeft;
+
+        service.RefreshGestureSlots(WorkArea);
+        var initial = service.ResolveTarget(WorkArea, direction);
+        Assert.Equal(hadTarget ? (IntPtr)1 : (IntPtr?)null, initial?.Hwnd);
+        Assert.True(service.TryBeginTargetAttempt(direction, initial?.Hwnd));
+        Assert.False(service.TryBeginTargetAttempt(direction, initial?.Hwnd));
+
+        candidates = [(IntPtr)2];
+        service.RefreshGestureSlots(WorkArea);
+        var target = service.ResolveTarget(WorkArea, direction);
+        Assert.Equal((direction, (IntPtr)2), target);
+        Assert.True(service.TryBeginTargetAttempt(direction, target?.Hwnd));
+        Assert.False(service.TryBeginTargetAttempt(direction, target?.Hwnd));
+    }
+
+    [Fact]
+    public void ThirdsUsesOneTargetAndOverlaySlotForBothVerticalGestures()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var thirds = new LayoutEngine().GetSlotRects("Thirds", WorkArea, new AppSettings());
+        var snapshot = new DirectionalFocusLayoutSnapshotService(new FakeMonitorResolver(WorkArea),
+            hwnd => hwnd == (IntPtr)1 ? thirds["Col2"] : thirds["Col1"], _ => true, _ => thirds);
+        IReadOnlyList<IntPtr> candidates = [(IntPtr)1, (IntPtr)2];
+        using var service = CreateService(registry, snapshot, () => candidates);
+
+        service.RefreshGestureSlots(WorkArea);
+        Assert.Equal((DirectionalFocusSlot.TopCenter, (IntPtr)1), service.ResolveTarget(WorkArea, DirectionalFocusSlot.TopCenter));
+        Assert.Equal((DirectionalFocusSlot.TopCenter, (IntPtr)1), service.ResolveTarget(WorkArea, DirectionalFocusSlot.BottomCenter));
+        Assert.DoesNotContain(registry.GetAvailableSlots(WorkArea), entry => entry.Slot == DirectionalFocusSlot.BottomCenter);
+
+        candidates = [(IntPtr)2];
+        service.RefreshGestureSlots(WorkArea);
+        Assert.Null(service.ResolveTarget(WorkArea, DirectionalFocusSlot.BottomCenter));
+        Assert.Equal((DirectionalFocusSlot.MiddleLeft, (IntPtr)2), service.ResolveTarget(WorkArea, DirectionalFocusSlot.BottomLeft));
+    }
+
+    [Fact]
     public void WhenRegistryMisses_RebuildsFromCurrentLayout()
     {
         var registry = new DirectionalFocusRegistry(_ => true, _ => true);
@@ -531,10 +608,10 @@ public class DirectionalFocusServiceRebuildTests
     public void RegistryHit_Accepted_WhileWindowIsAnimating()
     {
         var registry = new DirectionalFocusRegistry(_ => true, _ => true);
-        registry.SetSlotsForMonitor(WorkArea, new Dictionary<DirectionalFocusSlot, IntPtr>
+        registry.UpdateFromPlacements(new[]
         {
-            [DirectionalFocusSlot.TopLeft] = (IntPtr)140
-        });
+            new WindowPlacement { Hwnd = (IntPtr)140, SlotId = "A", TargetRect = SlotRect("A") }
+        }, new FakeMonitorResolver(WorkArea));
 
         // Window 140 is mid-tween: its real rect does NOT match slot A. Without the
         // exemption the strict rect validation would reject the registry hit.
@@ -546,6 +623,71 @@ public class DirectionalFocusServiceRebuildTests
         var hwnd = service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft);
 
         Assert.Equal((IntPtr)140, hwnd);
+    }
+
+    [Fact]
+    public void GestureRefreshRetainsTheAcceptedAnimationPlan()
+    {
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        registry.UpdateFromPlacements(new[]
+        {
+            new WindowPlacement { Hwnd = (IntPtr)140, SlotId = "A", TargetRect = SlotRect("A") }
+        }, new FakeMonitorResolver(WorkArea));
+        var animator = new FakeWindowAnimator { Animating = { (IntPtr)140 } };
+        var snapshot = CreateSnapshot(_ => SlotRect("B"));
+        using var service = CreateServiceWithAnimator(registry, snapshot, animator, () => []);
+
+        service.RefreshGestureSlots(WorkArea);
+
+        Assert.Equal((IntPtr)140, service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft));
+        Assert.Null(registry.GetHwndForSlot(WorkArea, DirectionalFocusSlot.BottomRight));
+    }
+
+    [Fact]
+    public void GestureRefreshUsesTheCurrentHeadOfAnAnimatingStack()
+    {
+        var resolver = new FakeMonitorResolver(WorkArea);
+        var settings = new AppSettings();
+        var engine = new LayoutEngine();
+        var slots = engine.GetSlotRects("Halves", WorkArea, settings);
+        var placements = engine.CalculatePlacements("Halves", Enumerable.Range(1, 3)
+            .Select(id => new ManagedWindow { Hwnd = (IntPtr)id }).ToArray(), WorkArea, settings);
+        IntPtr minimized = IntPtr.Zero;
+        var registry = new DirectionalFocusRegistry(hwnd => hwnd != minimized, _ => true);
+        registry.UpdateFromPlacements(placements, resolver, [(IntPtr)1, (IntPtr)2, (IntPtr)3], _ => slots);
+        var animator = new FakeWindowAnimator { Animating = { (IntPtr)1, (IntPtr)3 } };
+        var snapshot = new DirectionalFocusLayoutSnapshotService(resolver, _ => slots["Right"],
+            hwnd => hwnd != minimized, _ => slots);
+        using var service = CreateServiceWithAnimator(registry, snapshot, animator, () => [(IntPtr)3, (IntPtr)1]);
+
+        service.RefreshGestureSlots(WorkArea);
+        Assert.Equal((IntPtr)3, service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleLeft));
+
+        minimized = (IntPtr)3;
+        service.RefreshGestureSlots(WorkArea);
+        Assert.Equal((IntPtr)1, service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleLeft));
+        Assert.Null(registry.GetHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleRight));
+    }
+
+    [Fact]
+    public void GestureRefreshRejectsAnimationPlanWhenTheZoneRectangleChanges()
+    {
+        var resolver = new FakeMonitorResolver(WorkArea);
+        var engine = new LayoutEngine();
+        var settings = new AppSettings();
+        var slots = engine.GetSlotRects("Custom", WorkArea, settings, new(60));
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var placements = engine.CalculatePlacements("Custom", [new() { Hwnd = (IntPtr)1 }], WorkArea, settings, new(60));
+        registry.UpdateFromPlacements(placements, resolver, [(IntPtr)1], _ => slots);
+
+        var animator = new FakeWindowAnimator { Animating = { (IntPtr)1 } };
+        var changed = engine.GetSlotRects("Custom", WorkArea, settings, new(75));
+        var snapshot = new DirectionalFocusLayoutSnapshotService(resolver, _ => changed["Custom1"], _ => true, _ => changed);
+        using var service = CreateServiceWithAnimator(registry, snapshot, animator, () => [(IntPtr)1]);
+
+        service.RefreshGestureSlots(WorkArea);
+
+        Assert.Null(service.ResolveHwndForSlot(WorkArea, DirectionalFocusSlot.MiddleLeft));
     }
 
     [Fact]

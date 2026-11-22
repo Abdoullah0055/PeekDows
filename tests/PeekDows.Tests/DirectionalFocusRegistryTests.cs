@@ -9,6 +9,20 @@ public class DirectionalFocusRegistryTests
 {
     private readonly DirectionalFocusRegistry _registry = new(_ => true, _ => true);
 
+    [Theory]
+    [InlineData("Left", DirectionalFocusSlot.MiddleLeft)]
+    [InlineData("Right", DirectionalFocusSlot.MiddleRight)]
+    [InlineData("Col1", DirectionalFocusSlot.MiddleLeft)]
+    [InlineData("Col2", DirectionalFocusSlot.TopCenter)]
+    [InlineData("Col3", DirectionalFocusSlot.MiddleRight)]
+    [InlineData("Custom1", DirectionalFocusSlot.MiddleLeft)]
+    [InlineData("Custom2", DirectionalFocusSlot.MiddleRight)]
+    [InlineData("Custom3", DirectionalFocusSlot.BottomRight)]
+    public void MapsNonGridSlotIds(string slotId, DirectionalFocusSlot slot)
+    {
+        Assert.Equal(slot, DirectionalFocusRegistry.MapSlotId(slotId));
+    }
+
     private class FakeMonitorResolver : IMonitorResolver
     {
         private readonly Dictionary<IntPtr, MonitorInfo> _map;
@@ -27,6 +41,46 @@ public class DirectionalFocusRegistryTests
         {
             return _map[IntPtr.Zero];
         }
+    }
+
+    [Fact]
+    public void ArrangeUsesTopEligiblePlacementInZOrder()
+    {
+        var resolver = new FakeMonitorResolver(new()
+        {
+            [IntPtr.Zero] = new MonitorInfo { WorkArea = new Rect(0, 0, 1920, 1080) }
+        });
+        var monitor = resolver.GetPrimaryMonitor();
+        var engine = new LayoutEngine();
+        var settings = new AppSettings();
+        var windows = Enumerable.Range(1, 5).Select(id => new ManagedWindow { Hwnd = (IntPtr)id }).ToArray();
+        var placements = engine.CalculatePlacements("Halves", windows, monitor.WorkArea, settings);
+        var registry = new DirectionalFocusRegistry(hwnd => hwnd != (IntPtr)3, hwnd => hwnd != (IntPtr)1);
+
+        registry.UpdateFromPlacements(placements, resolver,
+            [(IntPtr)1, (IntPtr)3, (IntPtr)2, (IntPtr)4, (IntPtr)5],
+            m => engine.GetSlotRects("Halves", m.WorkArea, settings));
+
+        Assert.Equal((IntPtr)5, registry.GetHwndForSlot(monitor.WorkArea, DirectionalFocusSlot.MiddleLeft));
+        Assert.Equal((IntPtr)2, registry.GetHwndForSlot(monitor.WorkArea, DirectionalFocusSlot.MiddleRight));
+    }
+
+    [Fact]
+    public void CustomPlanUsesTheSplitSlotEvenIfTheBottomZoneIsEmpty()
+    {
+        var area = new Rect(0, 0, 1920, 1080);
+        var resolver = new FakeMonitorResolver(new() { [IntPtr.Zero] = new MonitorInfo { WorkArea = area } });
+        var engine = new LayoutEngine();
+        var settings = new AppSettings();
+        var zones = new CustomZoneLayout(SplitSecondary: true);
+        var placements = engine.CalculatePlacements("Custom", [new() { Hwnd = (IntPtr)1 }, new() { Hwnd = (IntPtr)2 }],
+            area, settings, zones);
+
+        _registry.UpdateFromPlacements(placements, resolver, getSlotRects: m => engine.GetSlotRects("Custom", m.WorkArea, settings, zones));
+
+        Assert.Equal((IntPtr)2, _registry.GetHwndForSlot(area, DirectionalFocusSlot.TopRight));
+        Assert.Null(_registry.GetHwndForSlot(area, DirectionalFocusSlot.MiddleRight));
+        Assert.Null(_registry.GetHwndForSlot(area, DirectionalFocusSlot.BottomRight));
     }
 
     [Fact]

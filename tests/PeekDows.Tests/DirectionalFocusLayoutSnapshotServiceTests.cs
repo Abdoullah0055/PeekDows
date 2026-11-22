@@ -31,6 +31,115 @@ public class DirectionalFocusLayoutSnapshotServiceTests
         public MonitorInfo GetPrimaryMonitor() => new() { WorkArea = _workArea, IsPrimary = true };
     }
 
+    private sealed class TwoMonitorResolver(MonitorInfo left, MonitorInfo right) : IMonitorResolver
+    {
+        public MonitorInfo GetMonitorForWindow(IntPtr hwnd) => hwnd == (IntPtr)8 ? right : left;
+        public MonitorInfo GetPrimaryMonitor() => left;
+    }
+
+    [Theory]
+    [InlineData("Halves", false, 2)]
+    [InlineData("Thirds", false, 3)]
+    [InlineData("Custom", false, 2)]
+    [InlineData("Custom", true, 3)]
+    public void RebuildUsesTheRespectivePlacementRects(string mode, bool split, int expectedCount)
+    {
+        var engine = new LayoutEngine();
+        var settings = new AppSettings();
+        var zones = new CustomZoneLayout(SplitSecondary: split);
+        var windows = Enumerable.Range(1, 3).Select(id => Window((IntPtr)id, default)).ToArray();
+        var rectangles = engine.CalculatePlacements(mode, windows, WorkArea, settings, zones)
+            .ToDictionary(placement => placement.Hwnd, placement => placement.TargetRect);
+        var snapshot = new DirectionalFocusLayoutSnapshotService(
+            new SingleMonitorResolver(WorkArea), hwnd => rectangles[hwnd],
+            _ => true, _ => engine.GetSlotRects(mode, WorkArea, settings, zones));
+
+        var slotMap = snapshot.BuildSlotMap(WorkArea, windows.Select(window => window.Hwnd));
+
+        Assert.Equal(expectedCount, slotMap.Count);
+        Assert.Equal((IntPtr)1, slotMap[DirectionalFocusSlot.MiddleLeft]);
+        Assert.All(slotMap, entry => Assert.True(snapshot.IsWindowStillInSlot(entry.Value, WorkArea, entry.Key)));
+    }
+
+    [Fact]
+    public void RebuildUsesPerMonitorLayoutAndTheTopEligibleWindowInEachStack()
+    {
+        var left = new MonitorInfo { ProfileId = "left", WorkArea = WorkArea with { Left = -1920, Top = -60 } };
+        var right = new MonitorInfo { ProfileId = "right", WorkArea = WorkArea };
+        var resolver = new TwoMonitorResolver(left, right);
+        var settings = new AppSettings
+        {
+            LayoutMode = "Thirds",
+            MonitorProfiles = new() { ["left"] = new("Halves", []) }
+        };
+        var engine = new LayoutEngine();
+        IReadOnlyDictionary<string, Rect> GetSlots(MonitorInfo monitor)
+        {
+            var profile = MonitorLayoutSettings.Resolve(settings, monitor);
+            return engine.GetSlotRects(profile.Mode, monitor.WorkArea, settings, profile.Zones);
+        }
+
+        var leftRect = GetSlots(left)["Left"];
+        var rects = new Dictionary<IntPtr, Rect>
+        {
+            [(IntPtr)1] = leftRect, // another desktop
+            [(IntPtr)2] = leftRect, // minimized
+            [(IntPtr)3] = leftRect with { Left = leftRect.Left + 300 }, // dragged away
+            [(IntPtr)4] = leftRect, // first eligible window in this slot
+            [(IntPtr)5] = leftRect,
+            [(IntPtr)8] = GetSlots(right)["Col2"]
+        };
+        var snapshot = new DirectionalFocusLayoutSnapshotService(resolver, hwnd => rects[hwnd],
+            hwnd => hwnd != (IntPtr)1 && hwnd != (IntPtr)2, GetSlots);
+
+        var leftMap = snapshot.BuildSlotMap(left.WorkArea, rects.Keys);
+        var rightMap = snapshot.BuildSlotMap(right.WorkArea, rects.Keys);
+
+        Assert.Equal((IntPtr)4, Assert.Single(leftMap).Value);
+        Assert.Equal((IntPtr)4, leftMap[DirectionalFocusSlot.MiddleLeft]);
+        Assert.Equal((IntPtr)8, Assert.Single(rightMap).Value);
+        Assert.Equal((IntPtr)8, rightMap[DirectionalFocusSlot.TopCenter]);
+        Assert.False(snapshot.IsWindowStillInSlot((IntPtr)8, left.WorkArea, DirectionalFocusSlot.TopCenter));
+    }
+
+    [Fact]
+    public void CloseGridRectsKeepTheirExactSlotAndTheStackHead()
+    {
+        var engine = new LayoutEngine();
+        var grid = engine.CalculateClassicPeekGridSlotRects(WorkArea, LayoutEngine.GetPresetRatio(WindowSizePreset.Large));
+        var snapshot = new DirectionalFocusLayoutSnapshotService(new SingleMonitorResolver(WorkArea),
+            hwnd => hwnd == (IntPtr)3 ? grid["F"] : grid["B"], _ => true, _ => grid);
+
+        var map = snapshot.BuildSlotMap(WorkArea, [(IntPtr)2, (IntPtr)1, (IntPtr)3]);
+
+        Assert.Equal(2, map.Count);
+        Assert.Equal((IntPtr)2, map[DirectionalFocusSlot.BottomRight]);
+        Assert.Equal((IntPtr)3, map[DirectionalFocusSlot.BottomCenter]);
+    }
+
+    [Fact]
+    public void SmallCustomZoneRemainsFocusableAfterArrangeShrinksTheWindow()
+    {
+        var area = WorkArea with { Height = 800 };
+        var settings = new AppSettings();
+        var slots = new LayoutEngine().GetSlotRects("Custom", area, settings, new(60, true, 80));
+        var raw = new RawWindowInfo
+        {
+            Hwnd = (IntPtr)3,
+            CurrentRect = slots["Custom3"],
+            IsVisible = true,
+            ProcessName = "editor.exe",
+            ProcessId = Environment.ProcessId + 1,
+            Title = "Editor"
+        };
+        var classifier = new WindowClassifier(settings, _ => true);
+        var snapshot = new DirectionalFocusLayoutSnapshotService(new SingleMonitorResolver(area),
+            _ => raw.CurrentRect, _ => classifier.IsEligibleForDirectionalFocus(raw), _ => slots);
+
+        Assert.False(classifier.IsEligible(raw));
+        Assert.Equal(raw.Hwnd, snapshot.BuildSlotMap(area, [raw.Hwnd])[DirectionalFocusSlot.BottomRight]);
+    }
+
     private static DirectionalFocusLayoutSnapshotService CreateService(
         Func<IntPtr, Rect> rectFor,
         Func<IntPtr, bool>? isOnCurrentDesktop = null)

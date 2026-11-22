@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
 using PeekDows.Core.Win32;
@@ -25,6 +26,7 @@ public sealed class DirectionalFocusService : IDisposable
     private const int CooldownMs = 150;
 
     private const int RebuildCooldownMs = 500;
+    private const int HeldSnapshotMaxAgeMs = 1500;
 
     // Cancellation inputs polled while held (GetAsyncKeyState already in NativeMethods).
     private const int VkEscape = 0x1B;
@@ -59,11 +61,13 @@ public sealed class DirectionalFocusService : IDisposable
     private int _inactiveStreak;
     private string? _pendingEndReason;
     private Point _anchor;
-    private Rect _anchorMonitor;
-    private DirectionalFocusSlot? _lastTriggeredSlot;
+    private (IntPtr Handle, Rect WorkArea) _anchorMonitor;
+    private (DirectionalFocusSlot Slot, IntPtr? Hwnd)? _lastTargetAttempt;
     private DateTime _lastFocusTime = DateTime.MinValue;
     private DateTime _cooldownUntil = DateTime.MinValue;
     private DateTime _lastRegistryRebuildAttempt = DateTime.MinValue;
+    private IntPtr _foregroundAtLastSnapshot;
+    private int _displayChanged;
     private bool _disposed;
 
     public DirectionalFocusService(
@@ -136,6 +140,7 @@ public sealed class DirectionalFocusService : IDisposable
     public void Start()
     {
         if (_timer.Enabled) return;
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         _timer.Start();
         _logger?.Info("DirectionalFocusService started");
     }
@@ -144,11 +149,25 @@ public sealed class DirectionalFocusService : IDisposable
     {
         if (!_timer.Enabled) return;
         _timer.Stop();
+        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         EndGesture("stop");
         _logger?.Info("DirectionalFocusService stopped");
     }
 
     public DirectionalFocusRegistry Registry => _registry;
+
+    internal void InvalidateLayout()
+    {
+        _registry.Clear();
+        _lastRegistryRebuildAttempt = DateTime.MinValue;
+        EndGesture("layout changed");
+    }
+
+    internal void RefreshGestureSlots(Rect monitorWorkArea)
+        => TryRebuildRegistryForCurrentDesktop(monitorWorkArea, force: true);
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+        => Interlocked.Exchange(ref _displayChanged, 1);
 
     /// <summary>
     /// Hint lifecycle for Overlay UI (Beta). Raised on the WinForms UI
@@ -196,6 +215,9 @@ public sealed class DirectionalFocusService : IDisposable
 
     internal void Tick()
     {
+        if (Interlocked.Exchange(ref _displayChanged, 0) != 0)
+            InvalidateLayout();
+
         bool ctrlDown = IsKeyDown(NativeMethods.VK_CONTROL);
         bool shiftDown = IsKeyDown(NativeMethods.VK_SHIFT);
         bool altDown = IsKeyDown(NativeMethods.VK_MENU);
@@ -225,9 +247,11 @@ public sealed class DirectionalFocusService : IDisposable
             // mid-gesture (which caused "no slots recognized" and ignored
             // activations).
             _anchorMonitor = MonitorFromPointNative(_anchor.X, _anchor.Y);
-            _lastTriggeredSlot = null;
+            _lastTargetAttempt = null;
             _logger?.Info($"Directional focus modifiers active: Ctrl+Win, anchorMonitor={_anchorMonitor}");
-            NotifyGestureStarted(_anchor, _anchorMonitor);
+            _foregroundAtLastSnapshot = NativeMethods.GetForegroundWindow();
+            RefreshGestureSlots(_anchorMonitor.WorkArea);
+            NotifyGestureStarted(_anchor, _anchorMonitor.WorkArea);
             return;
         }
         else if (shiftDown)
@@ -276,6 +300,12 @@ public sealed class DirectionalFocusService : IDisposable
         _inactiveStreak = 0;
         _pendingEndReason = null;
 
+        if (MonitorFromPointNative(_anchor.X, _anchor.Y) != _anchorMonitor)
+        {
+            InvalidateLayout();
+            return;
+        }
+
         // Flick detection: anchor → cursor vector against the pinned monitor.
         var current = Cursor.Position;
         int dx = current.X - _anchor.X;
@@ -284,31 +314,41 @@ public sealed class DirectionalFocusService : IDisposable
         var threshold = _getThresholdPx();
         var slot = _gestureDetector.Detect(_anchor.X, _anchor.Y, current.X, current.Y, threshold);
         double distance = Math.Sqrt((double)dx * dx + (double)dy * dy);
-        NotifyGestureUpdated(slot, threshold, distance);
-
-        if (slot == null) return;
-
-        // Don't re-trigger the slot we're already on while held — the window
-        // is already in front, re-activating it would just spam it.
-        if (slot == _lastTriggeredSlot) return;
-
-        // Global throttle while held: pace slot-hopping. Per-hwnd cooldowns and the
-        // unstable tracker carry the heavy protection; this only bounds the gesture cadence.
         var now = _nowProvider();
-        if (IsThrottled(now))
-        {
-            _logger?.Info($"Directional focus activation throttled, cooldown remaining={(_cooldownUntil - now).TotalMilliseconds}ms");
-            return;
-        }
+        RefreshHeldGestureSlots(now);
+        bool canAttempt = slot is not null && !IsThrottled(now);
+        bool canRebuild = canAttempt && (_lastTargetAttempt?.Slot != slot || _lastTargetAttempt?.Hwnd is null);
+        var target = slot is { } requested ? ResolveTarget(_anchorMonitor.WorkArea, requested, canRebuild) : null;
+        NotifyGestureUpdated(target?.Slot, threshold, distance);
+        if (!canAttempt || slot is not { } direction || !TryBeginTargetAttempt(direction, target?.Hwnd)) return;
 
-        // Resolve against the pinned anchor monitor, NOT the current cursor position: the slot
-        // set (A-H) belongs to the monitor where the gesture began, even if the cursor has
-        // since crossed a monitor boundary.
-        var mouseWorkArea = _anchorMonitor;
+        _logger?.Info($"Directional focus trigger candidate: slot={direction}, dx={dx}, dy={dy}, anchor=({_anchor.X},{_anchor.Y}), current=({current.X},{current.Y}), anchorMonitor={_anchorMonitor}, threshold={threshold}");
 
-        _logger?.Info($"Directional focus trigger candidate: slot={slot.Value}, dx={dx}, dy={dy}, anchor=({_anchor.X},{_anchor.Y}), current=({current.X},{current.Y}), anchorMonitor={mouseWorkArea}, threshold={threshold}");
+        ActivateSlot(direction, target?.Hwnd, now);
+    }
 
-        ActivateSlot(mouseWorkArea, slot.Value, now);
+    internal bool TryBeginTargetAttempt(DirectionalFocusSlot direction, IntPtr? hwnd)
+    {
+        if (_lastTargetAttempt is { } previous && previous.Slot == direction &&
+            (hwnd is null || hwnd == previous.Hwnd))
+            return false;
+
+        _lastTargetAttempt = (direction, hwnd);
+        return true;
+    }
+
+    private void RefreshHeldGestureSlots(DateTime now)
+    {
+        var age = (now - _lastRegistryRebuildAttempt).TotalMilliseconds;
+        if (age < RebuildCooldownMs) return;
+
+        var foreground = NativeMethods.GetForegroundWindow();
+        // A desktop change typically changes the foreground hwnd. Refresh periodically
+        // as well, including when an app is pinned across desktops and its hwnd stays put.
+        if (foreground == _foregroundAtLastSnapshot && age < HeldSnapshotMaxAgeMs) return;
+
+        _foregroundAtLastSnapshot = foreground;
+        TryRebuildRegistryForCurrentDesktop(_anchorMonitor.WorkArea);
     }
 
     /// <summary>
@@ -415,88 +455,37 @@ public sealed class DirectionalFocusService : IDisposable
         _lastFocusTime = now;
     }
 
-    /// <summary>
-    /// Resolves the hwnd for a slot on a monitor: registry first, then a rate-limited
-    /// on-demand rebuild from the current layout if the slot is missing/stale. Returns
-    /// null when the layout is not recognised. Pure lookup logic — no Win32 calls,
-    /// so it is directly unit-testable.
-    /// </summary>
-    /// <remarks>
-    /// The registry fast path is never trusted blindly: even when a slot→hwnd mapping
-    /// exists, the window must still be physically sitting in its expected slot rect
-    /// (validated via <see cref="DirectionalFocusLayoutSnapshotService.IsWindowStillInSlot"/>).
-    /// This stops Directional Focus from activating a window the user dragged away.
-    /// </remarks>
     internal IntPtr? ResolveHwndForSlot(Rect mouseWorkArea, DirectionalFocusSlot slot)
+        => ResolveTarget(mouseWorkArea, slot)?.Hwnd;
+
+    // Resolve once so the overlay highlights the same target that activation uses.
+    internal (DirectionalFocusSlot Slot, IntPtr Hwnd)? ResolveTarget(
+        Rect monitorWorkArea, DirectionalFocusSlot requested, bool allowRebuild = true)
     {
-        // 1. Fast path: registry has a mapping — but only trust it if the window is
-        //    still physically in its slot rect. Otherwise the registry is stale.
-        var hwnd = _registry.GetHwndForSlot(mouseWorkArea, slot);
+        var target = FindExactTarget(monitorWorkArea, requested);
+        if (target is null && allowRebuild && TryRebuildRegistryForCurrentDesktop(monitorWorkArea))
+            target = FindExactTarget(monitorWorkArea, requested);
 
-        if (hwnd != null && hwnd != IntPtr.Zero)
-        {
-            if (IsWindowValidInSlot(hwnd.Value, mouseWorkArea, slot))
-            {
-                _logger?.Info($"Directional focus registry hit: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}");
-            }
-            else
-            {
-                _logger?.Info($"Directional focus registry hit rejected: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}, window no longer matches slot rect");
-                hwnd = null;
-            }
-        }
+        return target ?? ResolveWithFallback(monitorWorkArea, requested);
+    }
 
-        // 2. On miss/stale, try a one-shot rebuild from the current layout (rate-limited).
-        if (hwnd == null || hwnd == IntPtr.Zero)
-        {
-            _logger?.Info($"Directional focus registry miss/stale: slot={slot}, monitor={mouseWorkArea}");
+    private (DirectionalFocusSlot Slot, IntPtr Hwnd)? FindExactTarget(
+        Rect monitorWorkArea, DirectionalFocusSlot requested)
+    {
+        var hwnd = _registry.GetHwndForSlot(monitorWorkArea, requested);
+        if (hwnd is { } exact && IsWindowValidInSlot(exact, monitorWorkArea, requested))
+            return (requested, exact);
 
-            if (TryRebuildRegistryForCurrentDesktop(mouseWorkArea))
-            {
-                hwnd = _registry.GetHwndForSlot(mouseWorkArea, slot);
+        // Thirds uses one canonical overlay entry for Col2, with both vertical
+        // gestures routed to it. An empty Col2 keeps the original direction for fallback.
+        var centerSlot = DirectionalFocusSlot.TopCenter;
+        if (requested == DirectionalFocusSlot.BottomCenter &&
+            _registry.GetHwndForSlot(monitorWorkArea, centerSlot) is { } center &&
+            _snapshotService.IsThirdsCenterColumn(center, monitorWorkArea) &&
+            IsWindowValidInSlot(center, monitorWorkArea, centerSlot))
+            return (centerSlot, center);
 
-                // Validate the rebuilt mapping too — a snapshot may map a slot to a
-                // window that has since drifted again, so re-check the rect.
-                if (hwnd != null && hwnd != IntPtr.Zero)
-                {
-                    if (IsWindowValidInSlot(hwnd.Value, mouseWorkArea, slot))
-                    {
-                        _logger?.Info($"Directional focus rebuild result accepted: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}");
-                    }
-                    else
-                    {
-                        _logger?.Info($"Directional focus rebuild result rejected: hwnd={hwnd.Value}, slot={slot}, monitor={mouseWorkArea}, window does not match slot rect");
-                        hwnd = null;
-                    }
-                }
-            }
-        }
-
-        if (hwnd == null || hwnd == IntPtr.Zero)
-        {
-            // The exact slot is empty OR no layout is recognised at all. Distinguish the two:
-            // if some slots ARE populated on this monitor, the layout is recognised and we can
-            // fall back to the best-aligned available slot in the gesture direction. Only when
-            // NO slot is populated do we tell the user to run Arrange Now.
-            var fallback = ResolveWithFallback(mouseWorkArea, slot);
-            if (fallback != null && fallback != IntPtr.Zero)
-            {
-                _logger?.Info($"Directional focus fallback selected: requested={slot}, monitor={mouseWorkArea}, hwnd={fallback}");
-                return fallback;
-            }
-
-            if (_registry.HasSlotsForMonitor(mouseWorkArea))
-            {
-                var available = string.Join(",", _registry.GetAvailableSlots(mouseWorkArea).Select(s => s.Slot));
-                _logger?.Info($"Directional focus exact slot empty: requested={slot}, availableSlots=[{available}], no aligned fallback on monitor={mouseWorkArea}");
-            }
-            else
-            {
-                _logger?.Info($"Directional focus ignored: current layout not recognized; run Arrange Now first. slot={slot}, monitor={mouseWorkArea}");
-            }
-        }
-
-        return hwnd;
+        return null;
     }
 
     /// <summary>
@@ -506,11 +495,9 @@ public sealed class DirectionalFocusService : IDisposable
     /// </summary>
     private bool IsWindowValidInSlot(IntPtr hwnd, Rect monitorWorkArea, DirectionalFocusSlot slot)
     {
-        if (_animator is not null && _animator.IsAnimating(hwnd))
-        {
-            _logger?.Info($"Directional focus slot validation bypassed (window animating): hwnd={hwnd}, slot={slot}");
-            return true;
-        }
+        if (_animator?.IsAnimating(hwnd) == true)
+            return _registry.GetPlannedSlotsForMonitor(monitorWorkArea).TryGetValue(hwnd, out var placement) &&
+                _snapshotService.IsPlannedSlotStillValid(placement, monitorWorkArea, slot);
         return _snapshotService.IsWindowStillInSlot(hwnd, monitorWorkArea, slot);
     }
 
@@ -521,14 +508,14 @@ public sealed class DirectionalFocusService : IDisposable
     /// the right edge even when MiddleRight is empty. Returns null only if no reasonable
     /// target exists in that direction.
     /// </summary>
-    private IntPtr? ResolveWithFallback(Rect mouseWorkArea, DirectionalFocusSlot requested)
+    private (DirectionalFocusSlot Slot, IntPtr Hwnd)? ResolveWithFallback(Rect mouseWorkArea, DirectionalFocusSlot requested)
     {
         var available = _registry.GetAvailableSlots(mouseWorkArea);
         if (available.Count == 0)
             return null;
 
         var requestedDir = SlotDirection(requested);
-        IntPtr? best = null;
+        (DirectionalFocusSlot Slot, IntPtr Hwnd)? best = null;
         double bestScore = double.MinValue;
 
         foreach (var (candidateSlot, candidateHwnd) in available)
@@ -548,7 +535,7 @@ public sealed class DirectionalFocusService : IDisposable
             if (score > bestScore)
             {
                 bestScore = score;
-                best = candidateHwnd;
+                best = (candidateSlot, candidateHwnd);
             }
         }
 
@@ -579,32 +566,27 @@ public sealed class DirectionalFocusService : IDisposable
         };
     }
 
-    private void ActivateSlot(Rect mouseWorkArea, DirectionalFocusSlot slot, DateTime now)
+    private void ActivateSlot(DirectionalFocusSlot slot, IntPtr? hwnd, DateTime now)
     {
-        var hwnd = ResolveHwndForSlot(mouseWorkArea, slot);
-
         if (hwnd == null || hwnd == IntPtr.Zero)
         {
-            // Nothing to activate: mark the slot visited and apply the normal cooldown so we
-            // don't keep re-resolving an empty slot on every tick, but no backoff is needed.
-            _lastTriggeredSlot = slot;
+            // Pace the next activation while continuing to watch for a target in this direction.
             SetPostActivationCooldown(now, success: true);
             return;
         }
 
-        bool onCurrentDesktop = _virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd.Value);
-        if (!onCurrentDesktop)
+        bool onCurrentDesktop = _virtualDesktopService.IsWindowOnCurrentVirtualDesktopNow(hwnd.Value);
+        bool isIconic = NativeMethods.IsIconic(hwnd.Value);
+        if (!onCurrentDesktop || isIconic)
         {
-            _logger?.Info($"Directional focus ignored: target is not on current virtual desktop, hwnd={hwnd.Value}");
+            _logger?.Info($"Directional focus ignored: hwnd={hwnd.Value}, onCurrentDesktop={onCurrentDesktop}, isMinimized={isIconic}");
             // Still apply the normal cooldown — we made a resolve attempt.
-            _lastTriggeredSlot = slot;
             SetPostActivationCooldown(now, success: true);
             return;
         }
 
         var targetTitle = GetWindowTitle(hwnd.Value);
         var targetPid = GetWindowProcessId(hwnd.Value);
-        bool isIconic = NativeMethods.IsIconic(hwnd.Value);
         var currentForeground = NativeMethods.GetForegroundWindow();
 
         _logger?.Info($"Directional focus target: hwnd={hwnd.Value}, title={targetTitle}, pid={targetPid}, onCurrentDesktop={onCurrentDesktop}, isMinimized={isIconic}, currentForegroundHwnd={currentForeground}");
@@ -641,7 +623,6 @@ public sealed class DirectionalFocusService : IDisposable
         // The per-hwnd cooldown inside WindowActivationService already shields this specific
         // hwnd; here we apply the throttle so the user's next rapid slot-hop is paced. Pending
         // uses the normal pacing, not a failure backoff.
-        _lastTriggeredSlot = slot;
         SetPostActivationCooldown(now, success: successLike);
     }
 
@@ -651,14 +632,11 @@ public sealed class DirectionalFocusService : IDisposable
     /// Rate-limited so the snapshot cannot run more than once per
     /// <see cref="RebuildCooldownMs"/>. Never moves any window.
     /// </summary>
-    private bool TryRebuildRegistryForCurrentDesktop(Rect mouseWorkArea)
+    private bool TryRebuildRegistryForCurrentDesktop(Rect mouseWorkArea, bool force = false)
     {
         var now = _nowProvider();
-        if ((now - _lastRegistryRebuildAttempt).TotalMilliseconds < RebuildCooldownMs)
-        {
-            _logger?.Info($"Directional focus rebuild skipped: rate-limited (cooldown={RebuildCooldownMs}ms)");
+        if (!force && (now - _lastRegistryRebuildAttempt).TotalMilliseconds < RebuildCooldownMs)
             return false;
-        }
 
         _lastRegistryRebuildAttempt = now;
 
@@ -675,24 +653,25 @@ public sealed class DirectionalFocusService : IDisposable
             return false;
         }
 
-        var slotMap = _snapshotService.BuildSlotMap(mouseWorkArea, candidates);
-
-        if (slotMap.Count == 0)
-        {
-            _logger?.Info($"Directional focus snapshot: no PeekDows slots recognized on monitor={mouseWorkArea}");
-            return false;
-        }
+        var animatingSlots = _registry.GetPlannedSlotsForMonitor(mouseWorkArea)
+            .Where(entry => _animator?.IsAnimating(entry.Key) == true).ToDictionary();
+        var eligible = candidates.Where(hwnd =>
+            _animator?.IsAnimating(hwnd) != true || animatingSlots.ContainsKey(hwnd));
+        // A registered window may be too small for discovery partway through its
+        // tween. Keep its planned zone eligible while the tween is in flight.
+        var slotMap = _snapshotService.BuildSlotMap(mouseWorkArea,
+            eligible.Concat(animatingSlots.Keys).Distinct(), animatingSlots);
 
         _registry.SetSlotsForMonitor(mouseWorkArea, slotMap);
         _logger?.Info($"Directional focus snapshot rebuild complete: monitor={mouseWorkArea}, slots={slotMap.Count}");
-        return true;
+        return slotMap.Count != 0;
     }
 
     private void ResetState()
     {
         _anchor = Point.Empty;
         _anchorMonitor = default;
-        _lastTriggeredSlot = null;
+        _lastTargetAttempt = null;
         // Disarming (or stopping the service) clears the throttle so the next
         // armed gesture begins fresh rather than inheriting the previous one's cooldown.
         _lastFocusTime = DateTime.MinValue;
@@ -747,7 +726,7 @@ public sealed class DirectionalFocusService : IDisposable
     }
 
     // C7 fix: deduplicated P/Invoke — use MonitorNativeMethods as single source of truth.
-    private Rect MonitorFromPointNative(int x, int y)
+    private (IntPtr Handle, Rect WorkArea) MonitorFromPointNative(int x, int y)
     {
         var point = new MonitorNativeMethods.POINT { X = x, Y = y };
         var hMonitor = MonitorNativeMethods.MonitorFromPoint(point, MonitorNativeMethods.MONITOR_DEFAULTTONEAREST);
@@ -757,16 +736,16 @@ public sealed class DirectionalFocusService : IDisposable
 
         if (MonitorNativeMethods.GetMonitorInfo(hMonitor, ref mi))
         {
-            return new Rect(
+            return (hMonitor, new Rect(
                 mi.rcWork.left,
                 mi.rcWork.top,
                 mi.rcWork.right - mi.rcWork.left,
                 mi.rcWork.bottom - mi.rcWork.top
-            );
+            ));
         }
 
         var primary = _monitorResolver.GetPrimaryMonitor();
-        return primary.WorkArea;
+        return (primary.Handle, primary.WorkArea);
     }
 
     public void Dispose()
@@ -774,6 +753,7 @@ public sealed class DirectionalFocusService : IDisposable
         if (_disposed) return;
         _disposed = true;
         _timer.Tick -= OnTimerTick;
+        if (_timer.Enabled) SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         _timer.Stop();
         _timer.Dispose();
     }

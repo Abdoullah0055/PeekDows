@@ -7,6 +7,9 @@ namespace PeekDows.Core.Services;
 
 public class LayoutEngine
 {
+    private static readonly string[] HalvesSlotOrder = ["Left", "Right"];
+    private static readonly string[] ThirdsSlotOrder = ["Col1", "Col2", "Col3"];
+
     // P-B2 fix: cache slot rects (pure function of workArea+ratio). One dict allocation per
     // distinct monitor WorkArea/ratio tuple instead of per arrange / per IsWindowStillInSlot call.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Rect WorkArea, double Ratio), IReadOnlyDictionary<string, Rect>> _slotRectsCache = new();
@@ -29,8 +32,7 @@ public class LayoutEngine
 
         var priorityWindows = PrioritizeForClassicPeekGrid(windows);
 
-        var ratio = GetPresetRatio(settings.WindowSizePreset);
-        var slotRects = CalculateClassicPeekGridSlotRects(workArea, ratio);
+        var slotRects = GetSlotRects("Grid", workArea, settings);
 
         string[] slotOrder = { "A", "B", "C", "D", "E", "F", "G", "H" };
 
@@ -61,30 +63,7 @@ public class LayoutEngine
         IReadOnlyList<ManagedWindow> windows,
         Rect workArea,
         AppSettings settings)
-    {
-        var result = new List<WindowPlacement>();
-        if (windows.Count == 0) return result;
-
-        int halfW = Math.Max(1, workArea.Width / 2);
-        var leftRect = new Rect(workArea.Left, workArea.Top, halfW, workArea.Height);
-        var rightRect = new Rect(workArea.Left + halfW, workArea.Top, Math.Max(1, workArea.Width - halfW), workArea.Height);
-        Rect[] slotRects = [leftRect, rightRect];
-        string[] slotOrder = ["Left", "Right"];
-
-        for (int i = 0; i < windows.Count; i++)
-        {
-            int slot = i % slotOrder.Length;
-            result.Add(new WindowPlacement
-            {
-                Hwnd = windows[i].Hwnd,
-                SlotId = slotOrder[slot],
-                TargetRect = slotRects[slot],
-                BringToFront = false
-            });
-        }
-
-        return result;
-    }
+        => CalculateOrderedPlacements(windows, HalvesSlotOrder, GetSlotRects("Halves", workArea, settings));
 
     /// <summary>
     /// F2 (Layouts Halves/Thirds): three equal columns covering the full work-area
@@ -96,25 +75,22 @@ public class LayoutEngine
         IReadOnlyList<ManagedWindow> windows,
         Rect workArea,
         AppSettings settings)
+        => CalculateOrderedPlacements(windows, ThirdsSlotOrder, GetSlotRects("Thirds", workArea, settings));
+
+    private static IReadOnlyList<WindowPlacement> CalculateOrderedPlacements(
+        IReadOnlyList<ManagedWindow> windows,
+        IReadOnlyList<string> slotOrder,
+        IReadOnlyDictionary<string, Rect> slotRects)
     {
-        var result = new List<WindowPlacement>();
-        if (windows.Count == 0) return result;
-
-        int thirdW = Math.Max(1, workArea.Width / 3);
-        var col1Rect = new Rect(workArea.Left, workArea.Top, thirdW, workArea.Height);
-        var col2Rect = new Rect(workArea.Left + thirdW, workArea.Top, thirdW, workArea.Height);
-        var col3Rect = new Rect(workArea.Left + (thirdW * 2), workArea.Top, Math.Max(1, workArea.Width - (thirdW * 2)), workArea.Height);
-        Rect[] slotRects = [col1Rect, col2Rect, col3Rect];
-        string[] slotOrder = ["Col1", "Col2", "Col3"];
-
+        var result = new List<WindowPlacement>(windows.Count);
         for (int i = 0; i < windows.Count; i++)
         {
-            int slot = i % slotOrder.Length;
+            var slotId = slotOrder[i % slotOrder.Count];
             result.Add(new WindowPlacement
             {
                 Hwnd = windows[i].Hwnd,
-                SlotId = slotOrder[slot],
-                TargetRect = slotRects[slot],
+                SlotId = slotId,
+                TargetRect = slotRects[slotId],
                 BringToFront = false
             });
         }
@@ -135,26 +111,47 @@ public class LayoutEngine
         AppSettings settings,
         CustomZoneLayout? customZones = null)
     {
-        if (!string.IsNullOrWhiteSpace(mode))
+        switch (MonitorLayoutSettings.NormalizeMode(mode))
         {
-            var normalized = mode.Trim();
-            if (string.Equals(normalized, "Halves", StringComparison.OrdinalIgnoreCase))
+            case "Halves":
                 return CalculateHalvesPlacements(windows, workArea, settings);
-            if (string.Equals(normalized, "Thirds", StringComparison.OrdinalIgnoreCase))
+            case "Thirds":
                 return CalculateThirdsPlacements(windows, workArea, settings);
-            if (string.Equals(normalized, "Custom", StringComparison.OrdinalIgnoreCase))
-            {
-                var zones = CalculateCustomZones(workArea, customZones ?? settings.CustomZones ?? new());
-                return windows.Select((window, index) => new WindowPlacement
-                {
-                    Hwnd = window.Hwnd,
-                    SlotId = $"Custom{index % zones.Count + 1}",
-                    TargetRect = zones[index % zones.Count]
-                }).ToArray();
-            }
+            case "Custom":
+                var slots = GetSlotRects("Custom", workArea, settings, customZones);
+                var order = Enumerable.Range(1, slots.Count).Select(index => $"Custom{index}").ToArray();
+                return CalculateOrderedPlacements(windows, order, slots);
+            default:
+                return CalculateClassicPeekGridPlacements(windows, workArea, settings);
         }
+    }
 
-        return CalculateClassicPeekGridPlacements(windows, workArea, settings);
+    public IReadOnlyDictionary<string, Rect> GetSlotRects(
+        string? mode, Rect workArea, AppSettings settings, CustomZoneLayout? zones = null)
+    {
+        switch (MonitorLayoutSettings.NormalizeMode(mode))
+        {
+            case "Halves":
+                int halfW = Math.Max(1, workArea.Width / 2);
+                return new Dictionary<string, Rect>
+                {
+                    ["Left"] = new(workArea.Left, workArea.Top, halfW, workArea.Height),
+                    ["Right"] = new(workArea.Left + halfW, workArea.Top, Math.Max(1, workArea.Width - halfW), workArea.Height)
+                };
+            case "Thirds":
+                int thirdW = Math.Max(1, workArea.Width / 3);
+                return new Dictionary<string, Rect>
+                {
+                    ["Col1"] = new(workArea.Left, workArea.Top, thirdW, workArea.Height),
+                    ["Col2"] = new(workArea.Left + thirdW, workArea.Top, thirdW, workArea.Height),
+                    ["Col3"] = new(workArea.Left + thirdW * 2, workArea.Top, Math.Max(1, workArea.Width - thirdW * 2), workArea.Height)
+                };
+            case "Custom":
+                return CalculateCustomZones(workArea, zones ?? settings.CustomZones ?? new())
+                    .Select((rect, index) => new KeyValuePair<string, Rect>($"Custom{index + 1}", rect)).ToDictionary();
+            default:
+                return CalculateClassicPeekGridSlotRects(workArea, GetPresetRatio(settings.WindowSizePreset));
+        }
     }
 
     public static IReadOnlyList<Rect> CalculateCustomZones(Rect area, CustomZoneLayout layout)

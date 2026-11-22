@@ -132,13 +132,19 @@ public class WindowClassifier
         }
     }
 
-    public bool IsEligible(RawWindowInfo window)
+    public bool IsEligible(RawWindowInfo window) => IsEligible(window, includeSmallWindows: false);
+
+    // Custom placement can legitimately shrink a window below the arrange threshold.
+    // Directional focus checks against the actual zone size after classification.
+    public bool IsEligibleForDirectionalFocus(RawWindowInfo window) => IsEligible(window, includeSmallWindows: true);
+
+    private bool IsEligible(RawWindowInfo window, bool includeSmallWindows)
     {
         if (!window.IsVisible) return false;
         if (window.IsMinimized) return false;
         if (window.IsCloaked) return false;
         if (string.IsNullOrWhiteSpace(window.Title)) return false;
-        if (window.CurrentRect.Width < 250 || window.CurrentRect.Height < 180) return false;
+        if (!includeSmallWindows && (window.CurrentRect.Width < 250 || window.CurrentRect.Height < 180)) return false;
         // C2 fix: self-filter via ProcessId OR tray host class/title so "dotnet run"
         // (parent is dotnet.exe) and double-instance cases still exclude our own windows.
         if (window.ProcessId == Environment.ProcessId) return false;

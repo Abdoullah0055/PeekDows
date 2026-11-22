@@ -8,7 +8,10 @@ namespace PeekDows.Core.Services;
 
 public sealed class DirectionalFocusRegistry
 {
+    private static readonly IReadOnlyDictionary<IntPtr, WindowPlacement> NoPlannedSlots =
+        new Dictionary<IntPtr, WindowPlacement>();
     private readonly Dictionary<Rect, Dictionary<DirectionalFocusSlot, IntPtr>> _slotsByMonitor = new();
+    private readonly Dictionary<Rect, Dictionary<IntPtr, WindowPlacement>> _plannedSlotsByMonitor = new();
     private readonly FileLogger? _logger;
     private readonly Func<IntPtr, bool> _isWindowValid;
     private readonly Func<IntPtr, bool> _isOnCurrentVirtualDesktop;
@@ -31,10 +34,31 @@ public sealed class DirectionalFocusRegistry
         _logger = logger;
     }
 
-    public void UpdateFromPlacements(IReadOnlyList<WindowPlacement> placements, IMonitorResolver monitorResolver)
+    public void Clear()
     {
         _slotsByMonitor.Clear();
-        ApplyPlacements(placements, monitorResolver);
+        _plannedSlotsByMonitor.Clear();
+    }
+
+    public IReadOnlyDictionary<IntPtr, WindowPlacement> GetPlannedSlotsForMonitor(Rect monitorWorkArea)
+        => _plannedSlotsByMonitor.TryGetValue(monitorWorkArea, out var plans) ? plans : NoPlannedSlots;
+
+    public void UpdateFromPlacements(
+        IReadOnlyList<WindowPlacement> placements,
+        IMonitorResolver monitorResolver,
+        IReadOnlyList<IntPtr>? topToBottom = null,
+        Func<MonitorInfo, IReadOnlyDictionary<string, Rect>>? getSlotRects = null)
+    {
+        Clear();
+        if (topToBottom is null)
+        {
+            ApplyPlacements(placements, monitorResolver, getSlotRects);
+            return;
+        }
+
+        var ranks = topToBottom.Distinct().Select((hwnd, rank) => (hwnd, rank))
+            .ToDictionary(entry => entry.hwnd, entry => entry.rank);
+        ApplyPlacements(placements.OrderBy(p => ranks.GetValueOrDefault(p.Hwnd, int.MaxValue)), monitorResolver, getSlotRects);
     }
 
     /// <summary>
@@ -57,18 +81,16 @@ public sealed class DirectionalFocusRegistry
         _logger?.Info($"DirectionalFocusRegistry: snapshot-set slots for monitor={monitorWorkArea}, count={slotMap.Count}");
     }
 
-    private void ApplyPlacements(IReadOnlyList<WindowPlacement> placements, IMonitorResolver monitorResolver)
+    private void ApplyPlacements(
+        IEnumerable<WindowPlacement> placements,
+        IMonitorResolver monitorResolver,
+        Func<MonitorInfo, IReadOnlyDictionary<string, Rect>>? getSlotRects)
     {
+        var slotsByMonitor = new Dictionary<Rect, IReadOnlyDictionary<string, Rect>>();
         foreach (var placement in placements)
         {
-            var slot = MapSlotId(placement.SlotId);
-            if (slot == null) continue;
-
-            if (!_isOnCurrentVirtualDesktop(placement.Hwnd))
-            {
-                _logger?.Info($"DirectionalFocusRegistry: ignored placement for slot={slot.Value}, hwnd={placement.Hwnd} – window not on current virtual desktop");
+            if (!_isWindowValid(placement.Hwnd) || !_isOnCurrentVirtualDesktop(placement.Hwnd))
                 continue;
-            }
 
             var monitor = monitorResolver.GetMonitorForWindow(placement.Hwnd);
 
@@ -78,11 +100,26 @@ public sealed class DirectionalFocusRegistry
             // windows onto one fake monitor and corrupt Directional Focus lookups, so we skip.
             if (monitor.IsFallback)
             {
-                _logger?.Warn($"DirectionalFocusRegistry: ignored placement for slot={slot.Value}, hwnd={placement.Hwnd} – monitor resolve failed (fallback monitor), not mapping");
+                _logger?.Warn($"DirectionalFocusRegistry: ignored placement for slot={placement.SlotId}, hwnd={placement.Hwnd} – monitor resolve failed (fallback monitor), not mapping");
                 continue;
             }
 
             var workArea = monitor.WorkArea;
+            bool customSplit = false;
+            if (getSlotRects is not null)
+            {
+                if (!slotsByMonitor.TryGetValue(workArea, out var slotRects))
+                    slotsByMonitor[workArea] = slotRects = getSlotRects(monitor);
+                if (!slotRects.ContainsKey(placement.SlotId)) continue;
+                customSplit = slotRects.ContainsKey("Custom3");
+            }
+
+            var slot = MapSlotId(placement.SlotId, customSplit);
+            if (slot is null) continue;
+
+            if (!_plannedSlotsByMonitor.TryGetValue(workArea, out var plans))
+                _plannedSlotsByMonitor[workArea] = plans = new Dictionary<IntPtr, WindowPlacement>();
+            plans.TryAdd(placement.Hwnd, placement);
 
             if (!_slotsByMonitor.TryGetValue(workArea, out var slotMap))
             {
@@ -90,8 +127,8 @@ public sealed class DirectionalFocusRegistry
                 _slotsByMonitor[workArea] = slotMap;
             }
 
-            slotMap[slot.Value] = placement.Hwnd;
-            _logger?.Info($"DirectionalFocusRegistry: mapped slot={slot.Value}, hwnd={placement.Hwnd}, monitor={workArea}");
+            if (slotMap.TryAdd(slot.Value, placement.Hwnd))
+                _logger?.Info($"DirectionalFocusRegistry: mapped slot={slot.Value}, hwnd={placement.Hwnd}, monitor={workArea}");
         }
     }
 
@@ -156,7 +193,7 @@ public sealed class DirectionalFocusRegistry
         return result;
     }
 
-    internal static DirectionalFocusSlot? MapSlotId(string slotId)
+    internal static DirectionalFocusSlot? MapSlotId(string slotId, bool customSplit = false)
     {
         return slotId switch
         {
@@ -168,6 +205,11 @@ public sealed class DirectionalFocusRegistry
             "F" => DirectionalFocusSlot.BottomCenter,
             "G" => DirectionalFocusSlot.MiddleRight,
             "H" => DirectionalFocusSlot.MiddleLeft,
+            "Left" or "Col1" or "Custom1" => DirectionalFocusSlot.MiddleLeft,
+            "Right" or "Col3" => DirectionalFocusSlot.MiddleRight,
+            "Col2" => DirectionalFocusSlot.TopCenter,
+            "Custom2" => customSplit ? DirectionalFocusSlot.TopRight : DirectionalFocusSlot.MiddleRight,
+            "Custom3" => DirectionalFocusSlot.BottomRight,
             _ => null
         };
     }

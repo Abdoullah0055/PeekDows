@@ -9,19 +9,24 @@ namespace PeekDows.Core.Services;
 public class WindowDiscoveryService
 {
     private Dictionary<IntPtr, ManagedWindow> _knownWindows = new();
-    private readonly Func<IReadOnlyList<RawWindowInfo>> _windowSource;
+    private readonly Func<bool, IReadOnlyList<RawWindowInfo>> _windowSource;
 
     public WindowDiscoveryService() : this(DefaultWindowSource) { }
 
     internal WindowDiscoveryService(Func<IReadOnlyList<RawWindowInfo>> windowSource)
+        : this(_ => windowSource()) { }
+
+    private WindowDiscoveryService(Func<bool, IReadOnlyList<RawWindowInfo>> windowSource)
     {
         _windowSource = windowSource;
     }
 
     public IReadOnlyList<RawWindowInfo> GetTopLevelWindows()
     {
-        return _windowSource();
+        return _windowSource(false);
     }
+
+    public IReadOnlyList<RawWindowInfo> GetDirectionalFocusWindows() => _windowSource(true);
 
     public WindowDiscoveryService Fork()
     {
@@ -33,7 +38,7 @@ public class WindowDiscoveryService
 
     public WindowDiff Refresh(WindowClassifier classifier)
     {
-        var rawWindows = _windowSource();
+        var rawWindows = GetTopLevelWindows();
         var now = DateTime.UtcNow;
 
         var previousSnapshot = new Dictionary<IntPtr, ManagedWindow>(_knownWindows);
@@ -103,7 +108,7 @@ public class WindowDiscoveryService
 
     public IReadOnlyList<ManagedWindow> GetKnownWindows() => _knownWindows.Values.ToList();
 
-    private static IReadOnlyList<RawWindowInfo> DefaultWindowSource()
+    private static IReadOnlyList<RawWindowInfo> DefaultWindowSource(bool includeSmallWindows)
     {
         var windows = new List<RawWindowInfo>();
         // P-C2 fix: cache foreground once instead of per-window.
@@ -133,7 +138,7 @@ public class WindowDiscoveryService
 
             NativeMethods.GetWindowRect(hwnd, out var nativeRect);
             var rect = new Rect(nativeRect.left, nativeRect.top, nativeRect.right - nativeRect.left, nativeRect.bottom - nativeRect.top);
-            if (rect.Width < 250 || rect.Height < 180) return true;
+            if (!includeSmallWindows && (rect.Width < 250 || rect.Height < 180)) return true;
 
             var sbClass = new System.Text.StringBuilder(256);
             NativeMethods.GetClassName(hwnd, sbClass, sbClass.Capacity);

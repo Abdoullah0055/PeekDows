@@ -43,6 +43,13 @@ public static class AppRuleService
     public static bool IsIgnoreAction(string? action)
         => string.Equals(action?.Trim(), "ignore", StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsProcessExcluded(IReadOnlyList<AppRule> rules, string? process)
+        => IsNormalizedProcessExcluded(rules, NormalizeProcess(process));
+
+    private static bool IsNormalizedProcessExcluded(IReadOnlyList<AppRule> rules, string name)
+        => name.Length > 0 && rules.Any(rule => rule is not null && IsIgnoreAction(rule.Action) &&
+            string.Equals(NormalizeProcess(rule.Process), name, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Single char A..H (case-insensitive, surrounding whitespace allowed).</summary>
     public static bool IsValidSlot(string? slot)
     {
@@ -200,7 +207,6 @@ public static class AppRuleService
             if (rules is null || rules.Count == 0)
                 return new List<ManagedWindow>(arrangeable);
 
-            var ignore = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var pins = new List<(string Process, string Slot)>();
             var pinSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var rule in rules)
@@ -208,11 +214,6 @@ public static class AppRuleService
                 if (!IsValidRule(rule) || rule is null)
                     continue;
                 var norm = NormalizeProcess(rule.Process);
-                if (IsIgnoreAction(rule.Action))
-                {
-                    ignore.Add(norm);
-                    continue;
-                }
                 if (IsPinAction(rule.Action))
                 {
                     // Premier arrivé gagne par process (le pré-tri est déterministe).
@@ -222,8 +223,7 @@ public static class AppRuleService
             }
 
             // Ignore prioritaire sur tout.
-            if (pins.Count > 0 && ignore.Count > 0)
-                pins.RemoveAll(p => ignore.Contains(p.Process));
+            pins.RemoveAll(p => IsNormalizedProcessExcluded(rules, p.Process));
 
             var used = new bool[arrangeable.Count];
             var result = new List<ManagedWindow>(arrangeable.Count);
@@ -255,7 +255,7 @@ public static class AppRuleService
                 var w = arrangeable[i];
                 if (w is null)
                     continue;
-                if (ignore.Contains(NormalizeProcess(w.ProcessName)))
+                if (IsProcessExcluded(rules, w.ProcessName))
                     continue;
                 result.Add(w);
             }
