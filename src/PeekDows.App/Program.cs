@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using PeekDows.App.Startup;
@@ -8,11 +9,8 @@ namespace PeekDows.App;
 
 static class Program
 {
-    // Lightweight installer hook: "PeekDows.App.exe --enable-startup" creates the
-    // Startup folder shortcut (via the existing StartupService) and flips the
-    // StartWithWindows setting, WITHOUT starting the tray app. This keeps the
-    // installer free of a duplicated shortcut mechanism and guarantees the tray
-    // menu checkmark, the settings file and the Startup shortcut all agree.
+    // Initialize Start with Windows on a clean install using the same shortcut
+    // service as the tray app. The installer hook exits before starting the tray.
     private const string EnableStartupArg = "--enable-startup";
 
     [STAThread]
@@ -46,17 +44,21 @@ static class Program
         }
     }
 
-    private static void EnableStartupAndExit()
+    internal static void EnableStartupAndExit(
+        SettingsService? settingsService = null, IStartupService? startup = null, FileLogger? logger = null)
     {
-        var logger = new FileLogger();
+        logger ??= new FileLogger();
         try
         {
+            settingsService ??= new SettingsService();
+            if (File.Exists(settingsService.SettingsFilePath))
+                return;
+
             logger.Info("--enable-startup: enabling Start with Windows");
 
-            var settingsService = new SettingsService();
             var settings = settingsService.Load();
 
-            var startup = new StartupService(logger);
+            startup ??= new StartupService(logger);
             var ok = startup.Enable();
             if (!ok)
             {

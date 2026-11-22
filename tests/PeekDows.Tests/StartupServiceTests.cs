@@ -1,4 +1,5 @@
 using System.IO;
+using PeekDows.App;
 using PeekDows.App.Startup;
 using PeekDows.Core.Services;
 
@@ -122,5 +123,48 @@ public class StartupServiceTests : IDisposable
 
         Assert.True(service.Disable());
         Assert.False(File.Exists(shortcutPath));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InstallerHook_LeavesExistingSettingsAndShortcutUntouched(bool enabled)
+    {
+        var settingsService = new SettingsService(Path.Combine(_tempDir, "settings.json"));
+        var settingsJson = $"{{ \"Version\": 1, \"StartWithWindows\": {enabled.ToString().ToLowerInvariant()} }}";
+        File.WriteAllText(settingsService.SettingsFilePath, settingsJson);
+
+        var shortcutPath = Path.Combine(_startupFolder, "PeekDows.lnk");
+        if (enabled)
+            File.WriteAllText(shortcutPath, "existing shortcut");
+        var startup = CreateInstallerStartupService();
+
+        Program.EnableStartupAndExit(settingsService, startup, _logger);
+
+        Assert.Equal(settingsJson, File.ReadAllText(settingsService.SettingsFilePath));
+        Assert.Equal(enabled, File.Exists(shortcutPath));
+        if (enabled)
+            Assert.Equal("existing shortcut", File.ReadAllText(shortcutPath));
+    }
+
+    [Fact]
+    public void InstallerHook_EnablesStartupWhenNoSettingsExist()
+    {
+        var settingsService = new SettingsService(Path.Combine(_tempDir, "settings.json"));
+        var startup = CreateInstallerStartupService();
+
+        Program.EnableStartupAndExit(settingsService, startup, _logger);
+
+        Assert.True(settingsService.Load().StartWithWindows);
+        Assert.True(startup.IsEnabled());
+    }
+
+    private StartupService CreateInstallerStartupService()
+    {
+        return new StartupService(_startupFolder, _exePath, _tempDir, _logger, path =>
+        {
+            File.WriteAllText(path, "created shortcut");
+            return true;
+        });
     }
 }

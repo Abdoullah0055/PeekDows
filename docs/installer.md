@@ -12,7 +12,7 @@ PeekDows ships as a **self-contained, single-file** .NET 10 build, wrapped in an
 - Creates a **Start Menu** shortcut.
 - Optionally creates a **Desktop** shortcut.
 - **Launches PeekDows** after installation.
-- **Enables "Start with Windows" by default** (Startup folder shortcut).
+- **Enables "Start with Windows" on a clean first installation** (Startup folder shortcut).
 - Registers a clean **Uninstall** entry.
 
 ## Prerequisites
@@ -85,18 +85,19 @@ This is the file you copy/download to the target PC and double-click to install.
 
 ## "Start with Windows" behavior
 
-The installer does **not** create the Startup shortcut directly. Instead it
-launches `PeekDows.App.exe --enable-startup`, which reuses the app's existing
-`StartupService` to:
+On a first installation, Setup launches `PeekDows.App.exe --enable-startup`.
+If no settings file exists, the app creates the Startup shortcut and records
+whether it succeeded in the `StartWithWindows` setting.
 
-1. Create `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\PeekDows.lnk`
-   pointing at the **installed** executable (`Environment.ProcessPath`).
-2. Flip the `StartWithWindows` setting to `true` so the Settings switch and
-   the shortcut stay in sync.
+A shortcut created by the installed app points to its executable and uses its
+icon (`IconLocation = "<exe>,0"`).
 
-The shortcut's `TargetPath` always points to the installed exe (never the dev
-build), and its icon is taken from the installed exe (`IconLocation = "<exe>,0"`).
-
+- **Upgrade or rerun over an installed copy.** Setup preserves the existing
+  setting and skips the startup hook in both graphical and silent mode.
+- **Install or reinstall with an existing settings file.** The hook leaves the
+  file and the shortcut alone, including when the preferences come from a
+  portable copy. If the saved choice is enabled and the shortcut is missing,
+  PeekDows recreates it on its next normal launch.
 - If the user later **disables** "Start with Windows" in Settings → General, the
   `StartupService` deletes the shortcut — same one the installer enabled.
 - If the user **re-enables** it, the shortcut is recreated pointing at the
@@ -118,8 +119,12 @@ After generating `PeekDowsSetup-x64.exe`:
 7. Disable "Start with Windows" in Settings → General and save → confirm the Startup shortcut is
    removed.
 8. Re-enable it → confirm the shortcut is recreated.
-9. Uninstall PeekDows (Settings → Apps, or the Start Menu shortcut) → confirm
-   app files and all shortcuts (Start Menu, Desktop, Startup) are removed.
+9. Upgrade or rerun Setup with the setting disabled, using both the GUI and
+   `/VERYSILENT`. Verify the setting stays disabled and the shortcut stays absent.
+10. Repeat with the setting enabled. Verify the shortcut still points to the
+    installed executable. Compare the remaining settings in both upgrade cases.
+11. Uninstall PeekDows and confirm the app files and shortcuts are removed.
+    Reinstall with the settings file still present and verify the saved choice.
 
 ## Limitations
 

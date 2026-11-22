@@ -9,7 +9,7 @@
 ;        ISCC.exe installer\PeekDows.iss
 ;      Output: artifacts\installer\PeekDowsSetup-x64.exe
 ;
-; Start with Windows is enabled by the app itself: after copying the files,
+; On a new installation, after copying the files,
 ; the installer launches "PeekDows.App.exe --enable-startup" which reuses the
 ; existing StartupService to create the Startup folder shortcut and flip the
 ; settings flag, keeping the tray menu state in sync.
@@ -75,22 +75,21 @@ Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 ; Two separate steps so the tray app actually starts after install:
-;   1. Hook "PeekDows.App.exe --enable-startup" — activates Start with Windows
-;      via the existing StartupService, then EXITS immediately (it does not run
-;      the tray app). runhidden + waituntilterminated so it finishes BEFORE step 2.
+;   1. Run the startup hook on a clean first install. It exits before the
+;      normal launch. runhidden + waituntilterminated ensures this order.
 ;   2. Real launch with NO arguments — runs the tray app normally so the icon
 ;      appears and stays in the background. The postinstall checkbox on GUI
 ;      installs lets the user opt out (default checked).
 
 ; --- GUI install ---
 ; Step 1 (silent hook, must complete first)
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--enable-startup"; Flags: runhidden waituntilterminated; Check: WizardSilentLaunchAllowed
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--enable-startup"; Flags: runhidden waituntilterminated; Check: ShouldEnableStartupOnGuiInstall
 ; Step 2 (real launch, user can uncheck via postinstall)
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent; Check: WizardSilentLaunchAllowed
 
 ; --- Silent install ---
 ; Step 1 (silent hook)
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--enable-startup"; Flags: runhidden waituntilterminated; Check: WizardIsSilent
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--enable-startup"; Flags: runhidden waituntilterminated; Check: ShouldEnableStartupOnSilentInstall
 ; Step 2 (real launch, no checkbox in silent mode)
 Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: WizardIsSilent
 
@@ -105,6 +104,9 @@ Filename: "{cmd}"; Parameters: "/C taskkill /F /IM {#MyAppExeName}"; Flags: runh
 Type: files; Name: "{userstartup}\PeekDows.lnk"
 
 [Code]
+var
+  IsUpgrade: Boolean;
+
 function WizardIsSilent: Boolean;
 begin
   Result := WizardSilent();
@@ -114,6 +116,16 @@ end;
 function WizardSilentLaunchAllowed: Boolean;
 begin
   Result := not WizardSilent();
+end;
+
+function ShouldEnableStartupOnGuiInstall: Boolean;
+begin
+  Result := (not IsUpgrade) and (not WizardSilent());
+end;
+
+function ShouldEnableStartupOnSilentInstall: Boolean;
+begin
+  Result := (not IsUpgrade) and WizardSilent();
 end;
 
 procedure KillRunningApp;
@@ -128,6 +140,9 @@ end;
 
 function InitializeSetup(): Boolean;
 begin
+  // Read the previous registration before Setup writes its uninstall entry.
+  IsUpgrade := RegKeyExists(HKCU,
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8F2C4A1E-3B5D-4E6F-9A7C-1D2E3F405160}_is1');
   KillRunningApp;
   Result := True;
 end;
