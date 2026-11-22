@@ -3,7 +3,6 @@ using System.Linq;
 using System.Windows.Forms;
 using PeekDows.App.Tray;
 using PeekDows.Core.Models;
-using PeekDows.Core.Services;
 
 namespace PeekDows.App.Settings;
 
@@ -13,17 +12,13 @@ namespace PeekDows.App.Settings;
 /// </summary>
 public class SettingsLegacyWindow : Form
 {
-    private readonly AppSettings _settings;
-    private readonly SettingsService _settingsService;
-    private TextBox _ignoredProcessesBox;
-    private TextBox _ignoredClassesBox;
+    private readonly IPeekDowsController _controller;
+    private readonly TextBox _ignoredProcessesBox;
+    private readonly TextBox _ignoredClassesBox;
 
-    public event Action? SettingsSaved;
-
-    public SettingsLegacyWindow(AppSettings settings, SettingsService settingsService, IPeekDowsController? controller = null)
+    public SettingsLegacyWindow(IPeekDowsController controller)
     {
-        _settings = settings;
-        _settingsService = settingsService;
+        _controller = controller;
 
         Text = "PeekDows Settings";
         Width = 520;
@@ -36,8 +31,7 @@ public class SettingsLegacyWindow : Form
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var ignored = new TabPage("Ignored apps");
         Controls.Add(tabs);
-        if (controller != null)
-            AddFallbackSettings(tabs, controller);
+        AddFallbackSettings(tabs, controller);
         tabs.TabPages.Add(ignored);
         var y = 12;
 
@@ -57,7 +51,7 @@ public class SettingsLegacyWindow : Form
             Height = 120,
             Multiline = true,
             ScrollBars = ScrollBars.Vertical,
-            Text = string.Join(Environment.NewLine, _settings.IgnoredProcesses)
+            Text = string.Join(Environment.NewLine, controller.CurrentSettings.IgnoredProcesses)
         };
         ignored.Controls.Add(_ignoredProcessesBox);
         y += 128;
@@ -78,7 +72,7 @@ public class SettingsLegacyWindow : Form
             Height = 120,
             Multiline = true,
             ScrollBars = ScrollBars.Vertical,
-            Text = string.Join(Environment.NewLine, _settings.IgnoredClasses)
+            Text = string.Join(Environment.NewLine, controller.CurrentSettings.IgnoredClasses)
         };
         ignored.Controls.Add(_ignoredClassesBox);
         y += 128;
@@ -170,22 +164,22 @@ public class SettingsLegacyWindow : Form
         controller.StateChanged += UpdateStatus;
         Disposed += (_, _) => controller.StateChanged -= UpdateStatus;
         UpdateStatus(controller.State);
-        AddToggle(general, "Auto arrange", () => _settings.AutoArrange, controller.ToggleAutoArrange);
-        AddToggle(general, "Animate window transitions", () => _settings.AnimateWindowTransitions, controller.ToggleAnimateWindowTransitions);
-        AddToggle(general, "Directional focus", () => _settings.DirectionalFocusEnabled, controller.ToggleDirectionalFocus);
-        AddToggle(general, "Start with Windows", () => _settings.StartWithWindows, controller.ToggleStartWithWindows);
-        AddToggle(general, "Arrange sound", () => _settings.ArrangeSoundEnabled, controller.ToggleArrangeSound);
-        AddSelection(general, "Focus hints", ["Off", "Overlay"], () => _settings.FocusHintMode == "Off" ? 0 : 1,
+        AddToggle(general, "Auto arrange", () => controller.CurrentSettings.AutoArrange, controller.ToggleAutoArrange);
+        AddToggle(general, "Animate window transitions", () => controller.CurrentSettings.AnimateWindowTransitions, controller.ToggleAnimateWindowTransitions);
+        AddToggle(general, "Directional focus", () => controller.CurrentSettings.DirectionalFocusEnabled, controller.ToggleDirectionalFocus);
+        AddToggle(general, "Start with Windows", () => controller.CurrentSettings.StartWithWindows, controller.ToggleStartWithWindows);
+        AddToggle(general, "Arrange sound", () => controller.CurrentSettings.ArrangeSoundEnabled, controller.ToggleArrangeSound);
+        AddSelection(general, "Focus hints", ["Off", "Overlay"], () => controller.CurrentSettings.FocusHintMode == "Off" ? 0 : 1,
             index => controller.SetFocusHintMode(index == 0 ? "Off" : "Overlay"));
 
         var layout = AddPage("Layout");
         string[] modes = ["Grid", "Halves", "Thirds", "Custom"];
-        AddSelection(layout, "Layout mode", modes, () => Math.Max(0, Array.IndexOf(modes, _settings.LayoutMode)),
+        AddSelection(layout, "Layout mode", modes, () => Math.Max(0, Array.IndexOf(modes, controller.CurrentSettings.LayoutMode)),
             index => controller.SetLayoutMode(modes[index]));
         WindowSizePreset[] presets = [WindowSizePreset.Small, WindowSizePreset.Medium, WindowSizePreset.Large];
         AddSelection(layout, "Window size preset", ["Small · 90%", "Medium · 95%", "Large · 98%"],
-            () => Math.Max(0, Array.IndexOf(presets, _settings.WindowSizePreset)), index => controller.SetWindowSizePreset(presets[index]));
-        AddToggle(layout, "Reposition maximized windows", () => _settings.AllowRepositionMaximizedWindows,
+            () => Math.Max(0, Array.IndexOf(presets, controller.CurrentSettings.WindowSizePreset)), index => controller.SetWindowSizePreset(presets[index]));
+        AddToggle(layout, "Reposition maximized windows", () => controller.CurrentSettings.AllowRepositionMaximizedWindows,
             controller.ToggleAllowRepositionMaximizedWindows);
         AddButton(layout, "Edit profiles", controller.OpenLayoutProfiles);
         AddButton(layout, "Export layout settings", controller.ExportLayoutSettings);
@@ -200,28 +194,32 @@ public class SettingsLegacyWindow : Form
 
     private void OnSave(object? sender, EventArgs e)
     {
-        var processes = _ignoredProcessesBox.Lines
-            .Where(l => !string.IsNullOrWhiteSpace(l))
-            .Select(l => l.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var classes = _ignoredClassesBox.Lines
-            .Where(l => !string.IsNullOrWhiteSpace(l))
-            .Select(l => l.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        _settings.IgnoredProcesses.Clear();
-        _settings.IgnoredProcesses.AddRange(processes);
-
-        _settings.IgnoredClasses.Clear();
-        _settings.IgnoredClasses.AddRange(classes);
-
-        _settingsService.Save(_settings);
-        SettingsSaved?.Invoke();
+        if (!TrySaveIgnoredLists(out _))
+        {
+            MessageBox.Show("Settings could not be saved. See the log for details.", "PeekDows",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
 
         MessageBox.Show("Settings saved.", "PeekDows", MessageBoxButtons.OK, MessageBoxIcon.Information);
         Close();
+    }
+
+    internal bool TrySaveIgnoredLists(out string error)
+    {
+        var previous = _controller.CurrentSettings;
+        var processes = IgnoredListsValidator.Clean(_ignoredProcessesBox.Lines);
+        var classes = IgnoredListsValidator.Clean(_ignoredClassesBox.Lines);
+        if (processes.SequenceEqual(previous.IgnoredProcesses, StringComparer.OrdinalIgnoreCase) &&
+            classes.SequenceEqual(previous.IgnoredClasses, StringComparer.OrdinalIgnoreCase))
+        {
+            error = "";
+            return true;
+        }
+
+        var next = previous.CopyForSettingsEdit();
+        next.IgnoredProcesses = processes;
+        next.IgnoredClasses = classes;
+        return _controller.TryCommitSettings(next, out error);
     }
 }

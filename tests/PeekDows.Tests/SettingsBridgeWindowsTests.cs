@@ -37,7 +37,7 @@ public sealed class SettingsBridgeWindowsTests
     {
         using var tmp = new TempSettingsScope();
         var rows = new List<WindowRow> { new("123", "Notepad", "notepad.exe", "Notepad", true, "") };
-        var bridge = new SettingsBridge(tmp.Controller, tmp.Service, appVersionProvider: () => "9.9.9");
+        var bridge = new SettingsBridge(tmp.Controller, appVersionProvider: () => "9.9.9");
         bridge.SetWindowsProvider(() => rows);
         bridge.SetWindowsMessageHandler((t, r) => WindowsMessageHandler.TryHandle(t, r, () => rows, WindowsMessageHandler.CamelCase));
         using var doc = JsonDocument.Parse(bridge.HandleMessage("""{"type":"requestWindows"}""")!);
@@ -142,6 +142,9 @@ public sealed class SettingsBridgeWindowsTests
         public void OpenSettings() { }
         public void OpenLogFile() { }
         public void OpenLogsFolder() { }
+        public bool TryCommitSettings(AppSettings next, out string error)
+            => throw new NotSupportedException();
+
         public void OnSettingsChanged() { OnSettingsChangedCount++; }
         public void Exit() { }
     }

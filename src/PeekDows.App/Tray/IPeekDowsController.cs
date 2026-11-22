@@ -49,6 +49,7 @@ public interface IPeekDowsController
     void OpenLogFile();
     void OpenLogsFolder();
     void OnSettingsChanged();
+    bool TryCommitSettings(AppSettings next, out string error);
     void Exit();
     bool TryUpdateHotkeys(IReadOnlyDictionary<string, string> changes, out string error)
     {

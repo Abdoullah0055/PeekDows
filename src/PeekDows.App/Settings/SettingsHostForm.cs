@@ -59,7 +59,7 @@ public sealed class SettingsHostForm : Form
         _controller = controller;
         _settingsService = settingsService;
         _logger = logger;
-        _bridge = new SettingsBridge(controller, settingsService, logger, openSettingsFolder: OpenSettingsFolder,
+        _bridge = new SettingsBridge(controller, logger, openSettingsFolder: OpenSettingsFolder,
             runDialog: RunSettingsDialog);
         _bridge.SetWindowsProvider(() => _controller.GetWindowsSnapshot());
         _bridge.SetWindowsMessageHandler((type, root) => WindowsMessageHandler.TryHandle(type, root, () => _controller.GetWindowsSnapshot(), WindowsMessageHandler.CamelCase));

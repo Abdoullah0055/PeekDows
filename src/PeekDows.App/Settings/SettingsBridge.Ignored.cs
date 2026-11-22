@@ -11,16 +11,15 @@ public sealed partial class SettingsBridge
         data["ignoredClasses"] = s.IgnoredClasses ?? new List<string>();
     }
 
-    partial void ApplyIgnoredDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool plainChanged)
+    partial void ApplyIgnoredDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool changed)
     {
         if (draft.IgnoredProcesses is { } ip)
         {
             var clean = IgnoredListsValidator.Clean(ip);
             if (!clean.SequenceEqual(settings.IgnoredProcesses, System.StringComparer.OrdinalIgnoreCase))
             {
-                settings.IgnoredProcesses.Clear();
-                settings.IgnoredProcesses.AddRange(clean);
-                plainChanged = true;
+                settings.IgnoredProcesses = clean;
+                changed = true;
             }
         }
         if (draft.IgnoredClasses is { } ic)
@@ -28,9 +27,8 @@ public sealed partial class SettingsBridge
             var clean = IgnoredListsValidator.Clean(ic);
             if (!clean.SequenceEqual(settings.IgnoredClasses, System.StringComparer.OrdinalIgnoreCase))
             {
-                settings.IgnoredClasses.Clear();
-                settings.IgnoredClasses.AddRange(clean);
-                plainChanged = true;
+                settings.IgnoredClasses = clean;
+                changed = true;
             }
         }
     }

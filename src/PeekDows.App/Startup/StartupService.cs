@@ -12,6 +12,7 @@ public sealed class StartupService : IStartupService
     private readonly string _executablePath;
     private readonly string _workingDirectory;
     private readonly FileLogger? _logger;
+    private readonly Func<string, bool> _createShortcut;
 
     public StartupService() : this(
         Environment.GetFolderPath(Environment.SpecialFolder.Startup),
@@ -29,12 +30,14 @@ public sealed class StartupService : IStartupService
     {
     }
 
-    internal StartupService(string startupFolderPath, string executablePath, string workingDirectory, FileLogger? logger)
+    internal StartupService(string startupFolderPath, string executablePath, string workingDirectory, FileLogger? logger,
+        Func<string, bool>? createShortcut = null)
     {
         _startupFolderPath = startupFolderPath;
         _executablePath = executablePath;
         _workingDirectory = workingDirectory;
         _logger = logger;
+        _createShortcut = createShortcut ?? CreateShortcut;
     }
 
     public bool IsEnabled()
@@ -78,7 +81,7 @@ public sealed class StartupService : IStartupService
                 return true;
             }
 
-            if (!CreateShortcut(shortcutPath))
+            if (!_createShortcut(shortcutPath))
             {
                 _logger?.Warn($"StartupService: failed to enable startup shortcut");
                 return false;
@@ -126,6 +129,28 @@ public sealed class StartupService : IStartupService
     public bool SetEnabled(bool enabled)
     {
         return enabled ? Enable() : Disable();
+    }
+
+    public byte[]? CaptureShortcut()
+    {
+        if (string.IsNullOrWhiteSpace(_startupFolderPath))
+            throw new IOException("The Startup folder path is unavailable.");
+
+        try { return File.ReadAllBytes(GetShortcutPath()); }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
+
+    public void RestoreShortcut(byte[]? content)
+    {
+        var path = GetShortcutPath();
+        if (content is not null)
+            File.WriteAllBytes(path, content);
+        else
+        {
+            try { File.Delete(path); }
+            catch (DirectoryNotFoundException) { }
+        }
     }
 
     private string GetShortcutPath()

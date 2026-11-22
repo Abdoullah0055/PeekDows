@@ -6,4 +6,6 @@ public interface IStartupService
     bool Enable();
     bool Disable();
     bool SetEnabled(bool enabled);
+    byte[]? CaptureShortcut();
+    void RestoreShortcut(byte[]? content);
 }

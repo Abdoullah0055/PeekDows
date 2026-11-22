@@ -13,10 +13,9 @@ public sealed partial class HotkeyService : IDisposable
     private const int HOTKEY_UNDO_ID = 3;
     private const uint VK_Z = 0x5A;
 
-    private readonly Action _onArrangeNow;
-    private readonly Action _onPauseResume;
-    private readonly Action _onUndo;
-    private readonly HotkeyMessageWindow _messageWindow;
+    private readonly HotkeyMessageWindow? _messageWindow;
+    private readonly Func<int, uint, uint, bool> _registerHotkey;
+    private readonly Func<int, bool> _unregisterHotkey;
     private readonly FileLogger? _logger;
     private bool _undoRegistered;
     private bool _disposed;
@@ -25,17 +24,24 @@ public sealed partial class HotkeyService : IDisposable
     public event Action? PauseResumeRequested;
     public event Action? UndoRequested;
 
-    public HotkeyService() : this(null) { }
-
     public HotkeyService(FileLogger? logger)
     {
         _logger = logger;
-        _messageWindow = new HotkeyMessageWindow(this);
-        _onArrangeNow = () => ArrangeNowRequested?.Invoke();
-        _onPauseResume = () => PauseResumeRequested?.Invoke();
-        _onUndo = () => UndoRequested?.Invoke();
+        var window = new HotkeyMessageWindow(this);
+        _messageWindow = window;
+        _registerHotkey = (id, modifiers, key) => NativeMethods.RegisterHotKey(window.Handle, id, modifiers, key);
+        _unregisterHotkey = id => NativeMethods.UnregisterHotKey(window.Handle, id);
         _logger?.Info("HotkeyService created");
     }
+
+    internal HotkeyService(Func<int, uint, uint, bool> registerHotkey, Func<int, bool> unregisterHotkey, FileLogger? logger = null)
+    {
+        _logger = logger;
+        _registerHotkey = registerHotkey;
+        _unregisterHotkey = unregisterHotkey;
+    }
+
+    public HotkeyService() : this(null) { }
 
     public bool RegisterUndoHotkey()
     {
@@ -47,7 +53,7 @@ public sealed partial class HotkeyService : IDisposable
         uint modifiers = (uint)(NativeMethods.MOD_CONTROL | NativeMethods.MOD_WIN);
         uint vk = VK_Z;
 
-        _undoRegistered = NativeMethods.RegisterHotKey(_messageWindow.Handle, HOTKEY_UNDO_ID, modifiers, vk);
+        _undoRegistered = _registerHotkey(HOTKEY_UNDO_ID, modifiers, vk);
 
         if (_undoRegistered)
         {
@@ -65,13 +71,13 @@ public sealed partial class HotkeyService : IDisposable
     public void UnregisterAll()
     {
         foreach (var id in _registeredGestures.Keys)
-            NativeMethods.UnregisterHotKey(_messageWindow.Handle, id);
+            _unregisterHotkey(id);
         _registeredGestures.Clear();
 
-        if (_undoRegistered && _messageWindow.Handle != IntPtr.Zero)
+        if (_undoRegistered)
         {
             _logger?.Info("UnregisterHotKey called for undo");
-            NativeMethods.UnregisterHotKey(_messageWindow.Handle, HOTKEY_UNDO_ID);
+            _unregisterHotkey(HOTKEY_UNDO_ID);
             _undoRegistered = false;
         }
     }
@@ -83,17 +89,17 @@ public sealed partial class HotkeyService : IDisposable
         if (id == HOTKEY_ARRANGE_ID)
         {
             _logger?.Info("ArrangeNowRequested event raised");
-            _onArrangeNow();
+            ArrangeNowRequested?.Invoke();
         }
         else if (id == HOTKEY_PAUSE_ID)
         {
             _logger?.Info("PauseResumeRequested event raised");
-            _onPauseResume();
+            PauseResumeRequested?.Invoke();
         }
         else if (id == HOTKEY_UNDO_ID)
         {
             _logger?.Info("UndoRequested event raised");
-            _onUndo();
+            UndoRequested?.Invoke();
         }
     }
 
@@ -104,7 +110,7 @@ public sealed partial class HotkeyService : IDisposable
 
         _logger?.Info("HotkeyService disposed");
         UnregisterAll();
-        _messageWindow.ForceDestroy();
+        _messageWindow?.ForceDestroy();
     }
 
     private sealed class HotkeyMessageWindow : NativeWindow

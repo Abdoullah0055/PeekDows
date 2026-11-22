@@ -1,5 +1,4 @@
 using PeekDows.App.Settings;
-using PeekDows.Core.Win32;
 
 namespace PeekDows.App.Hotkeys;
 
@@ -34,7 +33,7 @@ public sealed partial class HotkeyService
         var replaced = new List<KeyValuePair<int, Gesture>>();
         foreach (var entry in previous)
         {
-            if (!NativeMethods.UnregisterHotKey(_messageWindow.Handle, entry.Key))
+            if (!_unregisterHotkey(entry.Key))
             {
                 RestoreGestures(replaced);
                 error = "hotkey-conflict";
@@ -67,8 +66,10 @@ public sealed partial class HotkeyService
         {
             foreach (var added in registered)
             {
-                NativeMethods.UnregisterHotKey(_messageWindow.Handle, added);
-                _registeredGestures.Remove(added);
+                if (_unregisterHotkey(added))
+                    _registeredGestures.Remove(added);
+                else
+                    _logger?.Warn($"Could not unregister hotkey id={added} during rollback");
             }
             RestoreGestures(replaced);
         }
@@ -77,13 +78,13 @@ public sealed partial class HotkeyService
     private void RestoreGestures(IEnumerable<KeyValuePair<int, Gesture>> previous)
     {
         foreach (var (id, gesture) in previous)
-            if (!RegisterGesture(id, gesture))
+            if (_registeredGestures.ContainsKey(id) || !RegisterGesture(id, gesture))
                 _logger?.Warn($"Could not restore hotkey id={id}");
     }
 
     private bool RegisterGesture(int id, Gesture gesture)
     {
-        if (!NativeMethods.RegisterHotKey(_messageWindow.Handle, id, gesture.Modifiers, gesture.Key))
+        if (!_registerHotkey(id, gesture.Modifiers, gesture.Key))
             return false;
         _registeredGestures[id] = gesture;
         return true;

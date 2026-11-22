@@ -363,6 +363,9 @@ public class AutoArrangeServiceTests : IDisposable
         public void OpenSettings() { }
         public void OpenLogFile() { }
         public void OpenLogsFolder() { }
+        public bool TryCommitSettings(AppSettings next, out string error)
+            => throw new NotSupportedException();
+
         public void OnSettingsChanged() { }
         public void Exit() { }
     }

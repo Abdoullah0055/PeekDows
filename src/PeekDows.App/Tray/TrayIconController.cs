@@ -54,7 +54,6 @@ public class TrayIconController : IDisposable
     {
         if (_settingsWindow == null || _settingsWindow.IsDisposed)
         {
-            var settings = _controller.CurrentSettings;
             var settingsService = _settingsService ?? new SettingsService();
 
             // Modern WebView2 UI first; fall back to the legacy window when the runtime
@@ -71,15 +70,11 @@ public class TrayIconController : IDisposable
                 _logger?.Warn($"Settings window: WebView2 host creation failed ({ex.Message}), using legacy window");
             }
 
-            var window = host ?? new SettingsLegacyWindow(settings, settingsService, _controller);
+            var window = host ?? new SettingsLegacyWindow(_controller);
             if (host is SettingsHostForm hostForm)
             {
                 hostForm.InitializationFailed += reason =>
-                    ReplaceFailedSettingsHost(hostForm, settings, settingsService, reason);
-            }
-            else if (window is SettingsLegacyWindow legacy)
-            {
-                legacy.SettingsSaved += () => _controller.OnSettingsChanged();
+                    ReplaceFailedSettingsHost(hostForm, reason);
             }
 
             _settingsWindow = window;
@@ -95,19 +90,14 @@ public class TrayIconController : IDisposable
         }
     }
 
-    private void ReplaceFailedSettingsHost(
-        SettingsHostForm host,
-        AppSettings settings,
-        SettingsService settingsService,
-        string reason)
+    private void ReplaceFailedSettingsHost(SettingsHostForm host, string reason)
     {
         _logger?.Warn($"Settings window: WebView2 initialization failed ({reason}), using legacy window");
 
         if (!ReferenceEquals(_settingsWindow, host))
             return;
 
-        var legacy = new SettingsLegacyWindow(settings, settingsService, _controller);
-        legacy.SettingsSaved += () => _controller.OnSettingsChanged();
+        var legacy = new SettingsLegacyWindow(_controller);
         _settingsWindow = legacy;
         legacy.Show();
     }

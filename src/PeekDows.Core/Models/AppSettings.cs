@@ -112,4 +112,20 @@ public sealed class AppSettings
         { "assignSlotC", "Ctrl+Alt+3" },
         { "assignSlotD", "Ctrl+Alt+4" }
     };
+
+    /// <summary>Copies the collections editable by the settings windows.</summary>
+    public AppSettings CopyForSettingsEdit()
+    {
+        var copy = (AppSettings)MemberwiseClone();
+        copy.IgnoredProcesses = new List<string>(IgnoredProcesses);
+        copy.IgnoredClasses = new List<string>(IgnoredClasses);
+        copy.Hotkeys = new Dictionary<string, string>(Hotkeys, Hotkeys.Comparer);
+        copy.AppRules = AppRules.Select(rule => new AppRule
+        {
+            Process = rule.Process,
+            Action = rule.Action,
+            Slot = rule.Slot,
+        }).ToList();
+        return copy;
+    }
 }

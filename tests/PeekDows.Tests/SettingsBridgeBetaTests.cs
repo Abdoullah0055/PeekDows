@@ -1,7 +1,6 @@
 using System;
 using System.Text.Json;
 using PeekDows.App.Settings;
-using PeekDows.App.Tray;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
 using Xunit;
@@ -18,8 +17,8 @@ public sealed class SettingsBridgeBetaTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly SettingsService _settingsService;
-    private readonly AppSettings _settings;
-    private readonly FakeBetaController _controller;
+    private AppSettings Settings => _controller.CurrentSettings;
+    private readonly SettingsBridgeTests.FakeBridgeController _controller;
     private readonly SettingsBridge _bridge;
 
     public SettingsBridgeBetaTests()
@@ -27,13 +26,13 @@ public sealed class SettingsBridgeBetaTests : IDisposable
         _tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString());
         System.IO.Directory.CreateDirectory(_tempDir);
         _settingsService = new SettingsService(System.IO.Path.Combine(_tempDir, "settings.json"));
-        _settings = _settingsService.Load();
-        _controller = new FakeBetaController(_settings, _settingsService);
-        _bridge = new SettingsBridge(_controller, _settingsService, appVersionProvider: () => "9.9.9");
+        _controller = new SettingsBridgeTests.FakeBridgeController(_settingsService.Load(), _settingsService);
+        _bridge = new SettingsBridge(_controller, appVersionProvider: () => "9.9.9");
     }
 
     public void Dispose()
     {
+        _controller.Dispose();
         if (System.IO.Directory.Exists(_tempDir)) System.IO.Directory.Delete(_tempDir, true);
     }
 
@@ -62,7 +61,7 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     [Fact]
     public void Snapshot_NullHintMode_FallsBackToOverlay()
     {
-        _settings.FocusHintMode = null!;
+        Settings.FocusHintMode = null!;
 
         using var doc = JsonDocument.Parse(_bridge.BuildSnapshotMessage());
         var data = doc.RootElement.GetProperty("data");
@@ -73,7 +72,7 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     [Fact]
     public void Snapshot_ReflectsMutatedHintMode()
     {
-        _settings.FocusHintMode = "Off";
+        Settings.FocusHintMode = "Off";
 
         using var doc = JsonDocument.Parse(_bridge.BuildSnapshotMessage());
         var data = doc.RootElement.GetProperty("data");
@@ -95,13 +94,13 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     [Fact]
     public void Apply_OverlayToOff_PersistsNotifiesAndSnapshots()
     {
-        _settings.FocusHintMode = "Overlay";
+        Settings.FocusHintMode = "Overlay";
 
         var response = _bridge.HandleMessage("""{"type":"apply","data":{"focusHintMode":"Off"}}""");
 
-        Assert.Equal("Off", _settings.FocusHintMode);
+        Assert.Equal("Off", Settings.FocusHintMode);
         Assert.Equal("Off", _settingsService.Load().FocusHintMode);
-        Assert.Equal(1, _controller.OnSettingsChangedCount);
+        Assert.Equal(1, _controller.CommitCount);
 
         using var doc = JsonDocument.Parse(response!);
         Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
@@ -111,13 +110,13 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     [Fact]
     public void Apply_OffToOverlay_Persists()
     {
-        _settings.FocusHintMode = "Off";
+        Settings.FocusHintMode = "Off";
 
         _bridge.HandleMessage("""{"type":"apply","data":{"focusHintMode":"Overlay"}}""");
 
-        Assert.Equal("Overlay", _settings.FocusHintMode);
+        Assert.Equal("Overlay", Settings.FocusHintMode);
         Assert.Equal("Overlay", _settingsService.Load().FocusHintMode);
-        Assert.Equal(1, _controller.OnSettingsChangedCount);
+        Assert.Equal(1, _controller.CommitCount);
     }
 
     [Theory]
@@ -127,22 +126,22 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     [InlineData("OVERLAY", "Overlay")]
     public void Apply_HintMode_IsCaseInsensitive(string input, string expected)
     {
-        _settings.FocusHintMode = expected == "Off" ? "Overlay" : "Off";
+        Settings.FocusHintMode = expected == "Off" ? "Overlay" : "Off";
 
         _bridge.HandleMessage("{\"type\":\"apply\",\"data\":{\"focusHintMode\":\"" + input + "\"}}");
 
-        Assert.Equal(expected, _settings.FocusHintMode);
+        Assert.Equal(expected, Settings.FocusHintMode);
     }
 
     [Fact]
     public void Apply_InvalidHintMode_Ignored()
     {
-        _settings.FocusHintMode = "Overlay";
+        Settings.FocusHintMode = "Overlay";
 
         var response = _bridge.HandleMessage("""{"type":"apply","data":{"focusHintMode":"Laser"}}""");
 
-        Assert.Equal("Overlay", _settings.FocusHintMode);
-        Assert.Equal(0, _controller.OnSettingsChangedCount);
+        Assert.Equal("Overlay", Settings.FocusHintMode);
+        Assert.Equal(0, _controller.CommitCount);
         using var doc = JsonDocument.Parse(response!);
         Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
     }
@@ -157,22 +156,22 @@ public sealed class SettingsBridgeBetaTests : IDisposable
         // The bridge only normalizes Off|Overlay. Legacy values (Both, Spotlight)
         // are invalid here and ignored; the V5 Core migration normalizes them
         // at load instead.
-        _settings.FocusHintMode = "Overlay";
+        Settings.FocusHintMode = "Overlay";
 
         _bridge.HandleMessage("{\"type\":\"apply\",\"data\":{\"focusHintMode\":\"" + legacy + "\"}}");
 
-        Assert.Equal("Overlay", _settings.FocusHintMode);
-        Assert.Equal(0, _controller.OnSettingsChangedCount);
+        Assert.Equal("Overlay", Settings.FocusHintMode);
+        Assert.Equal(0, _controller.CommitCount);
     }
 
     [Fact]
     public void Apply_SameHintMode_DoesNotNotify()
     {
-        _settings.FocusHintMode = "Overlay";
+        Settings.FocusHintMode = "Overlay";
 
         _bridge.HandleMessage("""{"type":"apply","data":{"focusHintMode":"Overlay"}}""");
 
-        Assert.Equal(0, _controller.OnSettingsChangedCount);
+        Assert.Equal(0, _controller.CommitCount);
     }
 
     [Fact]
@@ -180,7 +179,7 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     {
         _bridge.HandleMessage("""{"type":"apply","data":{"spotlightOpacity":60}}""");
 
-        Assert.Equal(0, _controller.OnSettingsChangedCount);
+        Assert.Equal(0, _controller.CommitCount);
     }
 
     [Fact]
@@ -195,13 +194,13 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     [Fact]
     public void Apply_OverlayShowIconsFalse_PersistsNotifiesAndSnapshots()
     {
-        Assert.True(_settings.OverlayShowAppIcons);
+        Assert.True(Settings.OverlayShowAppIcons);
 
         var response = _bridge.HandleMessage("""{"type":"apply","data":{"overlayShowIcons":false}}""");
 
-        Assert.False(_settings.OverlayShowAppIcons);
+        Assert.False(Settings.OverlayShowAppIcons);
         Assert.False(_settingsService.Load().OverlayShowAppIcons);
-        Assert.Equal(1, _controller.OnSettingsChangedCount);
+        Assert.Equal(1, _controller.CommitCount);
 
         using var doc = JsonDocument.Parse(response!);
         Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
@@ -211,11 +210,11 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     [Fact]
     public void Apply_SameOverlayShowIcons_DoesNotNotify()
     {
-        _settings.OverlayShowAppIcons = true;
+        Settings.OverlayShowAppIcons = true;
 
         _bridge.HandleMessage("""{"type":"apply","data":{"overlayShowIcons":true}}""");
 
-        Assert.Equal(0, _controller.OnSettingsChangedCount);
+        Assert.Equal(0, _controller.CommitCount);
     }
 
     [Fact]
@@ -233,11 +232,11 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     [Fact]
     public void Apply_SoundEnabled_TogglesPersistsAndSnapshots()
     {
-        Assert.False(_settings.ArrangeSoundEnabled);
+        Assert.False(Settings.ArrangeSoundEnabled);
 
         var response = _bridge.HandleMessage("""{"type":"apply","data":{"soundEnabled":true}}""");
 
-        Assert.True(_settings.ArrangeSoundEnabled);
+        Assert.True(Settings.ArrangeSoundEnabled);
         Assert.True(_settingsService.Load().ArrangeSoundEnabled);
 
         using var doc = JsonDocument.Parse(response!);
@@ -250,9 +249,9 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     {
         var response = _bridge.HandleMessage("""{"type":"apply","data":{"soundName":"pop-minimal"}}""");
 
-        Assert.Equal("pop-minimal", _settings.ArrangeSoundName);
+        Assert.Equal("pop-minimal", Settings.ArrangeSoundName);
         Assert.Equal("pop-minimal", _settingsService.Load().ArrangeSoundName);
-        Assert.Equal(1, _controller.OnSettingsChangedCount);
+        Assert.Equal(1, _controller.CommitCount);
 
         using var doc = JsonDocument.Parse(response!);
         Assert.Equal("pop-minimal", doc.RootElement.GetProperty("data").GetProperty("soundName").GetString());
@@ -263,168 +262,42 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     {
         _bridge.HandleMessage("""{"type":"apply","data":{"soundAutoOffMinutes":90}}""");
 
-        Assert.Equal(90, _settings.ArrangeSoundAutoOffMinutes);
+        Assert.Equal(90, Settings.ArrangeSoundAutoOffMinutes);
         Assert.Equal(90, _settingsService.Load().ArrangeSoundAutoOffMinutes);
-        Assert.Equal(1, _controller.OnSettingsChangedCount);
+        Assert.Equal(1, _controller.CommitCount);
     }
 
     [Fact]
     public void Apply_NegativeSoundAutoOffMinutes_Ignored()
     {
-        _settings.ArrangeSoundAutoOffMinutes = 0;
+        Settings.ArrangeSoundAutoOffMinutes = 0;
 
         _bridge.HandleMessage("""{"type":"apply","data":{"soundAutoOffMinutes":-2}}""");
 
-        Assert.Equal(0, _settings.ArrangeSoundAutoOffMinutes);
-        Assert.Equal(0, _controller.OnSettingsChangedCount);
+        Assert.Equal(0, Settings.ArrangeSoundAutoOffMinutes);
+        Assert.Equal(0, _controller.CommitCount);
     }
 
     [Fact]
     public void Apply_EmptySoundName_Ignored()
     {
-        _settings.ArrangeSoundName = "chime-soft";
+        Settings.ArrangeSoundName = "chime-soft";
 
         _bridge.HandleMessage("""{"type":"apply","data":{"soundName":""}}""");
 
-        Assert.Equal("chime-soft", _settings.ArrangeSoundName);
-        Assert.Equal(0, _controller.OnSettingsChangedCount);
+        Assert.Equal("chime-soft", Settings.ArrangeSoundName);
+        Assert.Equal(0, _controller.CommitCount);
     }
 
     [Fact]
     public void Apply_SameSoundValues_DoNotNotify()
     {
-        _settings.ArrangeSoundName = "chime-soft";
-        _settings.ArrangeSoundAutoOffMinutes = 0;
+        Settings.ArrangeSoundName = "chime-soft";
+        Settings.ArrangeSoundAutoOffMinutes = 0;
 
         _bridge.HandleMessage("""{"type":"apply","data":{"soundName":"chime-soft","soundAutoOffMinutes":0}}""");
 
-        Assert.Equal(0, _controller.OnSettingsChangedCount);
+        Assert.Equal(0, _controller.CommitCount);
     }
 
-    /// <summary>
-    /// Minimal fake controller mirroring real semantics. Implements the full
-    /// IPeekDowsController surface (incl. SetFocusHintMode).
-    /// </summary>
-    private sealed class FakeBetaController : IPeekDowsController
-    {
-        private readonly SettingsService _settingsService;
-
-        public FakeBetaController(AppSettings settings, SettingsService settingsService)
-        {
-            CurrentSettings = settings;
-            _settingsService = settingsService;
-        }
-
-        public int OnSettingsChangedCount { get; private set; }
-
-        public RuntimeState State => RuntimeState.Running;
-        public string LogFilePath => "";
-        public AppSettings CurrentSettings { get; }
-        public bool IsAutoArrangeRunning => false;
-        public bool IsStartWithWindowsEnabled => CurrentSettings.StartWithWindows;
-        public bool IsDirectionalFocusEnabled => CurrentSettings.DirectionalFocusEnabled;
-        public bool IsAnimateWindowTransitionsEnabled => CurrentSettings.AnimateWindowTransitions;
-        public bool AllowRepositionMaximizedWindows => CurrentSettings.AllowRepositionMaximizedWindows;
-        public WindowSizePreset CurrentWindowSizePreset => CurrentSettings.WindowSizePreset;
-        public bool IsPaused => false;
-        public DateTimeOffset? PauseUntil => null;
-        public string? PauseDescription => null;
-
-        public event Action<RuntimeState>? StateChanged;
-        public event Action<bool>? AutoArrangeChanged;
-        public event Action<bool>? StartWithWindowsChanged;
-        public event Action<bool>? DirectionalFocusChanged;
-        public event Action<bool>? AnimateWindowTransitionsChanged;
-        public event Action<bool>? AllowRepositionMaximizedWindowsChanged;
-        public event Action<WindowSizePreset>? WindowSizePresetChanged;
-        public event Action<string>? FocusHintModeChanged;
-        public event Action<bool>? SoundChanged;
-
-        public void ArrangeNow() { }
-        public void TogglePause() { }
-        public void PauseFor(TimeSpan duration) { }
-        public void PauseUntilResumed() { }
-        public void Resume() { }
-        public void OpenSettings() { }
-        public void OpenLogFile() { }
-        public void OpenLogsFolder() { }
-        public void Exit() { }
-        public void OnSettingsChanged() { OnSettingsChangedCount++; }
-
-        public void ToggleAutoArrange()
-        {
-            CurrentSettings.AutoArrange = !CurrentSettings.AutoArrange;
-            _settingsService.Save(CurrentSettings);
-            AutoArrangeChanged?.Invoke(CurrentSettings.AutoArrange);
-        }
-
-        public void ToggleStartWithWindows()
-        {
-            CurrentSettings.StartWithWindows = !CurrentSettings.StartWithWindows;
-            _settingsService.Save(CurrentSettings);
-            StartWithWindowsChanged?.Invoke(CurrentSettings.StartWithWindows);
-        }
-
-        public void ToggleDirectionalFocus()
-        {
-            CurrentSettings.DirectionalFocusEnabled = !CurrentSettings.DirectionalFocusEnabled;
-            _settingsService.Save(CurrentSettings);
-            DirectionalFocusChanged?.Invoke(CurrentSettings.DirectionalFocusEnabled);
-        }
-
-        public void ToggleAnimateWindowTransitions()
-        {
-            CurrentSettings.AnimateWindowTransitions = !CurrentSettings.AnimateWindowTransitions;
-            _settingsService.Save(CurrentSettings);
-            AnimateWindowTransitionsChanged?.Invoke(CurrentSettings.AnimateWindowTransitions);
-        }
-
-        public void ToggleAllowRepositionMaximizedWindows()
-        {
-            CurrentSettings.AllowRepositionMaximizedWindows = !CurrentSettings.AllowRepositionMaximizedWindows;
-            _settingsService.Save(CurrentSettings);
-            AllowRepositionMaximizedWindowsChanged?.Invoke(CurrentSettings.AllowRepositionMaximizedWindows);
-        }
-
-        public void SetWindowSizePreset(WindowSizePreset preset)
-        {
-            CurrentSettings.WindowSizePreset = preset;
-            _settingsService.Save(CurrentSettings);
-            WindowSizePresetChanged?.Invoke(preset);
-        }
-
-        public void SetFocusHintMode(string mode)
-        {
-            CurrentSettings.FocusHintMode = mode;
-            _settingsService.Save(CurrentSettings);
-        }
-
-        public void UndoArrange() { }
-        public bool CanUndoArrange => false;
-        public void SetLayoutMode(string mode) { CurrentSettings.LayoutMode = mode; }
-        public event Action<string>? LayoutModeChanged;
-
-        public void ToggleArrangeSound()
-        {
-            CurrentSettings.ArrangeSoundEnabled = !CurrentSettings.ArrangeSoundEnabled;
-            _settingsService.Save(CurrentSettings);
-            SoundChanged?.Invoke(CurrentSettings.ArrangeSoundEnabled);
-        }
-
-        public void RefreshArrangeSoundAutoOff() { }
-
-        public void DisableArrangeSound(string reason)
-        {
-            CurrentSettings.ArrangeSoundEnabled = false;
-            _settingsService.Save(CurrentSettings);
-            SoundChanged?.Invoke(false);
-        }
-
-        public string[] UserSounds { get; set; } = [];
-        public string PickedSound { get; set; } = "";
-        public string[] GetUserSounds() => UserSounds;
-        public string PickArrangeSoundFile() => PickedSound;
-        public void DeleteArrangeSoundFile(string name) { }
-        public void PreviewArrangeSound(string name) { }
-    }
 }

@@ -22,7 +22,6 @@ public sealed partial class SettingsBridge
     private static readonly JsonSerializerOptions WriteOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly IPeekDowsController _controller;
-    private readonly SettingsService _settingsService;
     private readonly FileLogger? _logger;
     private readonly Func<string> _appVersionProvider;
     private readonly Action? _openSettingsFolder;
@@ -34,7 +33,6 @@ public sealed partial class SettingsBridge
 
     public SettingsBridge(
         IPeekDowsController controller,
-        SettingsService settingsService,
         FileLogger? logger = null,
         Func<string>? appVersionProvider = null,
         Action? openSettingsFolder = null,
@@ -42,7 +40,6 @@ public sealed partial class SettingsBridge
         Action<Action>? runDialog = null)
     {
         _controller = controller;
-        _settingsService = settingsService;
         _logger = logger;
         _appVersionProvider = appVersionProvider ?? DefaultAppVersion;
         _openSettingsFolder = openSettingsFolder;
@@ -60,8 +57,7 @@ public sealed partial class SettingsBridge
     // une implémentation immédiate et casserait le build avant l'arrivée de l'Agent C).
     partial void AugmentSnapshotIgnored(System.Collections.Generic.Dictionary<string, object?> data);
     partial void AugmentSnapshotHotkeys(System.Collections.Generic.Dictionary<string, object?> data);
-    partial void ApplyIgnoredDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool plainChanged);
-    partial void ApplyHotkeysDraft(SettingsDraft draft, ref string? hotkeyError);
+    partial void ApplyIgnoredDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool changed);
 
     private Func<string, JsonElement, string?>? _windowsMessageHandler;
 
@@ -227,55 +223,43 @@ public sealed partial class SettingsBridge
             return Applied(ok: false, error: "empty-draft");
         }
 
-        var settings = _controller.CurrentSettings;
+        var previous = _controller.CurrentSettings;
+        var next = previous.CopyForSettingsEdit();
         _logger?.Info("SettingsBridge: applying draft from settings UI");
 
-        string? hotkeyError = null;
-        ApplyHotkeysDraft(draft, ref hotkeyError);
+        var hotkeyError = ApplyHotkeysDraft(draft, next, out var changed);
         if (hotkeyError is not null)
             return Applied(ok: false, error: hotkeyError);
 
-        // 1. Toggle-backed keys — only when the value differs. Each controller toggle
-        //    persists and raises its *Changed event so the tray menu stays in sync.
-        if (draft.AutoArrange is { } av && settings.AutoArrange != av)
-            _controller.ToggleAutoArrange();
-        if (draft.Animate is { } nv && settings.AnimateWindowTransitions != nv)
-            _controller.ToggleAnimateWindowTransitions();
-        if (draft.DirectionalFocus is { } dv && settings.DirectionalFocusEnabled != dv)
-            _controller.ToggleDirectionalFocus();
-        if (draft.StartWithWindows is { } sv && settings.StartWithWindows != sv)
-            _controller.ToggleStartWithWindows();
-        if (draft.AllowRepositionMaximized is { } rv && settings.AllowRepositionMaximizedWindows != rv)
-            _controller.ToggleAllowRepositionMaximizedWindows();
+        if (draft.Enabled is { } enabled) next.Enabled = enabled;
+        if (draft.AutoArrange is { } autoArrange) next.AutoArrange = autoArrange;
+        if (draft.Animate is { } animate) next.AnimateWindowTransitions = animate;
+        if (draft.DirectionalFocus is { } focus) next.DirectionalFocusEnabled = focus;
+        if (draft.StartWithWindows is { } startup) next.StartWithWindows = startup;
+        if (draft.AllowRepositionMaximized is { } reposition) next.AllowRepositionMaximizedWindows = reposition;
+        if (draft.Preset is { } presetName && TryParsePreset(presetName, out var preset))
+            next.WindowSizePreset = preset;
+        if (draft.ArrangeOnStartup is { } arrangeOnStartup) next.ArrangeOnStartup = arrangeOnStartup;
+        if (draft.ShowTrayNotifications is { } notifications) next.ShowTrayNotifications = notifications;
+        if (draft.ThresholdPx is > 0 and var threshold) next.DirectionalFocusThresholdPx = threshold;
 
-        // 2. Preset — SetWindowSizePreset persists AND triggers a re-arrange, so the
-        //    on-screen layout matches the preview immediately.
-        if (draft.Preset is { } presetName
-            && TryParsePreset(presetName, out var preset)
-            && _controller.CurrentWindowSizePreset != preset)
-        {
-            _controller.SetWindowSizePreset(preset);
-        }
+        changed |= previous.Enabled != next.Enabled
+            || previous.AutoArrange != next.AutoArrange
+            || previous.AnimateWindowTransitions != next.AnimateWindowTransitions
+            || previous.DirectionalFocusEnabled != next.DirectionalFocusEnabled
+            || previous.StartWithWindows != next.StartWithWindows
+            || previous.AllowRepositionMaximizedWindows != next.AllowRepositionMaximizedWindows
+            || previous.WindowSizePreset != next.WindowSizePreset
+            || previous.ArrangeOnStartup != next.ArrangeOnStartup
+            || previous.ShowTrayNotifications != next.ShowTrayNotifications
+            || previous.DirectionalFocusThresholdPx != next.DirectionalFocusThresholdPx;
 
-        // 3. Plain fields — mutate the shared instance, then ONE Save + OnSettingsChanged.
-        bool plainChanged = false;
-        if (draft.Enabled is { } ev && settings.Enabled != ev) { settings.Enabled = ev; plainChanged = true; }
-        if (draft.ArrangeOnStartup is { } ov && settings.ArrangeOnStartup != ov) { settings.ArrangeOnStartup = ov; plainChanged = true; }
-        if (draft.ShowTrayNotifications is { } tv && settings.ShowTrayNotifications != tv) { settings.ShowTrayNotifications = tv; plainChanged = true; }
-        if (draft.ThresholdPx is { } th && th > 0 && settings.DirectionalFocusThresholdPx != th) { settings.DirectionalFocusThresholdPx = th; plainChanged = true; }
+        ApplyIgnoredDraft(draft, next, ref changed);
+        ApplyBetaDraft(draft, next, ref changed);
 
-        ApplyIgnoredDraft(draft, settings, ref plainChanged);
-        ApplyBetaDraft(draft, settings, ref plainChanged);
-
-        if (plainChanged)
-        {
-            _settingsService.Save(settings);
-            _controller.OnSettingsChanged();
-            // Re-arm (or stop) the sound auto-off deadline from the saved values.
-            try { _controller.RefreshArrangeSoundAutoOff(); } catch { }
-        }
-
-        return Applied(ok: true, error: null);
+        return !changed || _controller.TryCommitSettings(next, out var error)
+            ? Applied(ok: true, error: null)
+            : Applied(ok: false, error: error);
     }
 
     private static bool TryParsePreset(string name, out WindowSizePreset preset)
@@ -283,9 +267,7 @@ public sealed partial class SettingsBridge
 
     private string Applied(bool ok, string? error)
     {
-        // On success the fresh live snapshot rides along as the new source of truth —
-        // this also absorbs controller-side corrections (e.g. StartWithWindows reverting
-        // when the Startup shortcut could not be created).
+        // The fresh live snapshot becomes the UI's baseline after a successful save.
         return JsonSerializer.Serialize(
             ok ? (object)new { type = "applied", ok, data = SnapshotData() }
                : new { type = "applied", ok, error },

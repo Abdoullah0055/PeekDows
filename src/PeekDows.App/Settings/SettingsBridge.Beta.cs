@@ -38,25 +38,26 @@ public sealed partial class SettingsBridge
         }
     }
 
-    private void ApplyBetaDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool plainChanged)
+    private void ApplyBetaDraft(SettingsDraft draft, Core.Models.AppSettings settings, ref bool changed)
     {
         if (draft.FocusHintMode is { } raw
             && TryNormalizeHintMode(raw, out var mode)
             && !string.Equals(settings.FocusHintMode, mode, StringComparison.Ordinal))
         {
             settings.FocusHintMode = mode;
-            plainChanged = true;
+            changed = true;
         }
 
-        // Toggle-backed like the other tray toggles: flip only when different so the
-        // controller persists and raises SoundChanged (tray + open settings stay in sync).
         if (draft.SoundEnabled is { } se && settings.ArrangeSoundEnabled != se)
-            _controller.ToggleArrangeSound();
+        {
+            settings.ArrangeSoundEnabled = se;
+            changed = true;
+        }
 
         if (draft.OverlayShowIcons is { } oi && settings.OverlayShowAppIcons != oi)
         {
             settings.OverlayShowAppIcons = oi;
-            plainChanged = true;
+            changed = true;
         }
 
         if (draft.SoundName is { } sn
@@ -64,7 +65,7 @@ public sealed partial class SettingsBridge
             && !string.Equals(settings.ArrangeSoundName, sn, StringComparison.Ordinal))
         {
             settings.ArrangeSoundName = sn;
-            plainChanged = true;
+            changed = true;
         }
 
         if (draft.SoundAutoOffMinutes is { } minutes
@@ -72,16 +73,15 @@ public sealed partial class SettingsBridge
             && settings.ArrangeSoundAutoOffMinutes != minutes)
         {
             settings.ArrangeSoundAutoOffMinutes = minutes;
-            plainChanged = true;
+            changed = true;
         }
 
-        // Routed through the controller (like the sound toggle): single owner of
-        // the re-arrange-on-change behavior, so tray and desktop app agree.
         if (draft.LayoutMode is { } rawLayout
             && TryNormalizeLayoutMode(rawLayout, out var layoutMode)
             && !string.Equals(settings.LayoutMode, layoutMode, StringComparison.Ordinal))
         {
-            _controller.SetLayoutMode(layoutMode);
+            settings.LayoutMode = layoutMode;
+            changed = true;
         }
 
         if (draft.AppRules is { } rules)
@@ -90,7 +90,7 @@ public sealed partial class SettingsBridge
             if (!Core.Services.AppRuleService.AreRulesEqual(settings.AppRules, clean))
             {
                 settings.AppRules = clean;
-                plainChanged = true;
+                changed = true;
             }
         }
     }

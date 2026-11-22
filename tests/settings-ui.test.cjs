@@ -155,6 +155,29 @@ test("an unrelated save preserves a disabled overlay icon setting", () => {
   `);
 });
 
+test("a failed save keeps the entire draft available to retry", () => {
+  runInSettingsPage(`
+    const receive = data => window.chrome.webview.message({ data });
+    adoptSnapshot({ preset: "Small", layoutMode: "Grid", appRules: [], hotkeys: { arrangeNow: "Ctrl+Alt+Space" } });
+    state.draft.preset = "Medium";
+    state.draft.layoutMode = "Halves";
+    state.draft.appRules = [{ process: "notes.exe", action: "ignore" }];
+    state.draft.hotkeys.arrangeNow = "Ctrl+Alt+F8";
+    syncDirty();
+    $("saveBtn").click();
+    const submission = JSON.stringify(sent.at(-1));
+
+    receive({ type: "applied", ok: false, error: "settings-write-failed" });
+    assert.match($("unsaved").textContent, /Save failed/);
+    assert.equal($("unsaved").style.visibility, "visible");
+    assert.equal(state.dirty, true);
+    assert.equal($("saveBtn").disabled, false);
+    assert.equal(state.snapshot.layoutMode, "Grid");
+    $("saveBtn").click();
+    assert.equal(JSON.stringify(sent.at(-1)), submission);
+  `);
+});
+
 test("custom preview draws the configured splits and clears inactive slots", () => {
   runInSettingsPage(`
     state.snapshot = { customZones: { widthPercent: 65, heightPercent: 45, splitSecondary: true } };

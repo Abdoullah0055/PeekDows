@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using PeekDows.Core.Models;
 
 namespace PeekDows.App.Settings;
 
@@ -15,19 +16,22 @@ public sealed partial class SettingsBridge
         };
     }
 
-    partial void ApplyHotkeysDraft(SettingsDraft draft, ref string? hotkeyError)
+    private static string? ApplyHotkeysDraft(SettingsDraft draft, AppSettings next, out bool changed)
     {
-        if (draft.Hotkeys is null) return;
-        var changes = new Dictionary<string, string>();
-        foreach (var kv in draft.Hotkeys)
+        changed = false;
+        if (draft.Hotkeys is null) return null;
+
+        foreach (var (name, gesture) in draft.Hotkeys)
         {
-            if (kv.Key is not ("arrangeNow" or "pauseResume")) continue;
-            var h = _controller.CurrentSettings.Hotkeys;
-            var cur = h.TryGetValue(kv.Key, out var c) ? c : PeekDowsAppContext.DefaultHotkeys[kv.Key];
-            if (string.Equals(cur, kv.Value, System.StringComparison.OrdinalIgnoreCase)) continue;
-            changes.Add(kv.Key, kv.Value);
+            if (!PeekDowsAppContext.DefaultHotkeys.TryGetValue(name, out var defaultGesture)) continue;
+            if (!HotkeyParser.TryParse(gesture, out _, out _)) return "bad-gesture";
+
+            var current = next.Hotkeys.GetValueOrDefault(name, defaultGesture);
+            if (HotkeyParser.AreEquivalent(current, gesture)) continue;
+            next.Hotkeys[name] = gesture;
+            changed = true;
         }
-        if (changes.Count > 0 && !_controller.TryUpdateHotkeys(changes, out var error))
-            hotkeyError = error;
+
+        return null;
     }
 }
