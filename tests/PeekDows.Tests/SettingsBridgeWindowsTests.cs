@@ -62,6 +62,41 @@ public sealed class SettingsBridgeWindowsTests
     }
 
     [Fact]
+    public void WindowsEligibility_KeepsDisplayRuleProvenanceAfterSavingProcessExclusion()
+    {
+        var left = new MonitorInfo { Handle = (IntPtr)1, ProfileId = "left", WorkArea = new(0, 0, 1200, 900) };
+        var right = new MonitorInfo { Handle = (IntPtr)2, ProfileId = "right", WorkArea = new(1200, 0, 1200, 900) };
+        var settings = new AppSettings
+        {
+            AppRules = [new() { Process = "notes.exe", Action = "ignore" }],
+            MonitorProfiles = new()
+            {
+                ["right"] = new("Grid", [new() { Process = "notes", Action = "pin", Slot = "A" }])
+            },
+            IgnoredProcesses = ["notes.exe"]
+        };
+        var discovery = new WindowDiscoveryService(() =>
+            [TestWindow(1), TestWindow(2, maximized: true), TestWindow(3, className: "Shell_TrayWnd"),
+                TestWindow(4, processName: "SearchHost.exe")]);
+        var checkedWindows = new List<IntPtr>();
+        var rows = WindowsSnapshotProvider.Build(discovery, new WindowClassifier(settings), 200,
+            PeekDowsAppContext.CreateWindowsPlacementCheck(settings, hwnd =>
+            {
+                checkedWindows.Add(hwnd);
+                return hwnd == (IntPtr)1 ? left : right;
+            }, new LoneWindowMaximizePolicy())).ToDictionary(row => row.Hwnd);
+
+        Assert.All(rows.Values, row => Assert.False(row.Eligible));
+        Assert.Equal("ignored-process", rows["1"].Reason);
+        Assert.False(rows["1"].HasProfileRule);
+        Assert.Equal("ignored-process", rows["2"].Reason);
+        Assert.True(rows["2"].HasProfileRule);
+        Assert.Equal("system", rows["3"].Reason);
+        Assert.Equal("ignored-process", rows["4"].Reason);
+        Assert.Equal(new[] { (IntPtr)1, (IntPtr)2 }, checkedWindows);
+    }
+
+    [Fact]
     public void WindowsEligibility_AllowsPeekDowsMaximizedWindowsWithRepositionSettingOff()
     {
         var settings = new AppSettings { AllowRepositionMaximizedWindows = false };
@@ -77,12 +112,14 @@ public sealed class SettingsBridgeWindowsTests
         Assert.True(rows.Single(row => row.Hwnd == "2").Eligible);
     }
 
-    private static RawWindowInfo TestWindow(int handle, bool maximized = false) => new()
+    private static RawWindowInfo TestWindow(int handle, bool maximized = false,
+        string className = "", string processName = "notes.exe") => new()
     {
         Hwnd = (IntPtr)handle,
         Title = $"Notes {handle}",
         ProcessId = Environment.ProcessId + 1,
-        ProcessName = "notes.exe",
+        ProcessName = processName,
+        ClassName = className,
         CurrentRect = new(0, 0, 800, 600),
         IsVisible = true,
         IsMaximized = maximized

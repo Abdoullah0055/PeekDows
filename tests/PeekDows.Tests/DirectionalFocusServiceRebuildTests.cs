@@ -110,6 +110,46 @@ public class DirectionalFocusServiceRebuildTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void GestureRefreshOnlyMatchesMaximizedWindowThroughAnActiveRestorePlan(bool restoring)
+    {
+        var maximized = (IntPtr)1;
+        var arranged = (IntPtr)2;
+        var resolver = new FakeMonitorResolver(WorkArea);
+        var settings = new AppSettings { WindowSizePreset = WindowSizePreset.Large };
+        var slots = new LayoutEngine().GetSlotRects("Grid", WorkArea, settings);
+        var windows = new[]
+        {
+            new RawWindowInfo { Hwnd = maximized, Title = "Maximized", IsVisible = true, IsMaximized = true, CurrentRect = WorkArea },
+            new RawWindowInfo { Hwnd = arranged, Title = "Arranged", IsVisible = true, CurrentRect = slots["A"] }
+        };
+        var classifier = new WindowClassifier(settings);
+        var registry = new DirectionalFocusRegistry(_ => true, _ => true);
+        var snapshot = new DirectionalFocusLayoutSnapshotService(resolver,
+            hwnd => windows.Single(window => window.Hwnd == hwnd).CurrentRect, _ => true, _ => slots);
+        Assert.Equal(maximized, snapshot.BuildSlotMap(WorkArea, [maximized, arranged])[DirectionalFocusSlot.TopLeft]);
+
+        var animator = new FakeWindowAnimator();
+        if (restoring)
+        {
+            animator.Animating.Add(maximized);
+            registry.UpdateFromPlacements([new WindowPlacement
+            {
+                Hwnd = maximized, SlotId = "A", TargetRect = slots["A"], Kind = PlacementKind.RestoreAndReposition
+            }], resolver);
+        }
+        using var service = CreateServiceWithAnimator(registry, snapshot, animator, () => windows
+            .Where(window => classifier.IsEligibleForDirectionalFocus(window,
+                includeMaximized: window.IsMaximized && animator.IsAnimating(window.Hwnd)))
+            .Select(window => window.Hwnd).ToArray());
+
+        service.RefreshGestureSlots(WorkArea);
+
+        Assert.Equal(restoring ? maximized : arranged, registry.GetHwndForSlot(WorkArea, DirectionalFocusSlot.TopLeft));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void HeldDirectionAttemptsNewTargetOnceAfterRefresh(bool hadTarget)
     {
         var registry = new DirectionalFocusRegistry(_ => true, _ => true);

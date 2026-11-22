@@ -169,6 +169,40 @@ test("saving Windows exclusions reloads saved eligibility and keeps edits made d
   `);
 });
 
+test("unignoring a saved Windows exclusion from a pinned display keeps the global ignore rule", () => {
+  runInSettingsPage(`
+    const globalRule = { process: "notes.exe", action: "ignore" };
+    const profileWindow = { hwnd: "1", title: "Pinned", process: "notes.exe", hasProfileRule: true };
+    const globalWindow = { hwnd: "2", title: "Global", process: "notes.exe" };
+    receive({ type: "settings", data: { appRules: [globalRule] } });
+    receive({ type: "windows", data: [
+      { ...profileWindow, eligible: true },
+      { ...globalWindow, eligible: false, reason: "ignored-by-rule" }
+    ] });
+    const row = index => $("#windowsTable tbody").children[index];
+    const ignoreButton = () => row(0).children[4].children[0];
+    ignoreButton().click();
+    $("saveBtn").click();
+    const { requestId, data } = sent.at(-1);
+    assert.equal(data.ignoredProcesses.join(","), "notes.exe");
+    receive({ type: "applied", requestId, ok: true, data: { ...data, appRules: [globalRule] } });
+    assert.equal(sent.at(-1).type, "requestWindows");
+    receive({ type: "windows", data: [profileWindow, globalWindow].map(window =>
+      ({ ...window, eligible: false, reason: "ignored-process" })) });
+    ignoreButton().click();
+    $("unignoreConfirm").click();
+    assert.equal(state.draft.ignoredProcesses.length, 0);
+    assert.equal(state.draft.appRules.length, 1);
+    assert.equal(state.draft.appRules[0].action, "ignore");
+    assert.equal(row(0).children[2].textContent, "Check after Save");
+    assert.equal(row(1).children[2].textContent, "Ignored");
+    $("saveBtn").click();
+    assert.equal(sent.at(-1).type, "apply");
+    assert.equal(sent.at(-1).data.ignoredProcesses.length, 0);
+    assert.equal(Object.hasOwn(sent.at(-1).data, "appRules"), false);
+  `);
+});
+
 test("Windows refreshes an adopted external profile and waits while its snapshot is deferred", () => {
   runInSettingsPage(`
     receive({ type: "settings", data: { animate: true } });

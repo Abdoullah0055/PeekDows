@@ -941,7 +941,9 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         var rulesByMonitor = new Dictionary<IntPtr, List<AppRule>>();
         foreach (var raw in rawWindows)
         {
-            if (!_classifier.IsEligibleForDirectionalFocus(raw)) continue;
+            // An active tween can use its accepted plan even before the native restore completes.
+            var restoring = raw.IsMaximized && _animationService.IsAnimating(raw.Hwnd);
+            if (!_classifier.IsEligibleForDirectionalFocus(raw, includeMaximized: restoring)) continue;
 
             var monitor = _monitorService.GetMonitorForWindow(raw.Hwnd);
             if (monitor.IsFallback) continue;

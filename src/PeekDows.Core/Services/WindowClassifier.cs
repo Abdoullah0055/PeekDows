@@ -136,7 +136,8 @@ public class WindowClassifier
 
     // Custom placement can legitimately shrink a window below the arrange threshold.
     // Directional focus checks against the actual zone size after classification.
-    public bool IsEligibleForDirectionalFocus(RawWindowInfo window) => IsEligible(window, includeSmallWindows: true);
+    public bool IsEligibleForDirectionalFocus(RawWindowInfo window, bool includeMaximized = false)
+        => (!window.IsMaximized || includeMaximized) && IsEligible(window, includeSmallWindows: true);
 
     private bool IsEligible(RawWindowInfo window, bool includeSmallWindows)
     {
@@ -168,6 +169,9 @@ public class WindowClassifier
         EnsureProcessCacheFresh();
         return _ignoredProcessSet.Contains(trimmed);
     }
+
+    public static bool IsBuiltInIgnoredProcess(string? processName)
+        => AlwaysIgnoredProcessNames.Contains(processName?.Trim(), StringComparer.OrdinalIgnoreCase);
 
     public bool IsIgnoredClass(string? className)
     {
