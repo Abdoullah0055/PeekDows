@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Text.Json;
+using PeekDows.App;
 using PeekDows.App.Settings;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
@@ -37,13 +40,23 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     }
 
     [Fact]
-    public void SoundImport_ReturnsUpdatedLibraryWithoutASnapshot()
+    public void SoundImport_QueuesOnePickerAndPostsTheUpdatedLibrary()
     {
+        var work = new Queue<Action>();
+        var replies = new List<string>();
+        var bridge = new SettingsBridge(_controller, runDialog: work.Enqueue, postAsyncResponse: replies.Add);
         _controller.PickedSound = "new.wav";
-        _controller.UserSounds = ["old.wav", "new.wav"];
+        _controller.UserSounds = ["old.wav"];
 
-        var reply = _bridge.HandleMessage("""{"type":"pickSoundFile"}""");
-        using var document = JsonDocument.Parse(Assert.IsType<string>(reply));
+        Assert.Null(bridge.HandleMessage("""{"type":"pickSoundFile"}"""));
+        Assert.Null(bridge.HandleMessage("""{"type":"pickSoundFile"}"""));
+        Assert.DoesNotContain(nameof(_controller.PickArrangeSoundFile), _controller.Calls);
+        Assert.Empty(replies);
+        var pick = Assert.Single(work);
+        _controller.UserSounds = ["old.wav", "new.wav"];
+        pick();
+        Assert.Contains(nameof(_controller.PickArrangeSoundFile), _controller.Calls);
+        using var document = JsonDocument.Parse(Assert.Single(replies));
         var message = document.RootElement;
 
         Assert.Equal("soundFile", message.GetProperty("type").GetString());
@@ -53,9 +66,204 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     }
 
     [Fact]
-    public void SoundImport_CancelDoesNotRefreshSettings()
+    public void SoundImport_CancelPostsNothingAndReleasesThePicker()
     {
-        Assert.Null(_bridge.HandleMessage("""{"type":"pickSoundFile"}"""));
+        var work = new Queue<Action>();
+        var replies = new List<string>();
+        var bridge = new SettingsBridge(_controller, runDialog: work.Enqueue, postAsyncResponse: replies.Add);
+
+        Assert.Null(bridge.HandleMessage("""{"type":"pickSoundFile"}"""));
+        work.Dequeue()();
+        Assert.Empty(replies);
+        Assert.Null(bridge.HandleMessage("""{"type":"pickSoundFile"}"""));
+        Assert.Single(work);
+    }
+
+    [Fact]
+    public void SoundImport_FailurePostsAnAudioErrorAndReleasesThePicker()
+    {
+        var work = new Queue<Action>();
+        var replies = new List<string>();
+        var bridge = new SettingsBridge(_controller, runDialog: work.Enqueue, postAsyncResponse: replies.Add);
+        _controller.SoundPickError = new IOException("read-failed");
+
+        Assert.Null(bridge.HandleMessage("""{"type":"pickSoundFile"}"""));
+        work.Dequeue()();
+        using var document = JsonDocument.Parse(Assert.Single(replies));
+        Assert.Equal("soundError", document.RootElement.GetProperty("type").GetString());
+        Assert.Equal("pick", document.RootElement.GetProperty("operation").GetString());
+        Assert.Null(bridge.HandleMessage("""{"type":"pickSoundFile"}"""));
+        Assert.Single(work);
+    }
+
+    [Fact]
+    public void SoundDelete_ReturnsOnlyTheUpdatedLibraryAndPersistentSelection()
+    {
+        _controller.UserSounds = ["keep.wav"];
+
+        var reply = _bridge.HandleMessage("""{"type":"deleteSoundFile","name":"custom.wav"}""");
+        using var document = JsonDocument.Parse(Assert.IsType<string>(reply));
+        var message = document.RootElement;
+
+        Assert.Equal("soundFile", message.GetProperty("type").GetString());
+        Assert.Equal("custom.wav", message.GetProperty("deletedName").GetString());
+        Assert.Equal("chime-soft", message.GetProperty("soundName").GetString());
+        Assert.Equal(_controller.UserSounds, message.GetProperty("userSounds").Deserialize<string[]>());
+        Assert.False(message.TryGetProperty("data", out _));
+    }
+
+    [Fact]
+    public void SoundDelete_FailurePostsAnAudioError()
+    {
+        _controller.SoundDeleteError = new IOException("delete-failed");
+
+        var reply = _bridge.HandleMessage("""{"type":"deleteSoundFile","name":"custom.wav"}""");
+        using var document = JsonDocument.Parse(Assert.IsType<string>(reply));
+        Assert.Equal("soundError", document.RootElement.GetProperty("type").GetString());
+        Assert.Equal("delete", document.RootElement.GetProperty("operation").GetString());
+    }
+
+    [Fact]
+    public void SoundDelete_SelectedFileIsRestoredWhenFallbackSettingsCannotBeWritten()
+    {
+        const string name = "selected.wav";
+        var file = Path.Combine(_tempDir, name);
+        byte[] original = [1, 2, 3, 4];
+        File.WriteAllBytes(file, original);
+        Settings.ArrangeSoundName = name;
+        _settingsService.Save(Settings);
+        var before = File.ReadAllBytes(_settingsService.SettingsFilePath);
+        var invalidDestination = new SettingsService(Directory.CreateDirectory(Path.Combine(_tempDir, "invalid")).FullName);
+        using var controller = new SettingsBridgeTests.FakeBridgeController(Settings, invalidDestination);
+        var fallback = Settings.CopyForSettingsEdit();
+        fallback.ArrangeSoundName = "chime-soft";
+
+        var exception = Assert.Throws<IOException>(() => PeekDowsAppContext.DeleteSelectedSound(file, () =>
+        {
+            Assert.False(File.Exists(file));
+            Assert.Single(Directory.GetFiles(_tempDir, "*.tmp"));
+            if (!controller.TryCommitSettings(fallback, out var error)) throw new IOException(error);
+        }, (_, _) => { }));
+
+        Assert.Equal("settings-write-failed", exception.Message);
+        Assert.Equal(name, controller.CurrentSettings.ArrangeSoundName);
+        Assert.Equal(before, File.ReadAllBytes(_settingsService.SettingsFilePath));
+        Assert.Equal(original, File.ReadAllBytes(file));
+        Assert.Empty(Directory.GetFiles(_tempDir, "*.tmp"));
+    }
+
+    [Fact]
+    public void SoundDelete_FailedRestoreKeepsOriginalBytesForRecoveryAndReportsFailure()
+    {
+        var file = Path.Combine(_tempDir, "selected.wav");
+        File.WriteAllText(file, "original");
+
+        var exception = Assert.Throws<IOException>(() => PeekDowsAppContext.DeleteSelectedSound(file, () =>
+        {
+            File.WriteAllText(file, "replacement made after move");
+            throw new IOException("settings-write-failed");
+        }, (_, _) => { }));
+
+        var recoveryFile = Assert.Single(Directory.GetFiles(_tempDir, "*.tmp"));
+        Assert.Equal("original", File.ReadAllText(recoveryFile));
+        Assert.Equal("replacement made after move", File.ReadAllText(file));
+        Assert.Contains(recoveryFile, exception.Message);
+        Assert.Equal(2, Assert.IsType<AggregateException>(exception.InnerException).InnerExceptions.Count);
+    }
+
+    [Fact]
+    public void SoundDelete_SelectedFileAndTemporaryCopyAreRemovedAfterFallbackPersists()
+    {
+        var file = Path.Combine(_tempDir, "selected.wav");
+        File.WriteAllText(file, "original");
+        Settings.ArrangeSoundName = "selected.wav";
+        var fallback = Settings.CopyForSettingsEdit();
+        fallback.ArrangeSoundName = "chime-soft";
+
+        PeekDowsAppContext.DeleteSelectedSound(file, () =>
+        {
+            if (!_controller.TryCommitSettings(fallback, out var error)) throw new IOException(error);
+        }, (_, _) => { });
+
+        Assert.False(File.Exists(file));
+        Assert.Equal("chime-soft", _controller.CurrentSettings.ArrangeSoundName);
+        Assert.Equal("chime-soft", _settingsService.Load().ArrangeSoundName);
+        Assert.Empty(Directory.GetFiles(_tempDir, "*.tmp"));
+    }
+
+    [Theory]
+    [InlineData("""{"type":"apply","requestId":42}""", "apply-without-data")]
+    [InlineData("""{"type":"apply","requestId":42,"data":null}""", "empty-draft")]
+    [InlineData("""{"type":"apply","requestId":42,"data":{"animate":[]}}""", "malformed-draft")]
+    public void Apply_RejectsInvalidDraftsWithTheSameRequestId(string request, string error)
+    {
+        using var document = JsonDocument.Parse(_bridge.HandleMessage(request)!);
+        var message = document.RootElement;
+        Assert.Equal("applied", message.GetProperty("type").GetString());
+        Assert.Equal(42, message.GetProperty("requestId").GetInt64());
+        Assert.False(message.GetProperty("ok").GetBoolean());
+        Assert.Equal(error, message.GetProperty("error").GetString());
+        Assert.Equal(0, _controller.CommitCount);
+    }
+
+    [Fact]
+    public void Apply_UnexpectedFailureStillReturnsTheRequestId()
+    {
+        var bridge = new SettingsBridge(_controller, appVersionProvider: () => throw new IOException("snapshot"));
+        using var document = JsonDocument.Parse(bridge.HandleMessage("""{"type":"apply","requestId":41,"data":{}}""")!);
+        var message = document.RootElement;
+        Assert.Equal("applied", message.GetProperty("type").GetString());
+        Assert.Equal(41, message.GetProperty("requestId").GetInt64());
+        Assert.False(message.GetProperty("ok").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("""{"type":23}""", "missing-type")]
+    [InlineData("""{"type":"apply","requestId":"42","data":{"soundEnabled":true}}""", "invalid-request-id")]
+    [InlineData("""{"type":"apply","requestId":2.5,"data":{"soundEnabled":true}}""", "invalid-request-id")]
+    public void Apply_RejectsNonstringTypesAndNonintegerRequestIds(string request, string code)
+    {
+        using var document = JsonDocument.Parse(_bridge.HandleMessage(request)!);
+        Assert.Equal("error", document.RootElement.GetProperty("type").GetString());
+        Assert.Equal(code, document.RootElement.GetProperty("code").GetString());
+        Assert.Equal(0, _controller.CommitCount);
+    }
+
+    [Fact]
+    public void WebViewApply_RequiresARequestId()
+    {
+        using var document = JsonDocument.Parse(_bridge.HandleWebMessage("""{"type":"apply","data":{"soundEnabled":true}}""")!);
+        Assert.Equal("error", document.RootElement.GetProperty("type").GetString());
+        Assert.Equal("invalid-request-id", document.RootElement.GetProperty("code").GetString());
+        Assert.Equal(0, _controller.CommitCount);
+    }
+
+    [Fact]
+    public void WebViewApply_RejectsSelectingADeletedSoundAndKeepsExistingSettings()
+    {
+        Settings.ArrangeSoundName = "keep.wav";
+        _controller.UserSounds = ["keep.wav"];
+        using var document = JsonDocument.Parse(
+            _bridge.HandleWebMessage("""{"type":"apply","requestId":26,"data":{"soundName":"deleted.wav"}}""")!);
+        var reply = document.RootElement;
+        Assert.Equal("applied", reply.GetProperty("type").GetString());
+        Assert.Equal(26, reply.GetProperty("requestId").GetInt64());
+        Assert.False(reply.GetProperty("ok").GetBoolean());
+        Assert.Equal("sound-unavailable", reply.GetProperty("error").GetString());
+        Assert.Equal("keep.wav", Settings.ArrangeSoundName);
+        Assert.Equal(0, _controller.CommitCount);
+    }
+
+    [Theory]
+    [InlineData("""{"type":"apply","requestId":27,"data":{"animate":false}}""")]
+    [InlineData("""{"type":"apply","requestId":27,"data":{"soundName":"removed.wav","animate":false}}""")]
+    public void WebViewApply_LeavesAnUnchangedLegacySoundSelectionAlone(string request)
+    {
+        Settings.ArrangeSoundName = "removed.wav";
+        using var document = JsonDocument.Parse(_bridge.HandleWebMessage(request)!);
+        Assert.True(document.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("removed.wav", Settings.ArrangeSoundName);
+        Assert.False(Settings.AnimateWindowTransitions);
     }
 
     [Fact]
@@ -96,13 +304,14 @@ public sealed class SettingsBridgeBetaTests : IDisposable
     {
         Settings.FocusHintMode = "Overlay";
 
-        var response = _bridge.HandleMessage("""{"type":"apply","data":{"focusHintMode":"Off"}}""");
+        var response = _bridge.HandleMessage("""{"type":"apply","requestId":17,"data":{"focusHintMode":"Off"}}""");
 
         Assert.Equal("Off", Settings.FocusHintMode);
         Assert.Equal("Off", _settingsService.Load().FocusHintMode);
         Assert.Equal(1, _controller.CommitCount);
 
         using var doc = JsonDocument.Parse(response!);
+        Assert.Equal(17, doc.RootElement.GetProperty("requestId").GetInt64());
         Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
         Assert.Equal("Off", doc.RootElement.GetProperty("data").GetProperty("focusHintMode").GetString());
     }

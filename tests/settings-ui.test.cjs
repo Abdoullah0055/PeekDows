@@ -10,12 +10,18 @@ const script = fs.readFileSync(
 function runInSettingsPage(scenario) {
   const elements = new Map();
   const sent = [];
+  const timers = new Map();
+  let nextTimer = 0;
+  const classList = () => ({ add() {}, remove() {}, toggle() {} });
   const element = () => ({
     style: {},
     dataset: {},
     value: "",
+    scrollTop: 0,
     children: [],
-    querySelectorAll: () => [],
+    classList: classList(),
+    parentElement: { classList: classList() },
+    querySelectorAll(selector) { return this.children.filter(child => "." + child.className === selector); },
     append(...children) { this.children.push(...children); },
     appendChild(child) { this.children.push(child); },
     setAttribute(key, value) { this[key] = value; },
@@ -23,8 +29,14 @@ function runInSettingsPage(scenario) {
     set innerHTML(value) { this.children = []; },
     addEventListener(name, callback) { this[name] = callback; },
   });
+  const checkboxes = ["animate", "autoArrange"].map(key => Object.assign(element(), { dataset: { key } }));
+  const hotkeys = ["arrangeNow", "pauseResume"].map(key => Object.assign(element(), { dataset: { hotkey: key } }));
   const document = {
-    querySelectorAll: () => [],
+    querySelectorAll(selector) {
+      if (selector === "input[type=checkbox][data-key]") return checkboxes;
+      if (selector === "button[data-hotkey]") return hotkeys;
+      return [];
+    },
     querySelector: selector => document.getElementById(selector),
     createElement: element,
     getElementById(id) {
@@ -36,7 +48,25 @@ function runInSettingsPage(scenario) {
     addEventListener(name, callback) { this[name] = callback; },
     postMessage(message) { sent.push(message); },
   } } };
-  vm.runInNewContext(script + "\n" + scenario, { assert, document, sent, window, setTimeout: callback => callback() });
+  const receive = data => window.chrome.webview.message({ data });
+  const editCheckbox = (key, checked) => {
+    const checkbox = checkboxes.find(input => input.dataset.key === key);
+    checkbox.checked = checked;
+    checkbox.change();
+    return checkbox;
+  };
+  const runTimers = delay => {
+    for (const [id, timer] of [...timers]) {
+      if (timer.delay > delay) continue;
+      timers.delete(id);
+      timer.callback();
+    }
+  };
+  vm.runInNewContext(script + "\n" + scenario, {
+    assert, confirm: () => true, document, editCheckbox, hotkeys, receive, runTimers, sent, window,
+    setTimeout(callback, delay) { timers.set(++nextTimer, { callback, delay }); return nextTimer; },
+    clearTimeout: id => timers.delete(id)
+  });
 }
 
 test("preview shows the correct slots after switching modes", () => {
@@ -149,7 +179,7 @@ test("an unrelated save preserves a disabled overlay icon setting", () => {
     state.draft = pick(state.snapshot);
     syncDirty();
     assert.equal(state.dirty, false);
-    state.draft.animate = false;
+    editCheckbox("animate", false);
     $("saveBtn").click();
     assert.equal(JSON.stringify(sent.at(-1).data), '{"animate":false}');
   `);
@@ -157,7 +187,6 @@ test("an unrelated save preserves a disabled overlay icon setting", () => {
 
 test("a failed save keeps the entire draft available to retry", () => {
   runInSettingsPage(`
-    const receive = data => window.chrome.webview.message({ data });
     adoptSnapshot({ preset: "Small", layoutMode: "Grid", appRules: [], hotkeys: { arrangeNow: "Ctrl+Alt+Space" } });
     state.draft.preset = "Medium";
     state.draft.layoutMode = "Halves";
@@ -165,16 +194,162 @@ test("a failed save keeps the entire draft available to retry", () => {
     state.draft.hotkeys.arrangeNow = "Ctrl+Alt+F8";
     syncDirty();
     $("saveBtn").click();
-    const submission = JSON.stringify(sent.at(-1));
+    const submission = sent.at(-1);
 
-    receive({ type: "applied", ok: false, error: "settings-write-failed" });
+    receive({ type: "applied", requestId: submission.requestId, ok: false, error: "settings-write-failed" });
     assert.match($("unsaved").textContent, /Save failed/);
     assert.equal($("unsaved").style.visibility, "visible");
     assert.equal(state.dirty, true);
     assert.equal($("saveBtn").disabled, false);
     assert.equal(state.snapshot.layoutMode, "Grid");
     $("saveBtn").click();
-    assert.equal(JSON.stringify(sent.at(-1)), submission);
+    const retry = sent.at(-1);
+    assert.ok(retry.requestId > submission.requestId);
+    assert.equal(JSON.stringify(retry.data), JSON.stringify(submission.data));
+  `);
+});
+
+test("sound deletion updates only audio while an unrelated edit remains unsaved", () => {
+  runInSettingsPage(`
+    adoptSnapshot({ animate: true, autoArrange: false, soundName: "custom.wav", userSounds: ["custom.wav"] });
+    editCheckbox("animate", false);
+    $("userSounds").children[0].children[2].click();
+    assert.equal(JSON.stringify(sent.at(-1)), '{"type":"deleteSoundFile","name":"custom.wav"}');
+    receive({ type: "externalChange", data: { animate: true, autoArrange: true, userSounds: ["custom.wav"] } });
+    receive({ type: "soundFile", deletedName: "CUSTOM.WAV", soundName: "chime-soft", userSounds: [] });
+    assert.equal(state.draft.animate, false);
+    assert.equal(state.draft.soundName, "chime-soft");
+    assert.equal(state.dirty, true);
+    $("cancelBtn").click();
+    assert.equal(state.draft.autoArrange, true);
+    assert.equal(state.draft.soundName, "chime-soft");
+    assert.equal(userSounds.length, 0);
+  `);
+});
+
+test("an audio error leaves the selected sound and other edits intact", () => {
+  runInSettingsPage(`
+    adoptSnapshot({ animate: true, soundName: "custom.wav", userSounds: ["custom.wav"] });
+    editCheckbox("animate", false);
+    receive({ type: "soundError", operation: "delete" });
+    assert.equal($("soundError").hidden, false);
+    assert.match($("soundError").textContent, /delete/i);
+    assert.equal(state.draft.soundName, "custom.wav");
+    assert.equal(state.draft.animate, false);
+    assert.equal(state.dirty, true);
+  `);
+});
+
+test("Save ignores duplicate clicks and unrelated replies, then rebases edits after the click", () => {
+  runInSettingsPage(`
+    adoptSnapshot({ animate: true, autoArrange: false, userSounds: ["custom.wav"] });
+    editCheckbox("animate", false);
+    $("saveBtn").click();
+    const request = sent.at(-1);
+    assert.equal(request.type, "apply");
+    assert.ok(Number.isSafeInteger(request.requestId));
+    assert.equal($("saveBtn").disabled, true);
+    assert.equal($("cancelBtn").disabled, true);
+    $("saveBtn").click();
+    $("cancelBtn").click();
+    editCheckbox("autoArrange", true);
+    assert.equal($("saveBtn").disabled, true);
+    assert.equal(sent.filter(message => message.type === "apply").length, 1);
+    receive({ type: "applied", requestId: String(request.requestId), ok: true, data: { animate: true } });
+    receive({ type: "applied", requestId: request.requestId + 1, ok: true, data: { animate: true } });
+    assert.equal($("saveBtn").disabled, true);
+    receive({ type: "applied", requestId: request.requestId, ok: true, data: { animate: false, autoArrange: false } });
+    assert.equal(state.snapshot.animate, false);
+    assert.equal(state.draft.autoArrange, true);
+    assert.equal(document.querySelectorAll("input[type=checkbox][data-key]")[1].checked, true);
+    assert.equal($("saveBtn").disabled, false);
+    assert.equal(state.dirty, true);
+    assert.equal(sent.filter(message => message.type === "dirtyChanged" && !message.value).length, 0);
+  `);
+});
+
+test("a revert during Save survives settings and external snapshots before the reply", () => {
+  runInSettingsPage(`
+    adoptSnapshot({ animate: false });
+    editCheckbox("animate", true);
+    $("saveBtn").click();
+    const request = sent.at(-1);
+    editCheckbox("animate", false);
+    assert.equal(state.dirty, false);
+    assert.equal(sent.findLast(message => message.type === "dirtyChanged").value, true);
+    receive({ type: "settings", data: { animate: true } });
+    receive({ type: "externalChange", data: { animate: true } });
+    receive({ type: "applied", requestId: request.requestId, ok: true, data: { animate: true } });
+    assert.equal(state.snapshot.animate, true);
+    assert.equal(state.draft.animate, false);
+    assert.equal(state.dirty, true);
+  `);
+});
+
+test("Cancel after a failed Save restores the last deferred snapshot", () => {
+  runInSettingsPage(`
+    adoptSnapshot({ animate: true, autoArrange: false });
+    editCheckbox("animate", false);
+    $("saveBtn").click();
+    const request = sent.at(-1);
+    receive({ type: "externalChange", data: { animate: true, autoArrange: false } });
+    receive({ type: "settings", data: { animate: true, autoArrange: true } });
+    receive({ type: "applied", requestId: request.requestId, ok: false, error: "settings-write-failed" });
+    assert.equal(state.draft.animate, false);
+    assert.equal(state.snapshot.autoArrange, false);
+    $("cancelBtn").click();
+    assert.equal(state.draft.animate, true);
+    assert.equal(state.draft.autoArrange, true);
+    assert.equal(state.dirty, false);
+  `);
+});
+
+test("a duration scroll updates the draft before snapping, including while Save is pending", () => {
+  runInSettingsPage(`
+    adoptSnapshot({ animate: true, soundAutoOffMinutes: 0 });
+    runTimers(60);
+    editCheckbox("animate", false);
+    $("saveBtn").click();
+    const request = sent.at(-1);
+    const minutes = $("durM");
+
+    minutes.scrollTop = 74;
+    minutes.scroll();
+    assert.equal(state.draft.soundAutoOffMinutes, 2);
+    assert.equal(minutes.scrollTop, 74);
+    receive({ type: "applied", requestId: request.requestId, ok: true, data: { animate: false, soundAutoOffMinutes: 0 } });
+    assert.equal(state.draft.soundAutoOffMinutes, 2);
+    assert.equal(state.dirty, true);
+
+    minutes.scrollTop = 104;
+    minutes.scroll();
+    assert.equal(state.draft.soundAutoOffMinutes, 3);
+    assert.equal(minutes.scrollTop, 104);
+    runTimers(110);
+    assert.equal(minutes.scrollTop, 90);
+    assert.equal(state.draft.soundAutoOffMinutes, 3);
+  `);
+});
+
+test("a hotkey capture started during Save survives the reply and keeps the new baseline", () => {
+  runInSettingsPage(`
+    adoptSnapshot({ animate: true, hotkeys: { arrangeNow: "Ctrl+Alt+Space", pauseResume: "Ctrl+Alt+P" } });
+    editCheckbox("animate", false);
+    $("saveBtn").click();
+    const request = sent.at(-1);
+    const [arrange, pause] = hotkeys;
+    arrange.click();
+    receive({ type: "applied", requestId: request.requestId, ok: true,
+      data: { animate: false, hotkeys: { arrangeNow: "Ctrl+Alt+F7", pauseResume: "Ctrl+Alt+F8" } } });
+    assert.equal(arrange.textContent, "Press keys…");
+    assert.equal(arrange["aria-pressed"], "true");
+    assert.equal(pause.textContent, "Ctrl+Alt+F8");
+
+    window.keydown({ key: "F9", ctrlKey: true, altKey: true, preventDefault() {}, stopPropagation() {} });
+    assert.equal(arrange.textContent, "Ctrl+Alt+F9");
+    assert.equal(state.snapshot.hotkeys.arrangeNow, "Ctrl+Alt+F7");
+    assert.equal(state.draft.hotkeys.arrangeNow, "Ctrl+Alt+F9");
+    assert.equal(state.dirty, true);
   `);
 });
 

@@ -19,6 +19,8 @@ public sealed class ArrangeSoundService : IDisposable
         "chime-soft", "whoosh-wind", "pop-minimal"
     };
 
+    internal static bool IsFactorySound(string name) => FactoryNames.Contains(name);
+
     private const string Alias = "peekdows_arrange";
 
     private readonly Func<string> _soundsDirProvider;
@@ -40,7 +42,7 @@ public sealed class ArrangeSoundService : IDisposable
             var name = soundName.Trim();
 
             string? path = null;
-            if (string.IsNullOrEmpty(Path.GetExtension(name)) && FactoryNames.Contains(name))
+            if (string.IsNullOrEmpty(Path.GetExtension(name)) && IsFactorySound(name))
             {
                 var candidate = Path.Combine(System.AppContext.BaseDirectory, "Assets", "Sounds", name + ".wav");
                 if (File.Exists(candidate))

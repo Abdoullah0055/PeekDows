@@ -13,8 +13,11 @@ const EDITABLE_KEYS = [
 const state = { snapshot: null, draft: null, dirty: false };
 let deferredSnapshot = null;
 let runtimeStatus = null;
+let pendingSave = null;
+let nextSaveId = 0;
+let reportedDirty = false;
 
-// User-imported sounds (read-only list from snapshot, refreshed via requestSnapshot).
+// User-imported sounds are refreshed independently from setting edits.
 let userSounds = [];
 
 // Read-only Windows snapshot rows (filled on Refresh, never part of the draft).
@@ -36,21 +39,24 @@ function pick(snapshot) {
   return out;
 }
 
+function differs(left, right) {
+  return JSON.stringify(left) !== JSON.stringify(right);
+}
+
 // ---------- incoming messages ----------
 window.chrome?.webview?.addEventListener("message", (event) => {
   const msg = event.data;
   if (!msg || typeof msg.type !== "string") return;
 
-  if (msg.type === "settings") adoptSnapshot(msg.data);
-  else if (msg.type === "externalChange") onExternalChange(msg.data);
+  if (msg.type === "settings" || msg.type === "externalChange") onExternalChange(msg.data);
   else if (msg.type === "applied") onApplied(msg);
   else if (msg.type === "runtimeStatus") updateRuntimeStatus(msg.data);
   else if (msg.type === "soundFile") onSoundFile(msg);
+  else if (msg.type === "soundError") onSoundError(msg.operation);
   else if (msg.type === "windows") { windowsRows = msg.data ?? []; renderWindowsRows(); }
 });
 
-function adoptSnapshot(data) {
-  stopHotkeyCapture();
+function adoptSnapshot(data, lateValues = {}, lateHotkeys = {}) {
   deferredSnapshot = null;
   $("externalBanner").hidden = true;
   state.snapshot = data;
@@ -67,16 +73,18 @@ function adoptSnapshot(data) {
   state.snapshot.hotkeys ??= {};
   userSounds = data.userSounds ?? [];
   state.draft = pick(data);
+  Object.assign(state.draft, lateValues);
+  Object.assign(state.draft.hotkeys, lateHotkeys);
   updateRuntimeStatus(runtimeStatus ?? data.runtime);
-  setControlsFrom(data);
-  markClean();
+  setControlsFrom(state.draft);
+  syncDirty();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;
-  renderPresetSelection(data.preset);
-  renderPreview(data.preset, state.draft.layoutMode);
+  renderPresetSelection(state.draft.preset);
+  renderPreview(state.draft.preset, state.draft.layoutMode);
   renderLayoutModeSelection(state.draft.layoutMode);
   renderAppRules();
   renderWindowsRows();
-  $("thresholdValue").textContent = `${data.thresholdPx} px`;
+  $("thresholdValue").textContent = `${state.draft.thresholdPx} px`;
   renderHintModeSelection(state.draft.focusHintMode);
   renderSoundSelection(state.draft.soundName);
   renderUserSounds();
@@ -84,15 +92,34 @@ function adoptSnapshot(data) {
 
 function onSoundFile(msg) {
   if (!Array.isArray(msg.userSounds)) return;
+  $("soundError").hidden = true;
   userSounds = msg.userSounds;
-  if (state.snapshot) state.snapshot.userSounds = userSounds;
-  if (deferredSnapshot) deferredSnapshot.userSounds = userSounds;
+  const deleted = typeof msg.deletedName === "string" && typeof msg.soundName === "string";
+  for (const snapshot of [state.snapshot, deferredSnapshot]) {
+    if (!snapshot) continue;
+    snapshot.userSounds = userSounds;
+    if (deleted) snapshot.soundName = msg.soundName;
+  }
+  if (deleted && state.draft) {
+    if (state.draft.soundName?.toLowerCase() === msg.deletedName.toLowerCase())
+      state.draft.soundName = msg.soundName;
+    renderSoundSelection(state.draft.soundName);
+    syncDirty();
+  }
   renderUserSounds();
+}
+
+function onSoundError(operation) {
+  const message = $("soundError");
+  message.textContent = operation === "delete"
+    ? "Could not delete the sound. See the log for details."
+    : "Could not add the sound. Choose an MP3 or WAV up to 5 MB, or see the log for details.";
+  message.hidden = false;
 }
 
 function onExternalChange(data) {
   updateRuntimeStatus(data.runtime);
-  if (state.dirty) {
+  if (state.dirty || pendingSave) {
     deferredSnapshot = data;
     $("externalBanner").hidden = false;
   } else {
@@ -117,15 +144,24 @@ function syncLayoutActions() {
 }
 
 function onApplied(msg) {
-  if (!msg.ok) {
+  if (!pendingSave || msg.requestId !== pendingSave.id) return;
+  const sentDraft = pendingSave.draft;
+  pendingSave = null;
+  if (!msg.ok || !msg.data) {
+    syncDirty();
     $("unsaved").textContent = msg.error === "hotkey-conflict"
       ? "⚠ Shortcut already in use"
-      : msg.error === "bad-gesture" ? "⚠ Unsupported shortcut" : "⚠ Save failed — see log";
+      : msg.error === "bad-gesture" ? "⚠ Unsupported shortcut"
+      : msg.error === "sound-unavailable" ? "⚠ Sound no longer available" : "⚠ Save failed — see log";
     $("unsaved").style.visibility = "visible";
     return;
   }
-  $("externalBanner").hidden = true;
-  if (msg.data) adoptSnapshot(msg.data);   // fresh snapshot rides along
+  const lateValues = Object.fromEntries(EDITABLE_KEYS
+    .filter(key => key !== "hotkeys" && differs(state.draft[key], sentDraft[key]))
+    .map(key => [key, state.draft[key]]));
+  const lateHotkeys = Object.fromEntries(Object.entries(state.draft.hotkeys ?? {})
+    .filter(([name, gesture]) => gesture !== sentDraft.hotkeys?.[name]));
+  adoptSnapshot(msg.data, lateValues, lateHotkeys);
   const saved = $("savedMsg");
   saved.classList.add("show");
   setTimeout(() => saved.classList.remove("show"), 2200);
@@ -137,15 +173,14 @@ function setControlsFrom(data) {
     el.checked = !!data[el.dataset.key];
   }
   $("threshold").value = data.thresholdPx;
-  renderSoundDuration(state.draft?.soundAutoOffMinutes ?? 0);
-  renderSoundSelection(state.draft?.soundName);
-  renderUserSounds();
+  renderSoundDuration(data.soundAutoOffMinutes);
   renderIgnoredList();
   renderIgnoredSearch();
   const ic = $("ignoredClasses");
   if (ic) ic.value = (data.ignoredClasses ?? []).join("\n");
   const hk = data.hotkeys ?? {};
   for (const btn of document.querySelectorAll("button[data-hotkey]")) {
+    if (hotkeyCapture?.button === btn) continue;
     const name = btn.dataset.hotkey;
     if (hk[name]) btn.textContent = hk[name];
   }
@@ -153,24 +188,18 @@ function setControlsFrom(data) {
 }
 
 // ---------- dirty tracking ----------
-function markClean() {
-  if (state.dirty) post({ type: "dirtyChanged", value: false });
-  state.dirty = false;
-  $("saveBtn").disabled = true;
-  $("unsaved").style.visibility = "hidden";
-  $("unsaved").textContent = "● Unsaved changes";
-  syncLayoutActions();
-}
-
 function syncDirty() {
-  const dirty = JSON.stringify(state.draft) !== JSON.stringify(pick(state.snapshot));
-  if (dirty !== state.dirty) {
-    state.dirty = dirty;
-    post({ type: "dirtyChanged", value: dirty });
+  state.dirty = !!state.snapshot && differs(state.draft, pick(state.snapshot));
+  const busy = pendingSave !== null;
+  const dirtyForClose = state.dirty || busy;
+  if (dirtyForClose !== reportedDirty) {
+    reportedDirty = dirtyForClose;
+    post({ type: "dirtyChanged", value: dirtyForClose });
   }
-  $("saveBtn").disabled = !dirty;
+  $("saveBtn").disabled = busy || !state.dirty;
+  $("cancelBtn").disabled = busy;
   $("unsaved").textContent = "● Unsaved changes";
-  $("unsaved").style.visibility = dirty ? "visible" : "hidden";
+  $("unsaved").style.visibility = state.dirty ? "visible" : "hidden";
   syncLayoutActions();
 }
 
@@ -712,6 +741,7 @@ function renderUserSounds() {
     del.textContent = "Delete";
     del.addEventListener("click", () => {
       if (!confirm(`Delete sound "${name}"?`)) return;
+      $("soundError").hidden = true;
       post({ type: "deleteSoundFile", name });
     });
     row.append(txt, play, del);
@@ -720,13 +750,17 @@ function renderUserSounds() {
 }
 
 const addSound = $("addSound");
-if (addSound) addSound.addEventListener("click", () => post({ type: "pickSoundFile" }));
+if (addSound) addSound.addEventListener("click", () => {
+  $("soundError").hidden = true;
+  post({ type: "pickSoundFile" });
+});
 
 // ---------- auto-off drum picker (iOS clock style: hours 0-23, minutes 00-59) ----------
 const DUR_ITEM_PX = 30;
 const DUR_H_MAX = 23;
 const DUR_M_MAX = 59;
-let durProgrammatic = false; // true while renderSoundDuration positions the wheels
+const durProgrammaticPositions = new WeakMap();
+let durSnapTimer = null;
 
 function durPad2(n) {
   return String(n).padStart(2, "0");
@@ -747,17 +781,19 @@ function buildDurWheel(id, max, fmt) {
     item.addEventListener("click", () => {
       wheel.scrollTop = i * DUR_ITEM_PX;
       onDurScroll();
+      renderSoundDuration(state.draft?.soundAutoOffMinutes ?? 0);
     });
     wheel.append(item);
   }
   const padBottom = document.createElement("div");
   padBottom.className = "dur-pad";
   wheel.append(padBottom);
-  let debounce = null;
   wheel.addEventListener("scroll", () => {
-    if (durProgrammatic) return;
-    if (debounce) clearTimeout(debounce);
-    debounce = setTimeout(onDurScroll, 110);
+    if (durProgrammaticPositions.get(wheel) === wheel.scrollTop) return;
+    durProgrammaticPositions.delete(wheel);
+    onDurScroll();
+    clearTimeout(durSnapTimer);
+    durSnapTimer = setTimeout(() => renderSoundDuration(state.draft?.soundAutoOffMinutes ?? 0), 110);
   });
 }
 
@@ -765,64 +801,60 @@ function durSelected(wheel) {
   if (!wheel) return 0;
   const items = wheel.querySelectorAll(".dur-item");
   if (items.length === 0) return 0;
-  const idx = Math.max(0, Math.min(items.length - 1, Math.round(wheel.scrollTop / DUR_ITEM_PX)));
-  // Settle on the exact row (CSS proximity snap may stop between rows).
-  const exact = idx * DUR_ITEM_PX;
-  if (Math.abs(wheel.scrollTop - exact) > 1) wheel.scrollTop = exact;
-  for (const el of items) el.classList.toggle("sel", Number(el.dataset.index) === idx);
-  return idx;
+  return Math.max(0, Math.min(items.length - 1, Math.round(wheel.scrollTop / DUR_ITEM_PX)));
 }
 
 function onDurScroll() {
-  if (!state.draft || durProgrammatic) return;
+  if (!state.draft) return;
   const h = durSelected($("durH"));
   const m = durSelected($("durM"));
   state.draft.soundAutoOffMinutes = h * 60 + m;
   syncDirty();
 }
 
+function positionDurWheel(wheel, index) {
+  if (!wheel) return;
+  wheel.scrollTop = index * DUR_ITEM_PX;
+  durProgrammaticPositions.set(wheel, wheel.scrollTop);
+  for (const el of wheel.querySelectorAll(".dur-item"))
+    el.classList.toggle("sel", Number(el.dataset.index) === index);
+}
+
 function renderSoundDuration(totalMinutes) {
+  clearTimeout(durSnapTimer);
+  durSnapTimer = null;
+
   buildDurWheel("durH", DUR_H_MAX, (i) => String(i));
   buildDurWheel("durM", DUR_M_MAX, durPad2);
   const total = Math.max(0, totalMinutes | 0);
   const h = Math.min(DUR_H_MAX, Math.floor(total / 60));
   const m = Math.min(DUR_M_MAX, total % 60);
-  durProgrammatic = true;
-  try {
-    const wh = $("durH");
-    const wm = $("durM");
-    if (wh) {
-      wh.scrollTop = h * DUR_ITEM_PX;
-      for (const el of wh.querySelectorAll(".dur-item"))
-        el.classList.toggle("sel", Number(el.dataset.index) === h);
-    }
-    if (wm) {
-      wm.scrollTop = m * DUR_ITEM_PX;
-      for (const el of wm.querySelectorAll(".dur-item"))
-        el.classList.toggle("sel", Number(el.dataset.index) === m);
-    }
-  } finally {
-    // Let the programmatic scrolls land before listening again.
-    setTimeout(() => { durProgrammatic = false; }, 60);
-  }
+  // CSS proximity snap can stop between rows. Land on the exact selected row.
+  positionDurWheel($("durH"), h);
+  positionDurWheel($("durM"), m);
 }
 
 // ---------- footer actions ----------
 $("saveBtn").addEventListener("click", () => {
+  if (!state.dirty || pendingSave) return;
+  const sentDraft = JSON.parse(JSON.stringify(state.draft));
   const changes = {};
   for (const key of EDITABLE_KEYS) {
-    const value = state.draft[key];
+    const value = sentDraft[key];
     if (key === "hotkeys") {
-      const hotkeys = Object.fromEntries(Object.entries(value)
+      const hotkeys = Object.fromEntries(Object.entries(value ?? {})
         .filter(([name, gesture]) => gesture !== state.snapshot.hotkeys?.[name]));
       if (Object.keys(hotkeys).length) changes.hotkeys = hotkeys;
-    } else if (JSON.stringify(value) !== JSON.stringify(state.snapshot[key])) {
+    } else if (differs(value, state.snapshot[key])) {
       changes[key] = value;
     }
   }
-  post({ type: "apply", data: changes });
+  pendingSave = { id: ++nextSaveId, draft: sentDraft };
+  syncDirty();
+  post({ type: "apply", requestId: pendingSave.id, data: changes });
 });
 $("cancelBtn").addEventListener("click", () => {
+  if (pendingSave) return;
   stopHotkeyCapture();
   if (pendingUnignore) closeUnignoreModal(false);
   if (state.snapshot) adoptSnapshot(deferredSnapshot ?? state.snapshot);

@@ -370,7 +370,7 @@ public class SettingsBridgeTests : IDisposable
         var response = _bridge.HandleMessage("""{"type":"apply"}""");
 
         using var doc = JsonDocument.Parse(response!);
-        Assert.Equal("apply-without-data", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal("apply-without-data", doc.RootElement.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -507,9 +507,19 @@ public class SettingsBridgeTests : IDisposable
         public void DisableArrangeSound(string reason) => throw new NotSupportedException();
         public string[] UserSounds { get; set; } = [];
         public string PickedSound { get; set; } = "";
+        public Exception? SoundPickError { get; set; }
+        public Exception? SoundDeleteError { get; set; }
         public string[] GetUserSounds() => UserSounds;
-        public string PickArrangeSoundFile() => PickedSound;
-        public void DeleteArrangeSoundFile(string name) { }
+        public string PickArrangeSoundFile()
+        {
+            Calls.Add(nameof(PickArrangeSoundFile));
+            if (SoundPickError is { } error) throw error;
+            return PickedSound;
+        }
+        public void DeleteArrangeSoundFile(string name)
+        {
+            if (SoundDeleteError is { } error) throw error;
+        }
         public void PreviewArrangeSound(string name) { }
         public void SetWindowSizePreset(WindowSizePreset preset) => throw new NotSupportedException();
         public void Dispose() => _hotkeys.Dispose();

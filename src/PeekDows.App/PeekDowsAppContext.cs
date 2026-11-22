@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using PeekDows.App.AutoArrange;
@@ -7,6 +8,7 @@ using PeekDows.App.Animation;
 using PeekDows.App.Diagnostics;
 using PeekDows.App.Focus;
 using PeekDows.App.Hotkeys;
+using PeekDows.App.Sound;
 using PeekDows.App.Startup;
 using PeekDows.App.Tray;
 using PeekDows.Core.Models;
@@ -543,7 +545,6 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
             "PeekDows", "sounds");
 
-    private static readonly string[] FactorySoundNames = { "chime-soft", "whoosh-wind", "pop-minimal" };
 
     public void ToggleArrangeSound()
     {
@@ -632,109 +633,79 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
     public string PickArrangeSoundFile()
     {
-        try
+        using var dlg = new OpenFileDialog
         {
-            using var dlg = new OpenFileDialog
-            {
-                Filter = "Audio|*.mp3;*.wav",
-                Multiselect = false,
-            };
-            if (dlg.ShowDialog() != DialogResult.OK)
-                return "";
-            var src = dlg.FileName;
-            if (!PeekDows.Core.Services.SoundFileValidator.HasSupportedExtension(src))
-            {
-                _logger.Warn($"ArrangeSound: unsupported extension: {src}");
-                return "";
-            }
-            long len;
-            try
-            {
-                len = new System.IO.FileInfo(src).Length;
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"ArrangeSound: cannot read file size: {ex.Message}");
-                return "";
-            }
-            if (len > PeekDows.Core.Services.SoundFileValidator.MaxBytes)
-            {
-                _logger.Warn($"ArrangeSound: file too large ({len} bytes): {src}");
-                return "";
-            }
-            var clean = PeekDows.Core.Services.SoundFileValidator.SanitizeFileName(System.IO.Path.GetFileName(src));
-            if (string.IsNullOrEmpty(clean))
-            {
-                _logger.Warn($"ArrangeSound: invalid file name: {src}");
-                return "";
-            }
-            var dir = GetUserSoundsDir();
-            try
-            {
-                System.IO.Directory.CreateDirectory(dir);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"ArrangeSound: cannot create sounds dir: {ex.Message}");
-                return "";
-            }
-            var final = PeekDows.Core.Services.SoundFileValidator.Deduplicate(dir, clean);
-            try
-            {
-                System.IO.File.Copy(src, System.IO.Path.Combine(dir, final));
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"ArrangeSound: copy failed: {ex.Message}");
-                return "";
-            }
-            _logger.Info($"ArrangeSound: imported {final}");
-            return final;
-        }
-        catch (Exception ex)
-        {
-            _logger.Warn($"ArrangeSound pick failed: {ex.Message}");
-            return "";
-        }
+            Filter = "Audio|*.mp3;*.wav",
+            Multiselect = false,
+        };
+        if (dlg.ShowDialog() != DialogResult.OK) return "";
+
+        var source = dlg.FileName;
+        if (!SoundFileValidator.HasSupportedExtension(source))
+            throw new InvalidDataException("Unsupported sound file extension.");
+        if (new FileInfo(source).Length > SoundFileValidator.MaxBytes)
+            throw new InvalidDataException("Sound file exceeds the size limit.");
+        var clean = SoundFileValidator.SanitizeFileName(Path.GetFileName(source));
+        if (string.IsNullOrEmpty(clean))
+            throw new InvalidDataException("Invalid sound file name.");
+
+        var dir = GetUserSoundsDir();
+        Directory.CreateDirectory(dir);
+        var name = SoundFileValidator.Deduplicate(dir, clean);
+        File.Copy(source, Path.Combine(dir, name));
+        _logger.Info($"ArrangeSound: imported {name}");
+        return name;
     }
 
     public void DeleteArrangeSoundFile(string name)
     {
+        if (string.IsNullOrWhiteSpace(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || !SoundFileValidator.HasSupportedExtension(name))
+            throw new InvalidDataException("Invalid custom sound file name.");
+        if (string.Equals(Path.GetExtension(name), ".wav", StringComparison.OrdinalIgnoreCase)
+            && ArrangeSoundService.IsFactorySound(Path.GetFileNameWithoutExtension(name)))
+            throw new InvalidDataException("Factory sounds cannot be deleted.");
+
+        var path = Path.Combine(GetUserSoundsDir(), name);
+        if (!string.Equals(_settings.ArrangeSoundName, name, StringComparison.OrdinalIgnoreCase))
+        {
+            File.Delete(path);
+            return;
+        }
+
+        var next = _settings.CopyForSettingsEdit();
+        next.ArrangeSoundName = "chime-soft";
+        DeleteSelectedSound(path, () =>
+        {
+            if (!TryCommitSettings(next, out var error))
+                throw new IOException($"Could not reset the selected sound: {error}");
+        }, _logger.Error);
+        _logger.Info("ArrangeSound: deleted selected sound, reset to chime-soft");
+    }
+
+    internal static void DeleteSelectedSound(string path, Action persistFallback, Action<string, Exception> log)
+    {
+        var temporaryPath = Path.Combine(Path.GetDirectoryName(path)!, $".sound-delete-{Guid.NewGuid():N}.tmp");
+        File.Move(path, temporaryPath);
         try
         {
-            if (string.IsNullOrWhiteSpace(name)) return;
-            foreach (var f in FactorySoundNames)
-            {
-                if (string.Equals(name, f, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(name, f + ".wav", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.Warn($"ArrangeSound: refusing to delete factory sound {name}");
-                    return;
-                }
-            }
-            var file = System.IO.Path.GetFileName(name);
-            var path = System.IO.Path.Combine(GetUserSoundsDir(), file);
-            try
-            {
-                if (System.IO.File.Exists(path))
-                    System.IO.File.Delete(path);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"ArrangeSound: delete failed: {ex.Message}");
-            }
-            if (string.Equals(_settings.ArrangeSoundName, name, StringComparison.OrdinalIgnoreCase))
-            {
-                _settings.ArrangeSoundName = "chime-soft";
-                _settingsService.Save(_settings);
-                _logger.Info("ArrangeSound: deleted selected sound, reset to chime-soft");
-                OnSettingsChanged();
-                SoundChanged?.Invoke(_settings.ArrangeSoundEnabled);
-            }
+            persistFallback();
         }
-        catch (Exception ex)
+        catch (Exception saveError)
         {
-            _logger.Warn($"ArrangeSound delete failed: {ex.Message}");
+            try { File.Move(temporaryPath, path); }
+            catch (Exception restoreError)
+            {
+                throw new IOException($"Could not restore the selected sound. Recovery copy: {temporaryPath}",
+                    new AggregateException(saveError, restoreError));
+            }
+            throw;
+        }
+
+        try { File.Delete(temporaryPath); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log($"ArrangeSound: could not remove temporary sound copy {temporaryPath}", ex);
         }
     }
 

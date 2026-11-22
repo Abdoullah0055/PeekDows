@@ -26,6 +26,9 @@ public sealed class SettingsHostForm : Form
     private readonly SettingsBridge _bridge;
     private WebView2? _webView;
     private bool _isDirty;
+    private bool _isClosing;
+
+    private bool IsStopping => _isClosing || Disposing || IsDisposed;
 
     /// <summary>Raised when WebView2 fails after the host form was created.</summary>
     public event Action<string>? InitializationFailed;
@@ -60,7 +63,7 @@ public sealed class SettingsHostForm : Form
         _settingsService = settingsService;
         _logger = logger;
         _bridge = new SettingsBridge(controller, logger, openSettingsFolder: OpenSettingsFolder,
-            runDialog: RunSettingsDialog);
+            runDialog: RunSettingsDialog, postAsyncResponse: PostMessageToPage);
         _bridge.SetWindowsProvider(() => _controller.GetWindowsSnapshot());
         _bridge.SetWindowsMessageHandler((type, root) => WindowsMessageHandler.TryHandle(type, root, () => _controller.GetWindowsSnapshot(), WindowsMessageHandler.CamelCase));
         _bridge.DirtyChanged += OnDirtyChanged;
@@ -74,7 +77,7 @@ public sealed class SettingsHostForm : Form
         SubscribeExternalEvents();
         Load += async (_, _) => await InitializeWebViewAsync();
         FormClosing += OnFormClosing;
-        FormClosed += (_, _) => UnsubscribeExternalEvents();
+        Disposed += (_, _) => UnsubscribeExternalEvents();
     }
 
     private async System.Threading.Tasks.Task InitializeWebViewAsync()
@@ -83,17 +86,26 @@ public sealed class SettingsHostForm : Form
         {
             _logger?.Info("SettingsHostForm: initializing WebView2");
             var environment = await CoreWebView2Environment.CreateAsync();
-            _webView = new WebView2 { Dock = DockStyle.Fill };
-            Controls.Add(_webView);
-            await _webView.EnsureCoreWebView2Async(environment);
+            if (IsStopping) return;
 
-            var core = _webView.CoreWebView2;
+            var webView = new WebView2 { Dock = DockStyle.Fill };
+            _webView = webView;
+            Controls.Add(webView);
+            await webView.EnsureCoreWebView2Async(environment);
+            if (IsStopping || webView.IsDisposed) return;
+
+            var core = webView.CoreWebView2;
             var wwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
             core.SetVirtualHostNameToFolderMapping(VirtualHost, wwwroot, CoreWebView2HostResourceAccessKind.Allow);
             core.Settings.AreDefaultContextMenusEnabled = false;
             core.Settings.IsStatusBarEnabled = false;
-            core.NewWindowRequested += (_, e) => e.Handled = true;   // no popups
-            core.WindowCloseRequested += (_, _) => Close();          // Cancel button in JS
+            core.NavigationStarting += (_, e) => e.Cancel = !IsSettingsDocument(e.Uri);
+            core.FrameNavigationStarting += (_, e) => e.Cancel = true;
+            core.NewWindowRequested += (_, e) => e.Handled = true;
+            core.WindowCloseRequested += (_, _) =>
+            {
+                if (IsSettingsDocument(core.Source)) RunSettingsDialog(Close);
+            };
             core.WebMessageReceived += OnWebMessageReceived;
 
             core.Navigate($"https://{VirtualHost}/index.html");
@@ -101,22 +113,34 @@ public sealed class SettingsHostForm : Form
         }
         catch (Exception ex)
         {
+            if (IsStopping) return;
+
             _logger?.Error("SettingsHostForm: WebView2 initialization failed", ex);
             InitializationFailed?.Invoke(ex.Message);
             Close();
         }
     }
 
+    internal static bool IsSettingsDocument(string? address)
+        => Uri.TryCreate(address, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttps
+            && string.Equals(uri.Host, VirtualHost, StringComparison.OrdinalIgnoreCase)
+            && uri.IsDefaultPort && uri.UserInfo.Length == 0
+            && uri.AbsolutePath == "/index.html" && uri.Query.Length == 0;
+
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         try
         {
-            var response = _bridge.HandleMessage(e.WebMessageAsJson);
+            if (IsStopping) return;
+
+            var core = _webView?.CoreWebView2;
+            if (core is null || !IsSettingsDocument(core.Source) || !IsSettingsDocument(e.Source))
+                return;
+
+            var response = _bridge.HandleWebMessage(e.WebMessageAsJson);
             if (response != null)
-            {
-                _webView?.CoreWebView2.PostWebMessageAsJson(response);
-                _logger?.Info($"SettingsHostForm: bridge response posted ({response.Length} chars)");
-            }
+                PostMessageToPage(response);
         }
         catch (Exception ex)
         {
@@ -129,7 +153,7 @@ public sealed class SettingsHostForm : Form
     // WebView2 callbacks must return before a WinForms modal message loop starts.
     private void RunSettingsDialog(Action action) => BeginInvoke(() =>
     {
-        if (IsDisposed) return;
+        if (IsStopping) return;
         try { action(); }
         catch (Exception ex) { _logger?.Error("SettingsHostForm: settings action failed", ex); }
     });
@@ -173,16 +197,26 @@ public sealed class SettingsHostForm : Form
 
     private void PostExternalChange() => PostToPage(_bridge.BuildExternalChangeMessage);
 
+    private void PostMessageToPage(string message) => PostToPage(() => message);
+
     private void PostToPage(Func<string> buildMessage)
     {
-        if (_webView?.CoreWebView2 == null) return;
+        if (!IsHandleCreated || IsStopping) return;
         try
         {
-            _webView.CoreWebView2.PostWebMessageAsJson(buildMessage());
+            if (InvokeRequired)
+            {
+                BeginInvoke(() => PostToPage(buildMessage));
+                return;
+            }
+
+            var core = _webView?.CoreWebView2;
+            if (core is not null && IsSettingsDocument(core.Source))
+                core.PostWebMessageAsJson(buildMessage());
         }
         catch (Exception ex)
         {
-            _logger?.Warn($"SettingsHostForm: external change post failed: {ex.Message}");
+            _logger?.Warn($"SettingsHostForm: page message post failed: {ex.Message}");
         }
     }
 
@@ -204,6 +238,7 @@ public sealed class SettingsHostForm : Form
                 MessageBoxDefaultButton.Button2);
             if (result == DialogResult.No) e.Cancel = true;
         }
+        if (!e.Cancel) _isClosing = true;
     }
 
     private void OpenSettingsFolder()

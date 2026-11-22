@@ -12,9 +12,9 @@ namespace PeekDows.App.Settings;
 /// returns the JSON response to post back, or null when no response is expected.
 /// Malformed or unknown input is logged and answered with an error payload — never throws.
 /// Message types:
-///   UI → app: apply{data}, requestSnapshot, openLogFile, openLogsFolder,
+///   UI → app: apply{requestId, data}, requestSnapshot, openLogFile, openLogsFolder,
 ///             openSettingsFolder, dirtyChanged{value}
-///   app → UI: settings{data}, externalChange{data}, applied{ok, data|error}, error{code}
+///   app → UI: settings{data}, externalChange{data}, applied{requestId, ok, data|error}, error{code}
 /// </summary>
 public sealed partial class SettingsBridge
 {
@@ -26,6 +26,7 @@ public sealed partial class SettingsBridge
     private readonly Func<string> _appVersionProvider;
     private readonly Action? _openSettingsFolder;
     private readonly Action<Action> _runDialog;
+    private readonly Action<string>? _postAsyncResponse;
     private Func<System.Collections.Generic.IReadOnlyList<WindowRow>>? _windowsProvider;
 
     /// <summary>Raised when the UI reports its dirty state flipped (Save/Cancel footer).</summary>
@@ -37,7 +38,8 @@ public sealed partial class SettingsBridge
         Func<string>? appVersionProvider = null,
         Action? openSettingsFolder = null,
         Func<System.Collections.Generic.IReadOnlyList<WindowRow>>? windowsProvider = null,
-        Action<Action>? runDialog = null)
+        Action<Action>? runDialog = null,
+        Action<string>? postAsyncResponse = null)
     {
         _controller = controller;
         _logger = logger;
@@ -45,6 +47,7 @@ public sealed partial class SettingsBridge
         _openSettingsFolder = openSettingsFolder;
         _windowsProvider = windowsProvider;
         _runDialog = runDialog ?? (action => action());
+        _postAsyncResponse = postAsyncResponse;
     }
 
     /// <summary>Injection alternative du provider Windows (utilisée par SettingsHostForm).</summary>
@@ -113,7 +116,12 @@ public sealed partial class SettingsBridge
     /// Handles one message from the UI. Returns the JSON response to post back, or null
     /// when the message needs no response. Never throws.
     /// </summary>
-    public string? HandleMessage(string json)
+    internal string? HandleWebMessage(string json) => HandleMessage(json, requireRequestId: true);
+
+    // Direct callers predate the WebView's correlated Save protocol.
+    public string? HandleMessage(string json) => HandleMessage(json, requireRequestId: false);
+
+    private string? HandleMessage(string json, bool requireRequestId)
     {
         JsonDocument doc;
         try
@@ -131,6 +139,7 @@ public sealed partial class SettingsBridge
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object
                 || !root.TryGetProperty("type", out var typeEl)
+                || typeEl.ValueKind != JsonValueKind.String
                 || typeEl.GetString() is not { } type)
             {
                 _logger?.Warn("SettingsBridge: message without a string 'type' dropped");
@@ -140,9 +149,7 @@ public sealed partial class SettingsBridge
             switch (type)
             {
                 case "apply":
-                    return root.TryGetProperty("data", out var data)
-                        ? ApplyDraft(data)
-                        : Error("apply-without-data");
+                    return HandleApply(root, requireRequestId);
                 case "requestSnapshot":
                     return BuildSnapshotMessage();
                 case "openLogFile":
@@ -205,7 +212,35 @@ public sealed partial class SettingsBridge
         }
     }
 
-    private string ApplyDraft(JsonElement data)
+    private string HandleApply(JsonElement root, bool requireRequestId)
+    {
+        long? requestId = null;
+        if (root.TryGetProperty("requestId", out var id))
+        {
+            if (id.ValueKind != JsonValueKind.Number || !id.TryGetInt64(out var value)
+                || value is <= 0 or > 9_007_199_254_740_991)
+                return Error("invalid-request-id");
+            requestId = value;
+        }
+        else if (requireRequestId)
+        {
+            return Error("invalid-request-id");
+        }
+
+        try
+        {
+            return root.TryGetProperty("data", out var data)
+                ? ApplyDraft(data, requestId)
+                : Applied(requestId, ok: false, error: "apply-without-data");
+        }
+        catch (Exception ex)
+        {
+            _logger?.Error("SettingsBridge: unexpected apply failure", ex);
+            return Applied(requestId, ok: false, error: "apply-failed");
+        }
+    }
+
+    private string ApplyDraft(JsonElement data, long? requestId)
     {
         SettingsDraft? draft;
         try
@@ -215,21 +250,24 @@ public sealed partial class SettingsBridge
         catch (Exception ex)
         {
             _logger?.Warn($"SettingsBridge: malformed apply payload dropped: {ex.Message}");
-            return Applied(ok: false, error: "malformed-draft");
+            return Applied(requestId, ok: false, error: "malformed-draft");
         }
         if (draft is null)
         {
             _logger?.Warn("SettingsBridge: apply payload deserialized to null");
-            return Applied(ok: false, error: "empty-draft");
+            return Applied(requestId, ok: false, error: "empty-draft");
         }
 
         var previous = _controller.CurrentSettings;
+        if (IsUnavailableSoundChange(draft.SoundName, previous.ArrangeSoundName))
+            return Applied(requestId, ok: false, error: "sound-unavailable");
+
         var next = previous.CopyForSettingsEdit();
         _logger?.Info("SettingsBridge: applying draft from settings UI");
 
         var hotkeyError = ApplyHotkeysDraft(draft, next, out var changed);
         if (hotkeyError is not null)
-            return Applied(ok: false, error: hotkeyError);
+            return Applied(requestId, ok: false, error: hotkeyError);
 
         if (draft.Enabled is { } enabled) next.Enabled = enabled;
         if (draft.AutoArrange is { } autoArrange) next.AutoArrange = autoArrange;
@@ -258,19 +296,19 @@ public sealed partial class SettingsBridge
         ApplyBetaDraft(draft, next, ref changed);
 
         return !changed || _controller.TryCommitSettings(next, out var error)
-            ? Applied(ok: true, error: null)
-            : Applied(ok: false, error: error);
+            ? Applied(requestId, ok: true, error: null)
+            : Applied(requestId, ok: false, error: error);
     }
 
     private static bool TryParsePreset(string name, out WindowSizePreset preset)
         => Enum.TryParse(name, ignoreCase: true, out preset) && Enum.IsDefined(preset);
 
-    private string Applied(bool ok, string? error)
+    private string Applied(long? requestId, bool ok, string? error)
     {
         // The fresh live snapshot becomes the UI's baseline after a successful save.
         return JsonSerializer.Serialize(
-            ok ? (object)new { type = "applied", ok, data = SnapshotData() }
-               : new { type = "applied", ok, error },
+            ok ? (object)new { type = "applied", requestId, ok, data = SnapshotData() }
+               : new { type = "applied", requestId, ok, error },
             WriteOptions);
     }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using PeekDows.App.Sound;
 
 namespace PeekDows.App.Settings;
 
@@ -12,6 +13,8 @@ namespace PeekDows.App.Settings;
 /// </summary>
 public sealed partial class SettingsBridge
 {
+    private bool _soundPickerPending;
+
     private void AugmentSnapshotBeta(Dictionary<string, object?> data)
     {
         var s = _controller.CurrentSettings;
@@ -21,10 +24,19 @@ public sealed partial class SettingsBridge
         data["appRules"] = s.AppRules ?? new List<Core.Models.AppRule>();
         data["overlayShowIcons"] = s.OverlayShowAppIcons;
         data["soundEnabled"] = s.ArrangeSoundEnabled;
-        data["soundName"] = string.IsNullOrEmpty(s.ArrangeSoundName) ? "chime-soft" : s.ArrangeSoundName;
+        data["soundName"] = PersistentSoundName(s);
         data["soundAutoOffMinutes"] = s.ArrangeSoundAutoOffMinutes;
         data["userSounds"] = ReadUserSounds();
     }
+
+    private static string PersistentSoundName(Core.Models.AppSettings settings)
+        => string.IsNullOrEmpty(settings.ArrangeSoundName) ? "chime-soft" : settings.ArrangeSoundName;
+
+    private bool IsUnavailableSoundChange(string? requested, string? current)
+        => !string.IsNullOrWhiteSpace(requested)
+            && !string.Equals(requested, current, StringComparison.Ordinal)
+            && !ArrangeSoundService.IsFactorySound(requested)
+            && !ReadUserSounds().Contains(requested, StringComparer.OrdinalIgnoreCase);
 
     private string[] ReadUserSounds()
     {
@@ -101,59 +113,80 @@ public sealed partial class SettingsBridge
     /// </summary>
     private string? TryHandleSoundMessage(string type, JsonElement root)
     {
+        if (type == "pickSoundFile")
+            return QueueSoundPicker();
+
+        var name = root.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
+            ? n.GetString() ?? ""
+            : "";
+        if (type == "previewSound")
+        {
+            try { _controller.PreviewArrangeSound(name); } catch { }
+            return null;
+        }
+
         try
         {
-            switch (type)
+            _controller.DeleteArrangeSoundFile(name);
+            return JsonSerializer.Serialize(new
             {
-                case "pickSoundFile":
-                {
-                    string name;
-                    try
-                    {
-                        name = _controller.PickArrangeSoundFile() ?? "";
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger?.Warn($"SettingsBridge: pickSoundFile failed: {ex.Message}");
-                        return Error("pick-failed");
-                    }
-                    return name.Length == 0
-                        ? null
-                        : JsonSerializer.Serialize(new { type = "soundFile", name, userSounds = ReadUserSounds() }, WriteOptions);
-                }
-                case "previewSound":
-                {
-                    var name = root.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
-                        ? n.GetString() ?? ""
-                        : "";
-                    try { _controller.PreviewArrangeSound(name); } catch { }
-                    return null;
-                }
-                case "deleteSoundFile":
-                {
-                    var name = root.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
-                        ? n.GetString() ?? ""
-                        : "";
-                    try
-                    {
-                        _controller.DeleteArrangeSoundFile(name);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger?.Warn($"SettingsBridge: deleteSoundFile failed: {ex.Message}");
-                        return Applied(ok: false, error: "delete-failed");
-                    }
-                    return Applied(ok: true, error: null);
-                }
-                default:
-                    return null;
-            }
+                type = "soundFile",
+                deletedName = name,
+                soundName = PersistentSoundName(_controller.CurrentSettings),
+                userSounds = ReadUserSounds(),
+            }, WriteOptions);
         }
         catch (Exception ex)
         {
-            _logger?.Warn($"SettingsBridge: sound message '{type}' failed: {ex.Message}");
-            return Error("sound-failed");
+            return SoundError("delete", ex);
         }
+    }
+
+    private string? QueueSoundPicker()
+    {
+        if (_soundPickerPending) return null;
+        _soundPickerPending = true;
+        try
+        {
+            _runDialog(PickSoundFile);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _soundPickerPending = false;
+            return SoundError("pick", ex);
+        }
+    }
+
+    private void PickSoundFile()
+    {
+        try
+        {
+            string? response = null;
+            try
+            {
+                var name = _controller.PickArrangeSoundFile();
+                if (!string.IsNullOrEmpty(name))
+                    response = JsonSerializer.Serialize(new { type = "soundFile", name, userSounds = ReadUserSounds() }, WriteOptions);
+            }
+            catch (Exception ex)
+            {
+                response = SoundError("pick", ex);
+            }
+
+            if (response is not null)
+                _postAsyncResponse?.Invoke(response);
+        }
+        finally
+        {
+            _soundPickerPending = false;
+        }
+    }
+
+    private string SoundError(string operation, Exception error)
+    {
+        _logger?.Warn($"SettingsBridge: {operation} sound failed: {error.Message}");
+        return JsonSerializer.Serialize(new { type = "soundError", operation }, WriteOptions);
     }
 
     private static bool TryNormalizeLayoutMode(string raw, out string mode)
