@@ -51,11 +51,12 @@ public partial class PeekDowsAppContext
             _settings.AllowRepositionMaximizedWindows, _placementGeneration, _settings.WindowSizePreset,
             string.Join("|", _settings.IgnoredProcesses), string.Join("|", _settings.IgnoredClasses));
 
-    private bool StillMatchesPreview(IReadOnlyList<WindowPlacement> placements, IReadOnlyList<ManagedWindow> windows,
+    private bool StillMatchesPreview(WindowDiscoveryService discovery,
+        IReadOnlyList<WindowPlacement> placements, IReadOnlyList<ManagedWindow> windows,
         IReadOnlyDictionary<IntPtr, MonitorInfo> monitors)
     {
         var candidates = windows.ToDictionary(window => window.Hwnd);
-        var live = _discoveryService.GetTopLevelWindows().Where(_classifier.IsEligible).ToDictionary(window => window.Hwnd);
+        var live = discovery.Refresh(_classifier).Current.ToDictionary(window => window.Hwnd);
         if (!candidates.Keys.ToHashSet().SetEquals(live.Keys.Where(hwnd =>
             !live[hwnd].IsMaximized || _settings.AllowRepositionMaximizedWindows ||
             _loneWindowMaximizePolicy.WasMaximizedByPeekDows(hwnd))))
@@ -265,6 +266,7 @@ public partial class PeekDowsAppContext
 
     private void LayoutPreferencesChanged()
     {
+        _placementGeneration++;
         _stackedZones = [];
         OnSettingsChanged();
         WindowSizePresetChanged?.Invoke(_settings.WindowSizePreset);
@@ -278,21 +280,26 @@ public partial class PeekDowsAppContext
     {
         if (deviations.Count == 0 || monitors.Count == 0) return;
         int moved = 0;
+        var windowsByHandle = windows.ToDictionary(window => window.Hwnd);
         foreach (var deviation in deviations)
         {
             const int tolerance = PlacementVerifier.TolerancePx;
-            var (hwnd, expected, actual) = deviation;
+            var (hwnd, expected, _) = deviation;
             if (!monitors.TryGetValue(hwnd, out var monitor) || monitor.IsFallback ||
-                !Screen.AllScreens.Any(screen => screen.DeviceName == monitor.DeviceName &&
-                    screen.WorkingArea == new Rectangle(monitor.WorkArea.Left, monitor.WorkArea.Top,
-                        monitor.WorkArea.Width, monitor.WorkArea.Height)))
+                !windowsByHandle.TryGetValue(hwnd, out var window) ||
+                !NativeMethods.IsWindowVisible(hwnd) || NativeMethods.IsIconic(hwnd) || NativeMethods.IsZoomed(hwnd) ||
+                !_virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd))
                 continue;
+            var liveMonitor = _monitorService.GetMonitorForWindow(hwnd);
+            if (liveMonitor.IsFallback || liveMonitor.Handle != monitor.Handle || liveMonitor.DeviceName != monitor.DeviceName ||
+                liveMonitor.WorkArea != monitor.WorkArea || MonitorLayoutSettings.Resolve(_settings, liveMonitor).Mode != "Custom")
+                continue;
+            if (NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid) == 0 || (uint)window.ProcessId != pid ||
+                !NativeMethods.GetWindowRect(hwnd, out var rect))
+                continue;
+            var actual = new Rect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
             if (Math.Abs(actual.Left - expected.Left) > tolerance || Math.Abs(actual.Top - expected.Top) > tolerance ||
                 (actual.Width <= expected.Width + tolerance && actual.Height <= expected.Height + tolerance))
-                continue;
-            NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
-            if (!windows.Any(window => window.Hwnd == hwnd && (uint)window.ProcessId == pid) ||
-                !_virtualDesktopService.IsWindowOnCurrentVirtualDesktop(hwnd))
                 continue;
             var area = monitor.WorkArea;
             var flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_ASYNCWINDOWPOS;

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using PeekDows.App.Animation;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
+using PeekDows.Core.Win32;
 using Xunit;
 
 namespace PeekDows.Tests;
@@ -42,7 +43,6 @@ public class WindowAnimationServiceTests
             return true;
         }
 
-        public bool RestoreWindow(IntPtr hwnd) { RestoreCalls.Add(hwnd); return true; }
         public Rect GetWorkAreaForWindow(IntPtr hwnd) => WorkAreas.TryGetValue(hwnd, out var r) ? r : new Rect(0, 0, 1920, 1080);
 
         public bool TryGetRect(IntPtr hwnd, out Rect rect) => Rects.TryGetValue(hwnd, out rect!);
@@ -76,7 +76,7 @@ public class WindowAnimationServiceTests
     public void Begin_ThenTicks_ProgressTowardTargetWithEasing()
     {
         var (svc, api, clock) = Create();
-        svc.Begin(H(1), TargetRect, PlacementKind.Reposition);
+        Assert.Equal(AnimationStartResult.Started, svc.Begin(H(1), TargetRect, PlacementKind.Reposition));
         Assert.True(svc.IsAnimating(H(1)));
 
         clock.AdvanceMs(75); // halfway through the 150ms duration
@@ -116,14 +116,119 @@ public class WindowAnimationServiceTests
     }
 
     [Fact]
+    public void MaximizeKind_WithinOnePixelOfTarget_MaximizesImmediatelyAndCancelsOldTween()
+    {
+        var (svc, api, clock) = Create();
+        using var animator = svc;
+        Assert.Equal(AnimationStartResult.Started, svc.Begin(H(1), TargetRect, PlacementKind.Reposition));
+        var positioner = new FakeWindowPositioner();
+        var placement = new WindowPlacementService(positioner, _ => true, _ => false, null, null,
+            _ => true, null, animator: svc, shouldAnimate: () => true);
+
+        var result = placement.ApplyPlacements([new()
+        {
+            Hwnd = H(1), SlotId = "Maximize", Kind = PlacementKind.Maximize,
+            TargetRect = new Rect(0, 0, StartRect.Width + 1, StartRect.Height)
+        }]);
+
+        Assert.Equal(H(1), Assert.Single(positioner.MaximizeCalls));
+        Assert.Equal(H(1), Assert.Single(result.ChangedHwnds));
+        Assert.False(svc.IsAnimating(H(1)));
+        clock.AdvanceMs(150);
+        svc.Tick();
+        Assert.Empty(api.SetWindowPosCalls);
+        Assert.Empty(api.MaximizeCalls);
+    }
+
+    [Fact]
+    public void AnimatedRestore_PostsExactlyOneRestore_AndStartsFromWorkArea()
+    {
+        var (svc, api, clock) = Create();
+        using var animator = svc;
+        var workArea = new Rect(0, 0, 1920, 1080);
+        api.WorkAreas[H(1)] = workArea;
+        var positioner = new FakeWindowPositioner();
+        var placement = new WindowPlacementService(positioner, _ => true, _ => true, null, null,
+            _ => true, (hwnd, command) =>
+            {
+                Assert.Equal(NativeMethods.SW_RESTORE, command);
+                api.RestoreCalls.Add(hwnd);
+                return true;
+            }, animator: svc, shouldAnimate: () => true);
+
+        var result = placement.ApplyPlacements([new()
+        {
+            Hwnd = H(1), SlotId = "A", Kind = PlacementKind.RestoreAndReposition, TargetRect = TargetRect
+        }]);
+        clock.AdvanceMs(75);
+        svc.Tick();
+
+        Assert.Equal(H(1), Assert.Single(api.RestoreCalls));
+        Assert.Equal(H(1), Assert.Single(result.SucceededHwnds));
+        Assert.Equal(WindowAnimationService.LerpRect(workArea, TargetRect, WindowAnimationService.EaseOutCubic(0.5)),
+            Assert.Single(api.SetWindowPosCalls).Rect);
+        Assert.Empty(positioner.Calls);
+    }
+
+    [Fact]
+    public void AnimatedRestore_DeclinedTweenAndFailedMove_CanStillBeUndone()
+    {
+        var (svc, api, _) = Create();
+        using var animator = svc;
+        api.InvalidWindows.Add(H(1));
+        var positioner = new FakeWindowPositioner([H(1)]);
+        var placement = new WindowPlacementService(positioner, _ => true, _ => true, null, null,
+            _ => true, (_, _) => true, animator: svc, shouldAnimate: () => true);
+        var history = new ArrangeHistoryService(isWindowValid: _ => true);
+        var snapshot = history.Capture([new() { Hwnd = H(1), CurrentRect = StartRect, IsMaximized = true }]);
+
+        var result = placement.ApplyPlacements([new()
+        {
+            Hwnd = H(1), SlotId = "A", Kind = PlacementKind.RestoreAndReposition, TargetRect = TargetRect
+        }]);
+        history.Commit(snapshot, result.ChangedHwnds);
+
+        Assert.Empty(result.SucceededHwnds);
+        Assert.Equal(H(1), Assert.Single(result.ChangedHwnds));
+        Assert.True(history.CanUndo);
+        var undo = new FakeWindowPositioner();
+        history.Undo(undo, svc.Cancel);
+        Assert.Equal(H(1), Assert.Single(undo.MaximizeCalls));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnimationWithNoChange_OnlyReportsMutationIfRestoreWasAccepted(bool isMaximized)
+    {
+        var (svc, api, _) = Create();
+        using var animator = svc;
+        api.WorkAreas[H(1)] = StartRect;
+        var positioner = new FakeWindowPositioner();
+        var placement = new WindowPlacementService(positioner, _ => true, _ => isMaximized, null, null,
+            _ => true, (_, _) => true, animator: svc, shouldAnimate: () => true);
+
+        var result = placement.ApplyPlacements([new()
+        {
+            Hwnd = H(1), SlotId = "A", TargetRect = StartRect,
+            Kind = isMaximized ? PlacementKind.RestoreAndReposition : PlacementKind.Reposition
+        }]);
+
+        Assert.Equal(H(1), Assert.Single(result.SucceededHwnds));
+        Assert.Equal(isMaximized, result.ChangedHwnds.Contains(H(1)));
+        Assert.False(svc.IsAnimating(H(1)));
+        Assert.Empty(positioner.Calls);
+    }
+
+    [Fact]
     public void MaximizeKind_AlreadyZoomed_IsNoOpButSucceeds()
     {
         var (svc, api, clock) = Create();
         api.MaximizedWindows.Add(H(1));
 
-        bool began = svc.Begin(H(1), new Rect(0, 0, 1920, 1080), PlacementKind.Maximize);
+        var began = svc.Begin(H(1), new Rect(0, 0, 1920, 1080), PlacementKind.Maximize);
 
-        Assert.True(began);
+        Assert.Equal(AnimationStartResult.NoChange, began);
         Assert.False(svc.IsAnimating(H(1)));
         Assert.Empty(api.MaximizeCalls);
     }
@@ -246,20 +351,21 @@ public class WindowAnimationServiceTests
     }
 
     [Fact]
-    public void Begin_InvalidWindow_ReturnsFalse()
+    public void Begin_InvalidWindow_DeclinesAnimation()
     {
         var (svc, api, _) = Create();
         api.InvalidWindows.Add(H(1));
-        Assert.False(svc.Begin(H(1), TargetRect, PlacementKind.Reposition));
+        Assert.Equal(AnimationStartResult.Declined, svc.Begin(H(1), TargetRect, PlacementKind.Reposition));
     }
 
     [Fact]
-    public void Begin_AlreadyAtTarget_ReturnsTrueWithoutAnimating()
+    public void Begin_AlreadyAtTarget_ReturnsNoChangeWithoutAnimating()
     {
         var (svc, api, _) = Create();
         api.Rects[H(1)] = TargetRect;
-        bool began = svc.Begin(H(1), TargetRect, PlacementKind.Reposition);
-        Assert.True(began);
+        var began = svc.Begin(H(1), TargetRect, PlacementKind.Reposition);
+        Assert.Equal(AnimationStartResult.NoChange, began);
         Assert.False(svc.IsAnimating(H(1)));
+        Assert.Empty(api.SetWindowPosCalls);
     }
 }

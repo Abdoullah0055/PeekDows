@@ -14,6 +14,7 @@ public sealed class AutoArrangeService : IDisposable
     private readonly WindowClassifier _classifier;
     private readonly AutoArrangeDecisionEngine _decisionEngine;
     private readonly IPeekDowsController _controller;
+    private readonly Func<bool> _isPreviewOpen;
     private readonly FileLogger _logger;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly object _lock = new();
@@ -29,12 +30,14 @@ public sealed class AutoArrangeService : IDisposable
         WindowDiscoveryService discoveryService,
         WindowClassifier classifier,
         IPeekDowsController controller,
-        FileLogger logger)
+        FileLogger logger,
+        Func<bool>? isPreviewOpen = null)
     {
         _discoveryService = discoveryService;
         _classifier = classifier;
         _decisionEngine = new AutoArrangeDecisionEngine();
         _controller = controller;
+        _isPreviewOpen = isPreviewOpen ?? (() => false);
         _logger = logger;
 
         _timer = new System.Windows.Forms.Timer
@@ -42,6 +45,7 @@ public sealed class AutoArrangeService : IDisposable
             Interval = 1000
         };
         _timer.Tick += OnTimerTick;
+        _controller.StateChanged += OnControllerStateChanged;
     }
 
     public void Start(AppSettings settings)
@@ -60,17 +64,13 @@ public sealed class AutoArrangeService : IDisposable
 
     public void Stop()
     {
-        if (!IsRunning) return;
-
-        IsRunning = false;
-        _timer.Stop();
-
-        if (_pendingDelayTimer != null)
+        lock (_lock)
         {
-            _pendingDelayTimer.Stop();
-            _pendingDelayTimer.Dispose();
-            _pendingDelayTimer = null;
-            _logger.Info("AutoArrange pending delay timer disposed on stop");
+            if (!IsRunning) return;
+
+            IsRunning = false;
+            _timer.Stop();
+            ClearPendingDelay();
         }
 
         _logger.Info("AutoArrangeService stopped");
@@ -81,11 +81,31 @@ public sealed class AutoArrangeService : IDisposable
         Tick();
     }
 
+    private void OnControllerStateChanged(RuntimeState state)
+    {
+        if (state == RuntimeState.Paused)
+        {
+            lock (_lock) ClearPendingDelay();
+        }
+    }
+
+    internal bool AcknowledgePreviewPlacement(WindowDiscoveryService? validatedDiscovery, PlacementResult result)
+    {
+        if (validatedDiscovery is null || result.SucceededHwnds.Count == 0) return false;
+
+        lock (_lock)
+        {
+            _discoveryService.AdoptBaseline(validatedDiscovery);
+            ClearPendingDelay();
+        }
+        return true;
+    }
+
     internal void Tick()
     {
         lock (_lock)
         {
-            if (!IsRunning) return;
+            if (!IsRunning || _isPreviewOpen()) return;
 
             var settings = _controller.CurrentSettings;
             if (settings == null) return;
@@ -143,6 +163,11 @@ public sealed class AutoArrangeService : IDisposable
 
                 case AutoArrangeDecision.ArrangeImmediately:
                     _logger.Info($"AutoArrange detected removed windows count={diff.Removed.Count}");
+                    if (_pendingDelayTimer is not null)
+                    {
+                        _logger.Info("AutoArrange joining removed windows to the pending stabilization delay");
+                        break;
+                    }
                     _logger.Info("AutoArrange triggering ArrangeNow");
                     TriggerArrangeNow();
                     break;
@@ -163,32 +188,43 @@ public sealed class AutoArrangeService : IDisposable
         }
 
         _logger.Info($"AutoArrange scheduling arrange after stabilization delay={delayMs}");
-        var timer = new System.Windows.Forms.Timer { Interval = delayMs };
-        EventHandler? handler = null;
-        handler = (s, e) =>
+        _pendingDelayTimer = new System.Windows.Forms.Timer { Interval = delayMs };
+        _pendingDelayTimer.Tick += OnPendingDelayTick;
+        _pendingDelayTimer.Start();
+    }
+
+    private void OnPendingDelayTick(object? sender, EventArgs e)
+    {
+        if (ReferenceEquals(sender, _pendingDelayTimer)) TickPendingDelay();
+    }
+
+    internal void TickPendingDelay()
+    {
+        lock (_lock)
         {
-            // C5 fix: unsubscribe before dispose so no tick fires after Dispose.
-            timer.Tick -= handler!;
-            timer.Stop();
-            timer.Dispose();
-            lock (_lock)
-            {
-                if (_pendingDelayTimer == timer) _pendingDelayTimer = null;
-            }
-            lock (_lock)
-            {
-                if (!IsRunning) return;
-                var settings = _controller.CurrentSettings;
-                if (settings == null) return;
-                if (!settings.Enabled || !settings.AutoArrange || _controller.State == RuntimeState.Paused)
-                    return;
-                _logger.Info("AutoArrange triggering ArrangeNow (after stabilization)");
-                TriggerArrangeNow();
-            }
-        };
-        timer.Tick += handler;
-        _pendingDelayTimer = timer;
-        timer.Start();
+            if (_pendingDelayTimer is null) return;
+
+            var settings = _controller.CurrentSettings;
+            bool canArrange = IsRunning && settings is { Enabled: true, AutoArrange: true }
+                && _controller.State != RuntimeState.Paused;
+            if (canArrange && _isPreviewOpen()) return;
+
+            ClearPendingDelay();
+            if (!canArrange) return;
+
+            _logger.Info("AutoArrange triggering ArrangeNow (after stabilization)");
+            TriggerArrangeNow();
+        }
+    }
+
+    private void ClearPendingDelay()
+    {
+        if (_pendingDelayTimer is not { } timer) return;
+
+        _pendingDelayTimer = null;
+        timer.Tick -= OnPendingDelayTick;
+        timer.Stop();
+        timer.Dispose();
     }
 
     private void TriggerArrangeNow()
@@ -210,16 +246,8 @@ public sealed class AutoArrangeService : IDisposable
         if (_disposed) return;
         _disposed = true;
         Stop();
+        _controller.StateChanged -= OnControllerStateChanged;
         _timer.Tick -= OnTimerTick;
         _timer.Dispose();
-        lock (_lock)
-        {
-            if (_pendingDelayTimer != null)
-            {
-                var t = _pendingDelayTimer;
-                _pendingDelayTimer = null;
-                try { t.Stop(); t.Dispose(); } catch { }
-            }
-        }
     }
 }

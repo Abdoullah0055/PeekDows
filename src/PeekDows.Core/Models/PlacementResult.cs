@@ -10,4 +10,5 @@ public sealed class PlacementResult
     public int FailedCount { get; init; }
     public IReadOnlyList<string> Errors { get; init; } = [];
     public IReadOnlyList<IntPtr> SucceededHwnds { get; init; } = [];
+    public IReadOnlyList<IntPtr> ChangedHwnds { get; init; } = [];
 }

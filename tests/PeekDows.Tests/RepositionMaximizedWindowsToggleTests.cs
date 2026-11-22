@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PeekDows.App;
 using PeekDows.App.Tray;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
@@ -23,6 +24,51 @@ public class RepositionMaximizedWindowsToggleTests
         var settings = new AppSettings();
 
         Assert.False(settings.AllowRepositionMaximizedWindows);
+    }
+
+    [Theory]
+    [InlineData("disable")]
+    [InlineData("allow-maximized")]
+    [InlineData("disallow-maximized")]
+    [InlineData("mode")]
+    [InlineData("profile")]
+    [InlineData("custom-zones")]
+    [InlineData("excluded-process")]
+    [InlineData("excluded-class")]
+    [InlineData("app-rule")]
+    public void PlacementSettingChangeInvalidatesPendingCustomFallback(string change)
+    {
+        var previous = new AppSettings
+        {
+            LayoutMode = "Custom", AllowRepositionMaximizedWindows = change == "disallow-maximized"
+        };
+        var next = previous.CopyForSettingsEdit();
+
+        switch (change)
+        {
+            case "disable": next.Enabled = false; break;
+            case "allow-maximized": next.AllowRepositionMaximizedWindows = true; break;
+            case "disallow-maximized": next.AllowRepositionMaximizedWindows = false; break;
+            case "mode": next.LayoutMode = "Grid"; break;
+            case "profile": next.MonitorProfiles = new() { ["screen"] = new("Grid", []) }; break;
+            case "custom-zones": next.CustomZones = new(75); break;
+            case "excluded-process": next.IgnoredProcesses.Add("chrome.exe"); break;
+            case "excluded-class": next.IgnoredClasses.Add("Chrome_WidgetWin_1"); break;
+            case "app-rule": next.AppRules.Add(new AppRule { Process = "chrome.exe", Action = "ignore" }); break;
+        }
+
+        Assert.True(PeekDowsAppContext.InvalidatesPendingPlacement(previous, next));
+    }
+
+    [Fact]
+    public void HotkeysAndSoundDoNotInvalidatePendingCustomFallback()
+    {
+        var previous = new AppSettings { LayoutMode = "Custom" };
+        var next = previous.CopyForSettingsEdit();
+        next.ArrangeSoundEnabled = true;
+        next.Hotkeys["arrangeNow"] = "Ctrl+Alt+F6";
+
+        Assert.False(PeekDowsAppContext.InvalidatesPendingPlacement(previous, next));
     }
 
     [Fact]

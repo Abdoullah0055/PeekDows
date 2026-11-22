@@ -25,13 +25,6 @@ public interface IWindowAnimationApi
     /// <summary>Natively maximizes via non-blocking ShowWindowAsync(SW_MAXIMIZE).</summary>
     bool Maximize(IntPtr hwnd);
 
-    /// <summary>
-    /// Non-blocking restore (ShowWindowAsync SW_RESTORE). Used for
-    /// RestoreAndReposition: the window is restored then glided from its
-    /// monitor's WorkArea into the slot.
-    /// </summary>
-    bool RestoreWindow(IntPtr hwnd);
-
     /// <summary>Returns the monitor WorkArea for the window (fallback 1920x1080 if unknown).</summary>
     Rect GetWorkAreaForWindow(IntPtr hwnd);
 
@@ -66,7 +59,6 @@ public sealed class Win32AnimationApi : IWindowAnimationApi
     }
 
     public bool Maximize(IntPtr hwnd) => NativeMethods.ShowWindowAsync(hwnd, NativeMethods.SW_MAXIMIZE);
-    public bool RestoreWindow(IntPtr hwnd) => NativeMethods.ShowWindowAsync(hwnd, NativeMethods.SW_RESTORE);
     public Rect GetWorkAreaForWindow(IntPtr hwnd)
     {
         try
@@ -173,37 +165,35 @@ public sealed class WindowAnimationService : IWindowAnimator, IDisposable
         _timer.Tick += OnTimerTick;
     }
 
-    public bool Begin(IntPtr hwnd, Rect targetRect, PlacementKind kind, bool bringToFront = false)
+    public AnimationStartResult Begin(IntPtr hwnd, Rect targetRect, PlacementKind kind, bool bringToFront = false)
     {
         if (hwnd == IntPtr.Zero || !_api.IsWindow(hwnd))
         {
-            return false;
+            return AnimationStartResult.Declined;
         }
 
         if (kind == PlacementKind.Maximize && _api.IsZoomed(hwnd))
         {
-            // Already maximized: nothing to animate, report success (steady state).
-            return true;
+            Cancel(hwnd);
+            return AnimationStartResult.NoChange;
         }
 
         Rect from;
         if (kind == PlacementKind.RestoreAndReposition)
         {
-            // For a maximized→slot transition the current rect is the maximized rect.
-            // Tweening from it would glide from fullscreen; spec wants restore→WorkArea→glide.
-            // Issue the non-blocking restore immediately and use the monitor WorkArea as From.
-            _api.RestoreWindow(hwnd);
+            // Placement service posts the restore. The tween starts from the monitor work area.
             from = _api.GetWorkAreaForWindow(hwnd);
             _logger?.Info($"Animation RestoreAndReposition: hwnd={hwnd}, WorkArea as From={from}, to={targetRect}");
         }
         else if (!_api.TryGetRect(hwnd, out from))
         {
-            return false;
+            return AnimationStartResult.Declined;
         }
 
         if (MaxComponentDeviation(from, targetRect) <= 1)
         {
-            return true; // already there
+            Cancel(hwnd);
+            return kind == PlacementKind.Maximize ? AnimationStartResult.Declined : AnimationStartResult.NoChange;
         }
 
         _tweens[hwnd] = new Tween { From = from, To = targetRect, Kind = kind, BringToFront = bringToFront, StartedAt = _nowProvider(), LastWritten = from };
@@ -213,7 +203,7 @@ public sealed class WindowAnimationService : IWindowAnimator, IDisposable
         }
 
         _logger?.Info($"Animation begun: hwnd={hwnd}, kind={kind}, bringToFront={bringToFront}, from={from}, to={targetRect}");
-        return true;
+        return AnimationStartResult.Started;
     }
 
     public bool IsAnimating(IntPtr hwnd) => _tweens.ContainsKey(hwnd);

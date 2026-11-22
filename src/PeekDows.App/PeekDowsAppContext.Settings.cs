@@ -1,5 +1,6 @@
 using PeekDows.App.Settings;
 using PeekDows.Core.Models;
+using PeekDows.Core.Services;
 
 namespace PeekDows.App;
 
@@ -16,6 +17,7 @@ public partial class PeekDowsAppContext
     private void PublishSettings(AppSettings previous, AppSettings next)
     {
         _settings = next;
+        if (InvalidatesPendingPlacement(previous, next)) _placementGeneration++;
         OnSettingsChanged();
 
         bool autoArrangeChanged = previous.AutoArrange != next.AutoArrange;
@@ -60,6 +62,14 @@ public partial class PeekDowsAppContext
         if (soundChanged)
             ApplyEffect("arrange sound notification", () => SoundChanged?.Invoke(next.ArrangeSoundEnabled));
     }
+
+    internal static bool InvalidatesPendingPlacement(AppSettings previous, AppSettings next) =>
+        (previous.Enabled && !next.Enabled) ||
+        previous.AllowRepositionMaximizedWindows != next.AllowRepositionMaximizedWindows ||
+        !previous.IgnoredProcesses.SequenceEqual(next.IgnoredProcesses, StringComparer.OrdinalIgnoreCase) ||
+        !previous.IgnoredClasses.SequenceEqual(next.IgnoredClasses, StringComparer.OrdinalIgnoreCase) ||
+        (LayoutPreferencesFile.Capture(previous) with { Hotkeys = [] }).ToJson() !=
+        (LayoutPreferencesFile.Capture(next) with { Hotkeys = [] }).ToJson();
 
     private bool ApplyEffect(string operation, Action effect)
     {

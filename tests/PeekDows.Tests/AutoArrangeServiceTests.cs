@@ -54,9 +54,177 @@ public class AutoArrangeServiceTests : IDisposable
         };
     }
 
-    private AutoArrangeService CreateService(WindowDiscoveryService discoveryService)
+    private AutoArrangeService CreateService(WindowDiscoveryService discoveryService, Func<bool>? isPreviewOpen = null)
     {
-        return new AutoArrangeService(discoveryService, _classifier, _controller, new FileLogger());
+        return new AutoArrangeService(discoveryService, _classifier, _controller, new FileLogger(), isPreviewOpen);
+    }
+
+    [Fact]
+    public void OpenPreviewPausesDiscoveryAndTheFirstTickAfterCloseSchedulesOnce()
+    {
+        IReadOnlyList<RawWindowInfo> windows = [MakeRaw((IntPtr)1)];
+        int reads = 0;
+        var discovery = new WindowDiscoveryService(() => { reads++; return windows; });
+        bool previewOpen = false;
+        _service = CreateService(discovery, () => previewOpen);
+        _controller.CurrentSettingsValue.AutoArrange = true;
+        _service.Start(_controller.CurrentSettings);
+
+        previewOpen = true;
+        windows = [.. windows, MakeRaw((IntPtr)2)];
+        _service.Tick();
+        _service.TickPendingDelay();
+        Assert.Equal(1, reads);
+        Assert.Equal(0, _controller.ArrangeNowCallCount);
+
+        previewOpen = false;
+        _service.Tick();
+        Assert.Equal(2, reads);
+        Assert.Equal(0, _controller.ArrangeNowCallCount);
+        _service.TickPendingDelay();
+        _service.TickPendingDelay();
+        Assert.Equal(1, _controller.ArrangeNowCallCount);
+    }
+
+    [Theory]
+    [InlineData("active", 1)]
+    [InlineData("paused", 0)]
+    [InlineData("stopped", 0)]
+    public void PendingDelayWaitsForPreviewUnlessAutoArrangeWasPausedOrStopped(string state, int expectedArranges)
+    {
+        IReadOnlyList<RawWindowInfo> windows = [MakeRaw((IntPtr)1)];
+        var discovery = new WindowDiscoveryService(() => windows);
+        bool previewOpen = false;
+        _service = CreateService(discovery, () => previewOpen);
+        _controller.CurrentSettingsValue.AutoArrange = true;
+        _service.Start(_controller.CurrentSettings);
+        windows = [.. windows, MakeRaw((IntPtr)2)];
+        _service.Tick();
+
+        previewOpen = true;
+        _service.TickPendingDelay();
+        _service.TickPendingDelay();
+        Assert.Equal(0, _controller.ArrangeNowCallCount);
+
+        if (state == "paused")
+        {
+            _controller.SetState(RuntimeState.Paused);
+            _controller.SetState(RuntimeState.Running);
+        }
+        else if (state == "stopped")
+        {
+            _service.Stop();
+        }
+
+        previewOpen = false;
+        _service.TickPendingDelay();
+        _service.TickPendingDelay();
+        Assert.Equal(expectedArranges, _controller.ArrangeNowCallCount);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RemovalAfterCancelledPreview_JoinsPendingStabilizationInEitherTimerOrder(bool discoveryTicksFirst)
+    {
+        var a = MakeRaw((IntPtr)1);
+        var b = MakeRaw((IntPtr)2);
+        IReadOnlyList<RawWindowInfo> windows = [a];
+        var discovery = new WindowDiscoveryService(() => windows);
+        bool previewOpen = false;
+        _service = CreateService(discovery, () => previewOpen);
+        _controller.CurrentSettingsValue.AutoArrange = true;
+        _controller.CurrentSettingsValue.ArrangeAfterWindowCloses = true;
+        _service.Start(_controller.CurrentSettings);
+        windows = [a, b];
+        _service.Tick();
+
+        previewOpen = true;
+        windows = [b];
+        _service.Tick();
+        Assert.Equal(0, _controller.ArrangeNowCallCount);
+
+        previewOpen = false;
+        if (discoveryTicksFirst)
+        {
+            _service.Tick();
+            Assert.Equal(0, _controller.ArrangeNowCallCount);
+        }
+
+        _service.TickPendingDelay();
+        Assert.Equal(1, _controller.ArrangeNowCallCount);
+        if (!discoveryTicksFirst)
+            _service.Tick();
+        _service.TickPendingDelay();
+        Assert.Equal(1, _controller.ArrangeNowCallCount);
+    }
+
+    [Fact]
+    public void AppliedPreviewClearsPendingDelayButStillDetectsWindowsOpenedAfterValidation()
+    {
+        IReadOnlyList<RawWindowInfo> windows = [MakeRaw((IntPtr)1)];
+        var discovery = new WindowDiscoveryService(() => windows);
+        bool previewOpen = false;
+        _service = CreateService(discovery, () => previewOpen);
+        _controller.CurrentSettingsValue.AutoArrange = true;
+        _service.Start(_controller.CurrentSettings);
+        windows = [.. windows, MakeRaw((IntPtr)2)];
+        _service.Tick();
+
+        previewOpen = true;
+        var validated = discovery.Fork();
+        windows = [.. windows, MakeRaw((IntPtr)3)];
+        var validatedWindows = validated.Refresh(_classifier).Current;
+        windows = [.. windows, MakeRaw((IntPtr)4)];
+        Assert.True(_service.AcknowledgePreviewPlacement(validated,
+            new PlacementResult { SucceededHwnds = [(IntPtr)2] }));
+
+        Assert.Equal(validatedWindows.Select(window => window.Hwnd), discovery.GetKnownWindows().Select(window => window.Hwnd));
+        Assert.NotSame(validatedWindows[0], discovery.GetKnownWindows()[0]);
+        previewOpen = false;
+        _service.TickPendingDelay();
+        Assert.Equal(0, _controller.ArrangeNowCallCount);
+        _service.Tick();
+        _service.TickPendingDelay();
+        _service.TickPendingDelay();
+        Assert.Equal(1, _controller.ArrangeNowCallCount);
+    }
+
+    [Theory]
+    [InlineData("cancelled")]
+    [InlineData("stale")]
+    [InlineData("no accepted placements")]
+    public void UnappliedPreviewKeepsBothTheBaselineAndPendingDelay(string outcome)
+    {
+        IReadOnlyList<RawWindowInfo> windows = [MakeRaw((IntPtr)1)];
+        var discovery = new WindowDiscoveryService(() => windows);
+        bool previewOpen = false;
+        _service = CreateService(discovery, () => previewOpen);
+        _controller.CurrentSettingsValue.AutoArrange = true;
+        _service.Start(_controller.CurrentSettings);
+        windows = [.. windows, MakeRaw((IntPtr)2)];
+        _service.Tick();
+
+        previewOpen = true;
+        var preview = discovery.Fork();
+        windows = [.. windows, MakeRaw((IntPtr)3)];
+        preview.Refresh(_classifier);
+        if (outcome == "stale")
+        {
+            windows = [windows[0], windows[2]];
+            preview.Refresh(_classifier);
+        }
+        _service.TickPendingDelay();
+        var validated = outcome == "no accepted placements" ? preview : null;
+        Assert.False(_service.AcknowledgePreviewPlacement(validated,
+            new PlacementResult { ChangedHwnds = [(IntPtr)2] }));
+
+        Assert.Equal(new IntPtr[] { (IntPtr)1, (IntPtr)2 }, discovery.GetKnownWindows().Select(window => window.Hwnd));
+        Assert.Equal(0, _controller.ArrangeNowCallCount);
+        previewOpen = false;
+        _service.TickPendingDelay();
+        _service.TickPendingDelay();
+        Assert.Equal(1, _controller.ArrangeNowCallCount);
     }
 
     [Fact]
@@ -337,6 +505,12 @@ public class AutoArrangeServiceTests : IDisposable
         public event Action<bool>? SoundChanged;
 
         public void ArrangeNow() => ArrangeNowCallCount++;
+
+        public void SetState(RuntimeState state)
+        {
+            State = state;
+            StateChanged?.Invoke(state);
+        }
         public void TogglePause() { }
         public void PauseFor(TimeSpan duration) { }
         public void PauseUntilResumed() { }

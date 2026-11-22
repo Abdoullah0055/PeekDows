@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.InteropServices;
 using PeekDows.Core.Models;
 using PeekDows.Core.Win32;
 
@@ -111,6 +110,7 @@ public sealed class WindowPlacementService
         int failed = 0;
         var errors = new List<string>();
         var succeededHwnds = new List<IntPtr>();
+        var changedHwnds = new HashSet<IntPtr>();
 
         // P-B6 fix: avoid LINQ alloc (Where+ToList+FirstOrDefault) for ≤8 items.
         WindowPlacement? focus = null;
@@ -118,11 +118,11 @@ public sealed class WindowPlacementService
         foreach (var placement in placements)
         {
             if (placement.BringToFront) continue;
-            TryApplyPlacement(placement, ref succeeded, ref failed, errors, succeededHwnds);
+            TryApplyPlacement(placement, ref succeeded, ref failed, errors, succeededHwnds, changedHwnds);
         }
         if (focus != null)
         {
-            TryApplyPlacement(focus, ref succeeded, ref failed, errors, succeededHwnds);
+            TryApplyPlacement(focus, ref succeeded, ref failed, errors, succeededHwnds, changedHwnds);
         }
 
         _logger?.Info($"ApplyPlacements completed: attempted={placements.Count}, succeeded={succeeded}, failed={failed}");
@@ -133,11 +133,13 @@ public sealed class WindowPlacementService
             SucceededCount = succeeded,
             FailedCount = failed,
             Errors = errors,
-            SucceededHwnds = succeededHwnds
+            SucceededHwnds = succeededHwnds,
+            ChangedHwnds = changedHwnds.ToArray()
         };
     }
 
-    private bool TryApplyPlacement(WindowPlacement placement, ref int succeeded, ref int failed, List<string> errors, List<IntPtr> succeededHwnds)
+    private bool TryApplyPlacement(WindowPlacement placement, ref int succeeded, ref int failed,
+        List<string> errors, List<IntPtr> succeededHwnds, HashSet<IntPtr> changedHwnds)
     {
         try
         {
@@ -170,27 +172,13 @@ public sealed class WindowPlacementService
                 return false;
             }
 
-            if (placement.Kind == PlacementKind.Maximize)
+            bool isMaximized = _isWindowMaximized(placement.Hwnd);
+            if (placement.Kind == PlacementKind.Maximize && isMaximized)
             {
-                if (_isWindowMaximized(placement.Hwnd))
-                {
-                    // Steady state: the lone window is already maximized by us. Nothing to do.
-                    _logger?.Info($"Placement skipped (already maximized): hwnd={placement.Hwnd}, slot={placement.SlotId}");
-                    succeeded++;
-                    succeededHwnds.Add(placement.Hwnd);
-                    return true;
-                }
-                // Not maximized yet: fall through — the maximize is issued by the animator
-                // (final frame) or the instant path below. Never run the restore path here.
-            }
-            else if (_isWindowMaximized(placement.Hwnd))
-            {
-                _logger?.Info($"Maximized window detected: hwnd={placement.Hwnd}, slot={placement.SlotId}");
-                _logger?.Info($"Restoring maximized window before placement: hwnd={placement.Hwnd}, slot={placement.SlotId}");
-                // ShowWindowAsync posts the restore without waiting for the target thread,
-                // so a hung window cannot block arrange here.
-                bool restoreResult = _showWindowAsync(placement.Hwnd, NativeMethods.SW_RESTORE);
-                _logger?.Info($"ShowWindowAsync(SW_RESTORE) result={restoreResult} for hwnd={placement.Hwnd}");
+                _logger?.Info($"Placement skipped (already maximized): hwnd={placement.Hwnd}, slot={placement.SlotId}");
+                succeeded++;
+                succeededHwnds.Add(placement.Hwnd);
+                return true;
             }
 
             // Unstable-window circuit breaker: a window that recently hung, blocked a
@@ -220,17 +208,30 @@ public sealed class WindowPlacementService
                 return false;
             }
 
-            // Animated path: hand the placement to the animator when enabled. The animator
-            // returns false only when it cannot start (window gone, rect unreadable) — then
-            // we fall through to the instant path so the window is never left unplaced.
+            if (isMaximized)
+            {
+                // An accepted asynchronous restore may change the window even if placement fails.
+                if (!_showWindowAsync(placement.Hwnd, NativeMethods.SW_RESTORE))
+                {
+                    failed++;
+                    var msg = $"ShowWindowAsync(SW_RESTORE) failed: hwnd={placement.Hwnd}, slot={placement.SlotId}";
+                    errors.Add(msg);
+                    _logger?.Warn(msg);
+                    return false;
+                }
+                changedHwnds.Add(placement.Hwnd);
+            }
+
             if (_shouldAnimate?.Invoke() == true && _animator is not null)
             {
-                bool began = _animator.Begin(placement.Hwnd, placement.TargetRect, placement.Kind, placement.BringToFront);
-                if (began)
+                var animation = _animator.Begin(placement.Hwnd, placement.TargetRect, placement.Kind, placement.BringToFront);
+                if (animation != AnimationStartResult.Declined)
                 {
+                    if (animation == AnimationStartResult.Started)
+                        changedHwnds.Add(placement.Hwnd);
                     succeeded++;
                     succeededHwnds.Add(placement.Hwnd);
-                    _logger?.Info($"Placement animated: hwnd={placement.Hwnd}, slot={placement.SlotId}, kind={placement.Kind}, target={placement.TargetRect}, bringToFront={placement.BringToFront}");
+                    _logger?.Info($"Placement animation {animation}: hwnd={placement.Hwnd}, slot={placement.SlotId}, kind={placement.Kind}, target={placement.TargetRect}, bringToFront={placement.BringToFront}");
                     return true;
                 }
 
@@ -243,6 +244,7 @@ public sealed class WindowPlacementService
                 var (maxResult, maxWin32Error) = _positioner.MaximizeWindow(placement.Hwnd);
                 if (maxResult)
                 {
+                    changedHwnds.Add(placement.Hwnd);
                     succeeded++;
                     succeededHwnds.Add(placement.Hwnd);
                     _logger?.Info($"MaximizeWindow succeeded: hwnd={placement.Hwnd}");
@@ -264,6 +266,7 @@ public sealed class WindowPlacementService
 
             if (result)
             {
+                changedHwnds.Add(placement.Hwnd);
                 succeeded++;
                 succeededHwnds.Add(placement.Hwnd);
                 _logger?.Info($"SetWindowPos succeeded: hwnd={placement.Hwnd}, slot={placement.SlotId}, durationMs={elapsedMs}");

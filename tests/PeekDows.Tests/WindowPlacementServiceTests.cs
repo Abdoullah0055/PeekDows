@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
+using PeekDows.Core.Win32;
 using Xunit;
 
 namespace PeekDows.Tests;
@@ -153,9 +154,14 @@ public class WindowPlacementServiceTests
     public void ApplyPlacements_MaximizedWindow_RestoresBeforeSetWindowPos()
     {
         var fake = new FakeWindowPositioner();
-        var restored = new List<IntPtr>();
-        Func<IntPtr, bool> isMaximized = hwnd => { restored.Add(hwnd); return hwnd == (IntPtr)100; };
-        var service = new WindowPlacementService(fake, _ => true, isMaximized, null);
+        var restored = new List<(IntPtr Handle, int Command)>();
+        var service = new WindowPlacementService(fake, _ => true, hwnd => hwnd == (IntPtr)100,
+            null, null, _ => true, (hwnd, command) =>
+            {
+                Assert.Empty(fake.Calls);
+                restored.Add((hwnd, command));
+                return true;
+            });
 
         var placements = new List<WindowPlacement>
         {
@@ -165,7 +171,7 @@ public class WindowPlacementServiceTests
         var result = service.ApplyPlacements(placements);
 
         Assert.Equal(1, result.SucceededCount);
-        Assert.Contains((IntPtr)100, restored);
+        Assert.Equal(((IntPtr)100, NativeMethods.SW_RESTORE), Assert.Single(restored));
         Assert.Single(fake.Calls);
     }
 
@@ -190,11 +196,11 @@ public class WindowPlacementServiceTests
     }
 
     [Fact]
-    public void ApplyPlacements_RestoreFailure_DoesNotStopSetWindowPos()
+    public void ApplyPlacements_RestoreRejected_SkipsSetWindowPos()
     {
         var fake = new FakeWindowPositioner();
-        Func<IntPtr, bool> isMaximized = hwnd => true;
-        var service = new WindowPlacementService(fake, _ => true, isMaximized, null);
+        var service = new WindowPlacementService(fake, _ => true, _ => true,
+            null, null, _ => true, (_, _) => false);
 
         var placements = new List<WindowPlacement>
         {
@@ -203,8 +209,8 @@ public class WindowPlacementServiceTests
 
         var result = service.ApplyPlacements(placements);
 
-        Assert.Equal(1, result.SucceededCount);
-        Assert.Single(fake.Calls);
+        Assert.Equal(1, result.FailedCount);
+        Assert.Empty(fake.Calls);
     }
 
     [Fact]
@@ -252,7 +258,8 @@ public class WindowPlacementServiceTests
         var fake = new FakeWindowPositioner();
         var maximizedChecks = new List<IntPtr>();
         Func<IntPtr, bool> isMaximized = hwnd => { maximizedChecks.Add(hwnd); return hwnd == (IntPtr)777; };
-        var service = new WindowPlacementService(fake, _ => true, isMaximized, null);
+        var service = new WindowPlacementService(fake, _ => true, isMaximized, null,
+            null, _ => true, (_, _) => true);
 
         var placements = new List<WindowPlacement>
         {
@@ -308,11 +315,13 @@ public class WindowPlacementServiceTests
     }
 
     [Fact]
-    public void ApplyPlacements_NonResponsiveWindow_SkipsSetWindowPos()
+    public void ApplyPlacements_NonResponsiveMaximizedWindow_IsNeverRestoredOrMoved()
     {
         var fake = new FakeWindowPositioner();
         var tracker = new UnstableWindowTracker();
-        var svc = CreateHardenedService(fake, tracker, isResponsive: _ => false);
+        var restoreCalls = 0;
+        var svc = new WindowPlacementService(fake, _ => true, _ => true,
+            null, tracker, _ => false, (_, _) => { restoreCalls++; return true; });
 
         var result = svc.ApplyPlacements(new List<WindowPlacement>
         {
@@ -321,7 +330,8 @@ public class WindowPlacementServiceTests
 
         Assert.Equal(0, result.SucceededCount);
         Assert.Equal(1, result.FailedCount);
-        Assert.Empty(fake.Calls); // SetWindowPos never invoked
+        Assert.Empty(fake.Calls);
+        Assert.Equal(0, restoreCalls);
         Assert.True(tracker.IsUnstable((IntPtr)1)); // marked unstable for the cooldown
     }
 
@@ -331,7 +341,8 @@ public class WindowPlacementServiceTests
         var fake = new FakeWindowPositioner();
         var tracker = new UnstableWindowTracker();
         tracker.MarkUnstable((IntPtr)1); // already on the unstable list
-        var svc = CreateHardenedService(fake, tracker, isResponsive: _ => true);
+        var svc = new WindowPlacementService(fake, _ => true, _ => true, null, tracker,
+            _ => true, (_, _) => throw new InvalidOperationException("unstable window must not be restored"));
 
         var result = svc.ApplyPlacements(new List<WindowPlacement>
         {
@@ -341,6 +352,8 @@ public class WindowPlacementServiceTests
         Assert.Equal(0, result.SucceededCount);
         Assert.Equal(1, result.FailedCount);
         Assert.Empty(fake.Calls); // skipped before any SetWindowPos
+        Assert.Contains("unstable cooldown", Assert.Single(result.Errors));
+        Assert.Empty(result.ChangedHwnds);
     }
 
     [Fact]
@@ -405,14 +418,14 @@ public class WindowPlacementServiceTests
     private sealed class FakeWindowAnimator : IWindowAnimator
     {
         public List<(IntPtr Hwnd, Rect Target, PlacementKind Kind, bool BringToFront)> Begins = new();
-        public bool BeginResult = true;
+        public AnimationStartResult BeginResult = AnimationStartResult.Started;
         public int SnapAllCalls;
 
-        public bool Begin(IntPtr hwnd, Rect targetRect, PlacementKind kind, bool bringToFront = false)
+        public AnimationStartResult Begin(IntPtr hwnd, Rect targetRect, PlacementKind kind, bool bringToFront = false)
         {
-            if (!BeginResult) return false;
-            Begins.Add((hwnd, targetRect, kind, bringToFront));
-            return true;
+            if (BeginResult == AnimationStartResult.Started)
+                Begins.Add((hwnd, targetRect, kind, bringToFront));
+            return BeginResult;
         }
 
         public bool IsAnimating(IntPtr hwnd) => Begins.Any(b => b.Hwnd == hwnd);
@@ -468,6 +481,8 @@ public class WindowPlacementServiceTests
         Assert.Equal(1, result.SucceededCount);
         Assert.Empty(fake.MaximizeCalls);
         Assert.Empty(fake.Calls);
+        Assert.Equal((IntPtr)1, Assert.Single(result.SucceededHwnds));
+        Assert.Empty(result.ChangedHwnds);
     }
 
     [Fact]
@@ -500,6 +515,7 @@ public class WindowPlacementServiceTests
         });
 
         Assert.Equal(1, result.SucceededCount);
+        Assert.Equal((IntPtr)1, Assert.Single(result.ChangedHwnds));
         Assert.Single(animator.Begins);
         Assert.Equal(new Rect(0, 0, 800, 600), animator.Begins[0].Target);
         Assert.Equal(PlacementKind.Reposition, animator.Begins[0].Kind);
@@ -528,7 +544,7 @@ public class WindowPlacementServiceTests
     public void AnimationDeclined_FallsBackToInstantPlacement()
     {
         var fake = new FakeWindowPositioner();
-        var animator = new FakeWindowAnimator { BeginResult = false };
+        var animator = new FakeWindowAnimator { BeginResult = AnimationStartResult.Declined };
         var service = CreateAnimatedService(fake, animator, animate: true);
 
         var result = service.ApplyPlacements(new List<WindowPlacement>
@@ -556,7 +572,7 @@ public class WindowPlacementServiceTests
         Assert.Single(fake.Calls);
     }
 
- [Fact]
+    [Fact]
     public void RestoreAndRepositionKind_RoutedToAnimator()
     {
         var fake = new FakeWindowPositioner();

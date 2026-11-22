@@ -48,6 +48,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     private DateTime? _soundEnabledUntil;
     private int _arrangeInProgress;
     private int _placementGeneration;
+    private bool _isPreviewOpen;
 
     private AppSettings _settings;
 
@@ -128,7 +129,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         _hotkeyService.ArrangeNowRequested += OnArrangeNowRequested;
         _hotkeyService.PauseResumeRequested += OnPauseResumeRequested;
         _hotkeyService.UndoRequested += OnUndoArrangeRequested;
-        _historyService = new ArrangeHistoryService(_logger);
+        _historyService = new ArrangeHistoryService(_logger, maximizePolicy: _loneWindowMaximizePolicy);
 
         RegisterConfiguredHotkeys();
 
@@ -144,7 +145,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
         SyncStartWithWindows();
 
         _autoArrangeService = new AutoArrangeService(
-            _discoveryService, _classifier, this, _logger);
+            _discoveryService, _classifier, this, _logger, () => _isPreviewOpen);
 
         if (_settings.AutoArrange)
         {
@@ -309,6 +310,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     {
         if (state == RuntimeState.Paused)
         {
+            _placementGeneration++;
             // Cancellation rule 4 (spec): pausing lands every in-flight tween on its target
             // instantly so nothing keeps moving while paused.
             _animationService.SnapAllToTarget();
@@ -436,6 +438,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
         _settings.LayoutMode = normalized;
         _settingsService.Save(_settings);
+        _placementGeneration++;
         _logger.Info($"LayoutMode changed: {normalized}");
         OnSettingsChanged();
         LayoutModeChanged?.Invoke(normalized);
@@ -514,6 +517,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
     {
         _settings.AllowRepositionMaximizedWindows = !_settings.AllowRepositionMaximizedWindows;
         _settingsService.Save(_settings);
+        _placementGeneration++;
         _logger.Info($"AllowRepositionMaximizedWindows changed: {_settings.AllowRepositionMaximizedWindows}");
 
         AllowRepositionMaximizedWindowsChanged?.Invoke(_settings.AllowRepositionMaximizedWindows);
@@ -525,6 +529,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
         _settings.WindowSizePreset = preset;
         _settingsService.Save(_settings);
+        _placementGeneration++;
         _directionalFocusService.InvalidateLayout();
         _logger.Info($"WindowSizePreset changed: {preset} = {LayoutEngine.GetPresetRatio(preset):P0}");
         WindowSizePresetChanged?.Invoke(preset);
@@ -986,10 +991,12 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
 
         try
         {
+            _isPreviewOpen = preview;
             ExecuteArrangeCore(preview);
         }
         finally
         {
+            _isPreviewOpen = false;
             _arrangeInProgress = 0;
         }
     }
@@ -1139,13 +1146,14 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 var accepted = ShowArrangePreview(placements, eligibleWindows, discovery.GetTopLevelWindows());
                 if (!accepted || IsPaused || !_settings.Enabled || placements.Count == 0)
                     return;
-                if (ReadPreviewStamp() != stamp || !StillMatchesPreview(placements, arrangeable, monitorCache))
+                var validatedDiscovery = discovery.Fork();
+                if (ReadPreviewStamp() != stamp || !StillMatchesPreview(validatedDiscovery, placements, arrangeable, monitorCache))
                 {
                     MessageBox.Show("Windows or screens changed. Open the preview again.", "PeekDows",
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
-                _loneWindowMaximizePolicy.Adopt(policy);
+                discovery = validatedDiscovery;
             }
 
             if (placements.Count == 0)
@@ -1191,27 +1199,39 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             var targets = effectivePlacements.Select(p => p.Hwnd).ToHashSet();
             var snapshot = _historyService.Capture(arrangeable.Where(w => targets.Contains(w.Hwnd)));
             var result = _placementService.ApplyPlacements(effectivePlacements);
-            _historyService.Commit(snapshot, result.SucceededHwnds);
+            _historyService.Commit(snapshot, result.ChangedHwnds);
 
-            foreach (var p in result.SucceededHwnds)
+            var acceptedHwnds = result.SucceededHwnds.ToHashSet();
+            if (preview && _autoArrangeService.AcknowledgePreviewPlacement(discovery, result))
             {
-                var kind = placements.First(pl => pl.Hwnd == p).Kind;
-                if (kind == PlacementKind.Maximize)
+                _loneWindowMaximizePolicy.Adopt(policy);
+            }
+
+            var changedHwnds = result.ChangedHwnds.ToHashSet();
+            foreach (var placement in placements)
+            {
+                if (!changedHwnds.Contains(placement.Hwnd))
                 {
-                    _loneWindowMaximizePolicy.NotifyMaximizedByPeekDows(p);
+                    customMonitors.Remove(placement.Hwnd);
+                    continue;
                 }
-                else if (kind == PlacementKind.RestoreAndReposition)
+
+                if (placement.Kind == PlacementKind.Maximize && acceptedHwnds.Contains(placement.Hwnd))
                 {
-                    _loneWindowMaximizePolicy.NotifyRestoredByPeekDows(p);
+                    _loneWindowMaximizePolicy.NotifyMaximizedByPeekDows(placement.Hwnd);
+                }
+                else if (placement.Kind == PlacementKind.RestoreAndReposition)
+                {
+                    _loneWindowMaximizePolicy.NotifyRestoredByPeekDows(placement.Hwnd);
                 }
             }
 
-            var succeededPlacements = placements.Where(p => result.SucceededHwnds.Contains(p.Hwnd)).ToList();
+            var succeededPlacements = placements.Where(p => acceptedHwnds.Contains(p.Hwnd)).ToList();
             UpdateStackedZones(succeededPlacements, arrangeable, GetCachedMonitor);
             var topToBottom = new List<IntPtr>(succeededPlacements.Count);
             NativeMethods.EnumWindows((hwnd, _) =>
             {
-                if (result.SucceededHwnds.Contains(hwnd)) topToBottom.Add(hwnd);
+                if (acceptedHwnds.Contains(hwnd)) topToBottom.Add(hwnd);
                 return true;
             }, IntPtr.Zero);
             _directionalFocusRegistry.UpdateFromPlacements(succeededPlacements, _monitorService,
@@ -1240,7 +1260,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             if (_settings.AnimateWindowTransitions || effectivePlacements.Any(p => IsCustomSlot(p.SlotId)))
             {
                 var verifyTargets = effectivePlacements.Where(p => !IsCustomSlot(p.SlotId) ||
-                    result.SucceededHwnds.Contains(p.Hwnd)).ToArray();
+                    acceptedHwnds.Contains(p.Hwnd)).ToArray();
                 var verifyArrangeable = arrangeable;
                 System.Windows.Forms.Timer? verifyTimer = null;
                 verifyTimer = new System.Windows.Forms.Timer { Interval = 400 };
@@ -1252,8 +1272,9 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                         verifyTimer?.Dispose();
                     }
                     catch { }
-                    if (generation == _placementGeneration)
-                        RunPlacementVerification(verifyTargets, verifyArrangeable, customMonitors);
+                    if (generation != _placementGeneration || IsPaused || !_settings.Enabled)
+                        return;
+                    RunPlacementVerification(verifyTargets, verifyArrangeable, customMonitors);
                 };
                 verifyTimer.Start();
             }

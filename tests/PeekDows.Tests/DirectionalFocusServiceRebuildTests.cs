@@ -580,7 +580,7 @@ public class DirectionalFocusServiceRebuildTests
     private sealed class FakeWindowAnimator : IWindowAnimator
     {
         public HashSet<IntPtr> Animating = new();
-        public bool Begin(IntPtr hwnd, Rect targetRect, PlacementKind kind, bool bringToFront = false) => true;
+        public AnimationStartResult Begin(IntPtr hwnd, Rect targetRect, PlacementKind kind, bool bringToFront = false) => AnimationStartResult.Started;
         public bool IsAnimating(IntPtr hwnd) => Animating.Contains(hwnd);
         public void SnapAllToTarget() { }
     }

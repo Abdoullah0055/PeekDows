@@ -30,11 +30,13 @@ public class WindowDiscoveryService
 
     public WindowDiscoveryService Fork()
     {
-        return new WindowDiscoveryService(_windowSource)
-        {
-            _knownWindows = _knownWindows.ToDictionary(entry => entry.Key, entry => entry.Value.Copy())
-        };
+        var fork = new WindowDiscoveryService(_windowSource);
+        fork.AdoptBaseline(this);
+        return fork;
     }
+
+    public void AdoptBaseline(WindowDiscoveryService source) =>
+        _knownWindows = source._knownWindows.ToDictionary(entry => entry.Key, entry => entry.Value.Copy());
 
     public WindowDiff Refresh(WindowClassifier classifier)
     {

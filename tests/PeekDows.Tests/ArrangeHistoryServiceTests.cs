@@ -53,7 +53,7 @@ public sealed class ArrangeHistoryServiceTests
     }
 
     [Fact]
-    public void UndoCancelsOnlySuccessfulPlacementsBeforeRestoringOriginalState()
+    public void UndoCancelsOnlyChangedWindowsBeforeRestoringOriginalState()
     {
         var history = LiveService();
         var initial = new Rect(10, 20, 800, 600);
@@ -68,6 +68,65 @@ public sealed class ArrangeHistoryServiceTests
 
         Assert.Equal(((IntPtr)1, 0), Assert.Single(cancelled));
         Assert.Equal(initial, Assert.Single(fake.Calls).Rect);
+    }
+
+    [Fact]
+    public void UndoAfterAcceptedRestoreAndFailedMove_RemaximizesOnlyTheChangedWindow()
+    {
+        var history = LiveService();
+        var initial = new Rect(0, 0, 1920, 1080);
+        var snapshot = history.Capture([Window(1, initial, maximized: true), Window(2, initial)]);
+        var positioner = new FakeWindowPositioner([(IntPtr)1, (IntPtr)2]);
+        var placement = new WindowPlacementService(positioner, _ => true, hwnd => hwnd == (IntPtr)1,
+            null, null, _ => true, (_, _) => true);
+        var target = new Rect(0, 0, 960, 540);
+
+        var result = placement.ApplyPlacements([
+            new() { Hwnd = (IntPtr)1, TargetRect = target, Kind = PlacementKind.RestoreAndReposition },
+            new() { Hwnd = (IntPtr)2, TargetRect = target }
+        ]);
+        history.Commit(snapshot, result.ChangedHwnds);
+
+        Assert.Empty(result.SucceededHwnds);
+        Assert.Equal((IntPtr)1, Assert.Single(result.ChangedHwnds));
+        Assert.True(history.CanUndo);
+        var undo = new FakeWindowPositioner();
+        history.Undo(undo);
+        Assert.Equal(((IntPtr)1, initial, false), Assert.Single(undo.Calls));
+        Assert.Equal((IntPtr)1, Assert.Single(undo.MaximizeCalls));
+    }
+
+    [Fact]
+    public void UndoRestoresOriginalMaximizeOwnershipOnlyForAcceptedWindowIdentities()
+    {
+        var policy = new LoneWindowMaximizePolicy();
+        var owned = (IntPtr)1;
+        var userMaximized = (IntPtr)2;
+        var normal = (IntPtr)3;
+        var rejected = (IntPtr)4;
+        var gone = (IntPtr)5;
+        policy.NotifyMaximizedByPeekDows(owned);
+        policy.NotifyMaximizedByPeekDows(rejected);
+        policy.NotifyMaximizedByPeekDows(gone);
+        var history = new ArrangeHistoryService(isWindowValid: hwnd => hwnd != gone, maximizePolicy: policy);
+        var rect = new Rect(0, 0, 1920, 1080);
+        var snapshot = history.Capture([Window(1, rect, maximized: true), Window(2, rect, maximized: true),
+            Window(3, rect), Window(4, rect, maximized: true), Window(5, rect, maximized: true)]);
+        history.Commit(snapshot, [owned, userMaximized, normal, rejected, gone]);
+        policy.NotifyRestoredByPeekDows(owned);
+        policy.NotifyMaximizedByPeekDows(normal);
+        policy.NotifyRestoredByPeekDows(rejected);
+        policy.NotifyRestoredByPeekDows(gone);
+
+        var cancelled = new List<IntPtr>();
+        history.Undo(new FakeWindowPositioner([rejected]), cancelled.Add);
+
+        Assert.True(policy.WasMaximizedByPeekDows(owned));
+        Assert.False(policy.WasMaximizedByPeekDows(userMaximized));
+        Assert.False(policy.WasMaximizedByPeekDows(normal));
+        Assert.False(policy.WasMaximizedByPeekDows(rejected));
+        Assert.False(policy.WasMaximizedByPeekDows(gone));
+        Assert.DoesNotContain(gone, cancelled);
     }
 
     [Fact]

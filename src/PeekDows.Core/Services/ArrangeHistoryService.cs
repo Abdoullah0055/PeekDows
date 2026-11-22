@@ -13,6 +13,7 @@ public sealed class ArrangeHistoryService
     private readonly FileLogger? _logger;
     private readonly Func<IntPtr, bool> _isWindowValid;
     private readonly bool _useNativePlacement;
+    private readonly LoneWindowMaximizePolicy? _maximizePolicy;
     private readonly List<Entry[]> _history = new();
     private readonly object _lock = new();
 
@@ -22,14 +23,16 @@ public sealed class ArrangeHistoryService
         internal Entry[] Entries { get; }
     }
 
-    internal readonly record struct Entry(IntPtr Handle, Rect Rect, bool WasMaximized,
+    internal readonly record struct Entry(IntPtr Handle, Rect Rect, bool WasMaximized, bool WasMaximizedByPeekDows,
         uint Process, uint Thread, string ClassName, WINDOWPLACEMENT? NativePlacement);
 
-    public ArrangeHistoryService(FileLogger? logger = null, Func<IntPtr, bool>? isWindowValid = null)
+    public ArrangeHistoryService(FileLogger? logger = null, Func<IntPtr, bool>? isWindowValid = null,
+        LoneWindowMaximizePolicy? maximizePolicy = null)
     {
         _logger = logger;
         _useNativePlacement = isWindowValid is null;
         _isWindowValid = isWindowValid ?? NativeMethods.IsWindow;
+        _maximizePolicy = maximizePolicy;
     }
 
     public bool CanUndo
@@ -45,9 +48,11 @@ public sealed class ArrangeHistoryService
             if (window is null || window.Hwnd == IntPtr.Zero)
                 continue;
 
+            bool ownedMaximize = _maximizePolicy?.WasMaximizedByPeekDows(window.Hwnd) == true;
             if (!_useNativePlacement)
             {
-                entries.Add(new Entry(window.Hwnd, window.CurrentRect, window.IsMaximized, 0, 0, "", null));
+                entries.Add(new Entry(window.Hwnd, window.CurrentRect, window.IsMaximized,
+                    window.IsMaximized && ownedMaximize, 0, 0, "", null));
                 continue;
             }
 
@@ -59,8 +64,9 @@ public sealed class ArrangeHistoryService
             if (!NativeMethods.GetWindowPlacement(window.Hwnd, ref native))
                 continue;
             native.Flags |= AsyncWindowPlacement;
-            entries.Add(new Entry(window.Hwnd, window.CurrentRect, window.IsMaximized, process, thread,
-                ReadClass(window.Hwnd), native));
+            bool wasMaximized = native.ShowCommand == NativeMethods.SW_MAXIMIZE;
+            entries.Add(new Entry(window.Hwnd, window.CurrentRect, wasMaximized,
+                wasMaximized && ownedMaximize, process, thread, ReadClass(window.Hwnd), native));
         }
         return new Snapshot(entries.ToArray());
     }
@@ -105,7 +111,6 @@ public sealed class ArrangeHistoryService
         {
             try
             {
-                beforeRestore?.Invoke(entry.Handle);
                 if (!_isWindowValid(entry.Handle))
                     continue;
 
@@ -115,20 +120,34 @@ public sealed class ArrangeHistoryService
                     if (thread != entry.Thread || process != entry.Process || ReadClass(entry.Handle) != entry.ClassName)
                         continue;
 
-                    if (!NativeMethods.SetWindowPlacement(entry.Handle, in native))
+                    beforeRestore?.Invoke(entry.Handle);
+                    if (NativeMethods.SetWindowPlacement(entry.Handle, in native))
+                        RestoreMaximizeOwnership(entry);
+                    else
                         _logger?.Warn($"Undo placement failed for hwnd={entry.Handle}: {Marshal.GetLastWin32Error()}");
                     continue;
                 }
 
-                positioner.SetWindowPosition(entry.Handle, entry.Rect);
+                beforeRestore?.Invoke(entry.Handle);
+                bool accepted = positioner.SetWindowPosition(entry.Handle, entry.Rect).success;
                 if (entry.WasMaximized)
-                    positioner.MaximizeWindow(entry.Handle);
+                    accepted = positioner.MaximizeWindow(entry.Handle).success && accepted;
+                if (accepted)
+                    RestoreMaximizeOwnership(entry);
             }
             catch (Exception ex)
             {
                 _logger?.Warn($"Undo failed for hwnd={entry.Handle}: {ex.Message}");
             }
         }
+    }
+
+    private void RestoreMaximizeOwnership(Entry entry)
+    {
+        if (entry.WasMaximizedByPeekDows)
+            _maximizePolicy?.NotifyMaximizedByPeekDows(entry.Handle);
+        else
+            _maximizePolicy?.NotifyRestoredByPeekDows(entry.Handle);
     }
 
     private static string ReadClass(IntPtr hwnd)
