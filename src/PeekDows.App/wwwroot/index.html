@@ -53,28 +53,28 @@
           </div>
           <div class="card">
             <div class="row">
-              <div class="txt"><div class="t">Enable PeekDows</div><div class="d">Master switch. When off, nothing is ever moved.</div></div>
-              <label class="switch"><input type="checkbox" data-key="enabled"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="enabled-name">Enable PeekDows</div><div class="d" id="enabled-description">Master switch. When off, nothing is ever moved.</div></div>
+              <label class="switch"><input type="checkbox" data-key="enabled" aria-labelledby="enabled-name" aria-describedby="enabled-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
             <div class="row">
-              <div class="txt"><div class="t">Auto arrange</div><div class="d">Continuously monitor windows and arrange them as they open or close.</div></div>
-              <label class="switch"><input type="checkbox" data-key="autoArrange"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="autoArrange-name">Auto arrange</div><div class="d" id="autoArrange-description">Continuously monitor windows and arrange them as they open or close.</div></div>
+              <label class="switch"><input type="checkbox" data-key="autoArrange" aria-labelledby="autoArrange-name" aria-describedby="autoArrange-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
             <div class="row">
-              <div class="txt"><div class="t">Animate window transitions</div><div class="d">150 ms ease-out tween when windows move into their slots.</div></div>
-              <label class="switch"><input type="checkbox" data-key="animate"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="animate-name">Animate window transitions</div><div class="d" id="animate-description">150 ms ease-out tween when windows move into their slots.</div></div>
+              <label class="switch"><input type="checkbox" data-key="animate" aria-labelledby="animate-name" aria-describedby="animate-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
             <div class="row">
-              <div class="txt"><div class="t">Start with Windows</div><div class="d">Create a shortcut in the Startup folder.</div></div>
-              <label class="switch"><input type="checkbox" data-key="startWithWindows"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="startWithWindows-name">Start with Windows</div><div class="d" id="startWithWindows-description">Create a shortcut in the Startup folder.</div></div>
+              <label class="switch"><input type="checkbox" data-key="startWithWindows" aria-labelledby="startWithWindows-name" aria-describedby="startWithWindows-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
             <div class="row">
-              <div class="txt"><div class="t">Arrange on startup</div><div class="d">Run one arrange as soon as PeekDows launches.</div></div>
-              <label class="switch"><input type="checkbox" data-key="arrangeOnStartup"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="arrangeOnStartup-name">Arrange on startup</div><div class="d" id="arrangeOnStartup-description">Run one arrange as soon as PeekDows launches.</div></div>
+              <label class="switch"><input type="checkbox" data-key="arrangeOnStartup" aria-labelledby="arrangeOnStartup-name" aria-describedby="arrangeOnStartup-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
             <div class="row">
-              <div class="txt"><div class="t">Show tray notifications</div><div class="d">Occasional tray balloon messages (off by default).</div></div>
-              <label class="switch"><input type="checkbox" data-key="showTrayNotifications"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="showTrayNotifications-name">Show tray notifications</div><div class="d" id="showTrayNotifications-description">Occasional tray balloon messages (off by default).</div></div>
+              <label class="switch"><input type="checkbox" data-key="showTrayNotifications" aria-labelledby="showTrayNotifications-name" aria-describedby="showTrayNotifications-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
           </div>
           <div class="card">
@@ -92,8 +92,8 @@
           </div>
           <div class="card">
             <div class="row">
-              <div class="txt"><div class="t">Directional focus</div><div class="d">Hold <span class="kbd">Ctrl</span>+<span class="kbd">Win</span> and flick the mouse toward a screen zone to focus that slot. Any other key cancels.</div></div>
-              <label class="switch"><input type="checkbox" data-key="directionalFocus"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="directionalFocus-name">Directional focus</div><div class="d" id="directionalFocus-description">Hold <span class="kbd">Ctrl</span>+<span class="kbd">Win</span> and flick the mouse toward a screen zone to focus that slot. Any other key cancels.</div></div>
+              <label class="switch"><input type="checkbox" data-key="directionalFocus" aria-labelledby="directionalFocus-name" aria-describedby="directionalFocus-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
             <div class="row">
               <div class="txt"><div class="t">Directional focus threshold</div><div class="d">How far the mouse must travel (px) before a zone is triggered.</div></div>
@@ -110,8 +110,8 @@
               </div>
             </div>
             <div class="row">
-              <div class="txt"><div class="t">Show app icons in the overlay</div><div class="d">Show the app icon or an initial in each direction.</div></div>
-              <label class="switch"><input type="checkbox" data-key="overlayShowIcons"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="overlayShowIcons-name">Show app icons in the overlay</div><div class="d" id="overlayShowIcons-description">Show the app icon or an initial in each direction.</div></div>
+              <label class="switch"><input type="checkbox" data-key="overlayShowIcons" aria-labelledby="overlayShowIcons-name" aria-describedby="overlayShowIcons-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
           </div>
         </section>
@@ -168,8 +168,8 @@
           </div>
           <div class="card">
             <div class="row" style="border-top:none">
-              <div class="txt"><div class="t">Reposition maximized windows</div><div class="d">When off (default), windows you maximized yourself are never touched.</div></div>
-              <label class="switch"><input type="checkbox" data-key="allowRepositionMaximized"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="allowRepositionMaximized-name">Reposition maximized windows</div><div class="d" id="allowRepositionMaximized-description">When off (default), windows you maximized yourself are never touched.</div></div>
+              <label class="switch"><input type="checkbox" data-key="allowRepositionMaximized" aria-labelledby="allowRepositionMaximized-name" aria-describedby="allowRepositionMaximized-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
           </div>
           <div class="card">
@@ -184,8 +184,8 @@
           </div>
           <div class="card">
             <div class="row" style="border-top:none">
-              <div class="txt"><div class="t">Arrange sound</div><div class="d">Short chime played after each successful arrange. Off by default.</div></div>
-              <label class="switch"><input type="checkbox" data-key="soundEnabled"><span class="track"></span><span class="thumb"></span></label>
+              <div class="txt"><div class="t" id="soundEnabled-name">Arrange sound</div><div class="d" id="soundEnabled-description">Short chime played after each successful arrange. Off by default.</div></div>
+              <label class="switch"><input type="checkbox" data-key="soundEnabled" aria-labelledby="soundEnabled-name" aria-describedby="soundEnabled-description"><span class="track"></span><span class="thumb"></span></label>
             </div>
             <div class="row" style="display:block">
               <div class="txt"><div class="t">Preset</div><div class="d">Factory chimes (click previews the sound).</div></div>

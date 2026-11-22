@@ -20,8 +20,9 @@ let reportedDirty = false;
 // User-imported sounds are refreshed independently from setting edits.
 let userSounds = [];
 
-// Read-only Windows snapshot rows (filled on Refresh, never part of the draft).
-let windowsRows = [];
+// Read-only Windows rows, independent of the settings draft.
+let windowsRows = null;
+let windowsRequested = false;
 
 const $ = (id) => document.getElementById(id);
 const post = (msg) => {
@@ -53,10 +54,16 @@ window.chrome?.webview?.addEventListener("message", (event) => {
   else if (msg.type === "runtimeStatus") updateRuntimeStatus(msg.data);
   else if (msg.type === "soundFile") onSoundFile(msg);
   else if (msg.type === "soundError") onSoundError(msg.operation);
-  else if (msg.type === "windows") { windowsRows = msg.data ?? []; renderWindowsRows(); }
+  else if (msg.type === "windows") {
+    windowsRows = msg.data ?? [];
+    renderWindowsRows();
+    renderIgnoredSearch();
+  }
 });
 
-function adoptSnapshot(data, lateValues = {}, lateHotkeys = {}) {
+function adoptSnapshot(data, lateValues = {}, lateHotkeys = {}, runtime = data.runtime) {
+  const refreshWindows = data !== state.snapshot &&
+    (windowsRows !== null || windowsRequested || $("page-windows").classList.contains("active"));
   deferredSnapshot = null;
   $("externalBanner").hidden = true;
   state.snapshot = data;
@@ -75,7 +82,7 @@ function adoptSnapshot(data, lateValues = {}, lateHotkeys = {}) {
   state.draft = pick(data);
   Object.assign(state.draft, lateValues);
   Object.assign(state.draft.hotkeys, lateHotkeys);
-  updateRuntimeStatus(runtimeStatus ?? data.runtime);
+  updateRuntimeStatus(runtime);
   setControlsFrom(state.draft);
   syncDirty();
   $("versionLine").textContent = `v${data.appVersion} · settings schema v${data.version}`;
@@ -88,6 +95,7 @@ function adoptSnapshot(data, lateValues = {}, lateHotkeys = {}) {
   renderHintModeSelection(state.draft.focusHintMode);
   renderSoundSelection(state.draft.soundName);
   renderUserSounds();
+  if (refreshWindows) requestWindows();
 }
 
 function onSoundFile(msg) {
@@ -118,8 +126,8 @@ function onSoundError(operation) {
 }
 
 function onExternalChange(data) {
-  updateRuntimeStatus(data.runtime);
   if (state.dirty || pendingSave) {
+    updateRuntimeStatus(data.runtime);
     deferredSnapshot = data;
     $("externalBanner").hidden = false;
   } else {
@@ -131,16 +139,23 @@ function onExternalChange(data) {
 function updateRuntimeStatus(runtime) {
   if (!runtime) return;
   runtimeStatus = runtime;
-  $("statusFoot").textContent = runtime.isPaused ? runtime.pauseDescription ?? "Paused" : "Running";
-  $("statusFoot").parentElement.classList.toggle("paused", runtime.isPaused);
-  $("pauseFor").disabled = false;
-  $("resume").hidden = !runtime.isPaused;
+  const enabled = isRuntimeEnabled();
+  $("statusFoot").textContent = !enabled ? "Disabled" :
+    runtime.isPaused ? runtime.pauseDescription ?? "Paused" : "Running";
+  $("statusFoot").parentElement.classList.toggle("inactive", !enabled || !!runtime.isPaused);
+  $("pauseDuration").disabled = !enabled;
+  $("pauseFor").disabled = !enabled;
+  $("resume").hidden = !enabled || !runtime.isPaused;
   syncLayoutActions();
+}
+
+function isRuntimeEnabled() {
+  return runtimeStatus?.enabled ?? state.snapshot?.enabled ?? false;
 }
 
 function syncLayoutActions() {
   for (const id of ["editLayoutProfiles", "importLayout"]) $(id).disabled = state.dirty;
-  $("previewArrange").disabled = state.dirty || !!runtimeStatus?.isPaused || !state.snapshot?.enabled;
+  $("previewArrange").disabled = state.dirty || !!runtimeStatus?.isPaused || !isRuntimeEnabled();
 }
 
 function onApplied(msg) {
@@ -246,15 +261,23 @@ function isIgnoredInList(proc) {
 }
 
 function isIgnoreRule(rule, proc) {
-  return sameProc(rule.process, proc) && String(rule.action).toLowerCase() === "ignore";
+  return ruleProcess(rule.process) === ruleProcess(proc) && String(rule.action).trim().toLowerCase() === "ignore";
+}
+
+function ruleProcess(proc) {
+  return String(proc ?? "").trim().toLowerCase().replace(/\.exe$/, "").trim();
+}
+
+function isIgnoredByGlobalRule(proc) {
+  return (state.draft?.appRules ?? []).some(rule => isIgnoreRule(rule, proc));
 }
 
 function isIgnored(proc) {
-  return isIgnoredInList(proc) || (state.draft?.appRules ?? []).some(rule => isIgnoreRule(rule, proc));
+  return isIgnoredInList(proc) || isIgnoredByGlobalRule(proc);
 }
 
 function addIgnored(proc) {
-  if (!state.draft || !proc || isIgnored(proc)) return;
+  if (!state.draft || !proc || isIgnoredInList(proc)) return;
   state.draft.ignoredProcesses = [...(state.draft.ignoredProcesses ?? []), proc];
   syncDirty();
   renderIgnoredList();
@@ -264,8 +287,8 @@ function addIgnored(proc) {
 
 let pendingUnignore = null; // { proc } while the confirm modal is open
 
-function askUnignore(proc, trigger) {
-  pendingUnignore = { proc, trigger };
+function askUnignore(proc, trigger, removeGlobalRule = true) {
+  pendingUnignore = { proc, trigger, removeGlobalRule };
   $("unignoreName").textContent = proc;
   $("unignoreModalBack").hidden = false;
   $("unignoreCancel").focus();
@@ -332,9 +355,8 @@ function renderIgnoredSearch() {
   box.innerHTML = "";
   const q = input.value.trim().toLowerCase();
   if (!q) return;
-  if (windowsRows.length === 0) {
-    post({ type: "requestWindows" });
-    box.innerHTML = '<div class="empty">Loading open windows… type again in a moment.</div>';
+  if (windowsRows === null) {
+    box.innerHTML = '<div class="empty">Loading open windows…</div>';
     return;
   }
   const seen = new Set();
@@ -358,9 +380,12 @@ function renderIgnoredSearch() {
 
 const ignoredSearch = $("ignoredSearch");
 if (ignoredSearch) {
-  ignoredSearch.addEventListener("input", renderIgnoredSearch);
+  ignoredSearch.addEventListener("input", () => {
+    if (ignoredSearch.value.trim() && windowsRows === null && !windowsRequested) requestWindows();
+    renderIgnoredSearch();
+  });
   ignoredSearch.addEventListener("focus", () => {
-    if (windowsRows.length === 0) post({ type: "requestWindows" });
+    if (windowsRows === null) requestWindows();
   });
 }
 
@@ -370,7 +395,9 @@ if (unignoreConfirm) unignoreConfirm.addEventListener("click", () => {
     const proc = pendingUnignore.proc;
     state.draft.ignoredProcesses =
       (state.draft.ignoredProcesses ?? []).filter((p) => !sameProc(p, proc));
-    state.draft.appRules = (state.draft.appRules ?? []).filter(rule => !isIgnoreRule(rule, proc));
+    if (pendingUnignore.removeGlobalRule) {
+      state.draft.appRules = (state.draft.appRules ?? []).filter(rule => !isIgnoreRule(rule, proc));
+    }
     syncDirty();
     renderIgnoredList();
     renderIgnoredSearch();
@@ -482,6 +509,11 @@ if (hotkeysReset) {
 }
 
 // ---------- windows snapshot (read-only + "copy process to draft") ----------
+function requestWindows() {
+  windowsRequested = true;
+  post({ type: "requestWindows" });
+}
+
 function renderWindowsRows() {
   const filterEl = $("windowsFilter");
   const q = ((filterEl && filterEl.value) || "").toLowerCase();
@@ -489,15 +521,13 @@ function renderWindowsRows() {
   if (!tb) return;
   tb.innerHTML = "";
   const occupied = collectPinnedSlots();
-  for (const w of windowsRows) {
+  for (const w of windowsRows ?? []) {
     if (q && !((w.title + " " + w.process).toLowerCase().includes(q))) continue;
     const tr = document.createElement("tr");
     const tdT = document.createElement("td"); tdT.textContent = w.title;
     const tdP = document.createElement("td"); tdP.textContent = w.process;
     const tdE = document.createElement("td");
-    tdE.textContent = isIgnored(w.process) ? "Ignored" :
-      w.reason === "ignored-process" && !BUILTIN_PROCESSES.has(String(w.process).toLowerCase())
-        ? "Check after Save" : w.eligible ? "Yes" : (w.reason || "No");
+    tdE.textContent = windowEligibilityLabel(w);
     const tdB = document.createElement("td");
     tdB.append(renderIgnoreButton(w));
     const tdPin = document.createElement("td");
@@ -508,9 +538,25 @@ function renderWindowsRows() {
   }
 }
 
+function isWindowProcessIgnored(w) {
+  return isIgnoredInList(w.process) || (!w.hasProfileRule && isIgnoredByGlobalRule(w.process));
+}
+
+function windowEligibilityLabel(w) {
+  if (w.reason === "system") return w.reason;
+  if (isWindowProcessIgnored(w)) return "Ignored";
+  if (w.reason === "ignored-by-profile") return "Ignored by display profile";
+  if (w.reason === "ignored-by-rule" ||
+      (w.reason === "ignored-process" && !BUILTIN_PROCESSES.has(String(w.process).toLowerCase())))
+    return "Check after Save";
+  if (w.reason === "maximized") return "Maximized";
+  if (w.reason === "monitor-unavailable") return "Display unavailable";
+  return w.eligible ? "Yes" : w.reason || "No";
+}
+
 function renderIgnoreButton(w) {
   const locked = !w.process || BUILTIN_PROCESSES.has(String(w.process).toLowerCase()) || w.reason === "system";
-  const ignored = locked ? !!w.process : isIgnored(w.process);
+  const ignored = locked ? !!w.process : isWindowProcessIgnored(w);
   const button = document.createElement("button");
   if (w.hwnd) button.id = `ignore-${w.hwnd}`;
   button.className = "btn ignore-toggle";
@@ -522,7 +568,7 @@ function renderIgnoreButton(w) {
   button.setAttribute("aria-pressed", String(ignored));
   button.addEventListener("click", () => {
     if (locked) return;
-    if (isIgnored(w.process)) askUnignore(w.process, button);
+    if (isWindowProcessIgnored(w)) askUnignore(w.process, button, !w.hasProfileRule);
     else addIgnored(w.process);
   });
   return button;
@@ -631,7 +677,7 @@ function renderAppRules() {
 }
 
 const windowsRefresh = $("windowsRefresh");
-if (windowsRefresh) windowsRefresh.addEventListener("click", () => post({ type: "requestWindows" }));
+if (windowsRefresh) windowsRefresh.addEventListener("click", requestWindows);
 const windowsFilter = $("windowsFilter");
 if (windowsFilter) windowsFilter.addEventListener("input", renderWindowsRows);
 
@@ -857,7 +903,8 @@ $("cancelBtn").addEventListener("click", () => {
   if (pendingSave) return;
   stopHotkeyCapture();
   if (pendingUnignore) closeUnignoreModal(false);
-  if (state.snapshot) adoptSnapshot(deferredSnapshot ?? state.snapshot);
+  // These snapshots may predate a pause or resume received while editing.
+  if (state.snapshot) adoptSnapshot(deferredSnapshot ?? state.snapshot, {}, {}, runtimeStatus);
 });
 
 $("openLog").addEventListener("click", () => post({ type: "openLogFile" }));
@@ -871,7 +918,7 @@ for (const nav of document.querySelectorAll(".navitem[data-page]")) {
     nav.classList.add("active");
     document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
     $(`page-${nav.dataset.page}`).classList.add("active");
-    if (nav.dataset.page === "windows" && windowsRows.length === 0) post({ type: "requestWindows" });
+    if (nav.dataset.page === "windows" && windowsRows === null) requestWindows();
   });
 }
 

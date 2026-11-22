@@ -85,7 +85,12 @@ public sealed partial class SettingsBridge
     public string BuildRuntimeStatusMessage()
         => JsonSerializer.Serialize(new { type = "runtimeStatus", data = RuntimeStatus() }, WriteOptions);
 
-    private object RuntimeStatus() => new { isPaused = _controller.IsPaused, pauseDescription = _controller.PauseDescription };
+    private object RuntimeStatus() => new
+    {
+        enabled = _controller.CurrentSettings.Enabled,
+        isPaused = _controller.IsPaused,
+        pauseDescription = _controller.PauseDescription
+    };
 
     private object SnapshotData()
     {

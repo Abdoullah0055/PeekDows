@@ -57,9 +57,9 @@ public partial class PeekDowsAppContext
     {
         var candidates = windows.ToDictionary(window => window.Hwnd);
         var live = discovery.Refresh(_classifier).Current.ToDictionary(window => window.Hwnd);
-        if (!candidates.Keys.ToHashSet().SetEquals(live.Keys.Where(hwnd =>
-            !live[hwnd].IsMaximized || _settings.AllowRepositionMaximizedWindows ||
-            _loneWindowMaximizePolicy.WasMaximizedByPeekDows(hwnd))))
+        if (!candidates.Keys.ToHashSet().SetEquals(live.Values
+            .Where(window => CanRepositionWindow(window.Hwnd, window.IsMaximized, _settings, _loneWindowMaximizePolicy))
+            .Select(window => window.Hwnd)))
             return false;
         foreach (var placement in placements)
         {
@@ -306,7 +306,8 @@ public partial class PeekDowsAppContext
             if (NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, area.Left, area.Top, area.Width, area.Height, (uint)flags))
                 moved++;
         }
-        if (moved > 0) _trayController.NotifyCustomFallback(moved);
+        if (moved > 0 && _settings.ShowTrayNotifications)
+            _trayController.NotifyCustomFallback(moved);
     }
 
     private void ShowLayoutError(Exception ex)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using PeekDows.Core.Models;
 using PeekDows.Core.Services;
@@ -9,6 +10,57 @@ namespace PeekDows.Tests;
 
 public class MultiMonitorLayoutServiceTests
 {
+    [Fact]
+    public void MonitorProfilesOverrideDefaultRulesWithOrWithoutExeSuffix()
+    {
+        var left = new MonitorInfo { Handle = (IntPtr)1, ProfileId = "left", WorkArea = new(0, 0, 1200, 900) };
+        var right = new MonitorInfo { Handle = (IntPtr)2, ProfileId = "right", WorkArea = new(1200, 0, 1200, 900) };
+        var resolver = new FakeMonitorResolver(new() { [(IntPtr)1] = left, [(IntPtr)2] = right }, left);
+        var service = new MultiMonitorLayoutService(resolver, new LayoutEngine());
+        var settings = new AppSettings
+        {
+            AppRules = [new() { Process = "notes.exe", Action = "ignore" }],
+            MonitorProfiles = new()
+            {
+                ["left"] = new("Grid", [new() { Process = "notes.exe", Action = "ignore" }]),
+                ["right"] = new("Grid", [new() { Process = "NOTES", Action = "pin", Slot = "A" }])
+            }
+        };
+        var placements = service.CalculatePlacementsByMonitor([
+            new ManagedWindow { Hwnd = (IntPtr)1, ProcessName = "notes.exe" },
+            new ManagedWindow { Hwnd = (IntPtr)2, ProcessName = "notes.exe" }
+        ], settings);
+
+        Assert.Equal((IntPtr)2, Assert.Single(placements).Hwnd);
+    }
+
+    [Fact]
+    public void ArrangeLog_KeepsMonitorDetailsWithoutWindowTitles()
+    {
+        var left = new MonitorInfo { Handle = (IntPtr)1, WorkArea = new Rect(0, 0, 1200, 900) };
+        var unresolved = new MonitorInfo { IsFallback = true };
+        var resolver = new FakeMonitorResolver(new() { [(IntPtr)1] = left, [(IntPtr)2] = unresolved }, left);
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            using var logger = new FileLogger(directory.FullName);
+            var service = new MultiMonitorLayoutService(resolver, new LayoutEngine(), logger);
+            service.CalculatePlacementsByMonitor([
+                new ManagedWindow { Hwnd = (IntPtr)1, Title = "PEEKDOWS_AUDIT_PRIVATE_1247", ProcessName = "notes.exe" },
+                new ManagedWindow { Hwnd = (IntPtr)2, Title = "PEEKDOWS_AUDIT_UNRESOLVED", ProcessName = "other.exe" }
+            ], new AppSettings());
+            logger.Flush();
+            var log = File.ReadAllText(logger.LogFilePath);
+            Assert.DoesNotContain("PEEKDOWS_AUDIT_", log);
+            Assert.Contains($"hwnd=1, process=notes.exe, workArea={left.WorkArea}", log);
+            Assert.Contains("hwnd=2, process=other.exe", log);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
     [Fact]
     public void PinUsesTheSlotOnTheWindowsOwnMonitor()
     {

@@ -110,6 +110,7 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 
 - [ ] Tray → Settings opens the dark WebView2 window; sidebar shows General / Layout / About active and Windows / Hotkeys / Ignored apps disabled with "v2" chips.
 - [ ] Every switch renders with the current settings values (compare with `%APPDATA%\PeekDows\settings.json`).
+- [ ] At 100% and 150% scaling, Tab to each of the ten Settings switches. Check the visible focus outline, the name and description announced by Narrator, and the state change when pressing Space.
 - [ ] Editing any control shows "● Unsaved changes" and enables Save; reverting the edit hides it again (dirty tracking flips off).
 - [ ] Save applies Auto arrange, Start with Windows and the Window size preset.
 - [ ] Layout preset Small/Medium/Large animates the live preview; after Save the actual windows re-arrange at the new ratio.
@@ -117,12 +118,16 @@ Prerequisite: `dotnet run --project src/PeekDows.App`.
 - [ ] About tab: version line matches the app version; "Open" buttons open the log file, the logs folder and the settings folder respectively.
 - [ ] Close with unsaved changes → confirmation dialog; "No" keeps the window open.
 - [ ] Pause or resume from the tray with Settings open → the sidebar status updates without touching the draft or showing a settings change banner.
+- [ ] Turn off Enable PeekDows and save → sidebar shows Disabled even if a pause is active, and Pause and Preview are unavailable. Re-enable and save → sidebar reflects the active pause or Running.
 - [ ] Cancel closes the window without applying anything (verify settings.json untouched).
 - [ ] DPI: repeat opening at 100%, 125% and 150% scaling — the window stays crisp and usable.
 - [ ] Fallback: temporarily break WebView2 (e.g. set env var `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to an invalid path), reopen Settings → basic General, Layout, About and Ignored apps tabs open and the log warns.
 - [ ] Ignored apps search-and-check: open a test app (e.g. Notepad), on the Ignored apps page type its name → it appears with a checkbox → check it → Save → it is in `%APPDATA%\PeekDows\settings.json`; close the app and PeekDows, reopen both → the entry is still listed (persistence).
 - [ ] Hotkeys: change Pause / resume from `Ctrl+Alt+P` to `Ctrl+Alt+O`, Save → the new combo toggles pause; then try a conflicting combo, Save → an error is shown and the previous combo still works.
 - [ ] Windows: open the Windows page, Refresh → rows are listed (title, process, eligibility); click "Ignorer ce process" on a row → the process appears checked in the Ignored apps list (Save still required to apply).
+- [ ] With two displays and two windows from the same test app, set only the left display profile to ignore that app. Refresh Windows and check that the left row says Ignored by display profile and the right row says Yes. Adding the app to Ignored apps in the draft marks both rows Ignored.
+- [ ] On a test account, arrange, use directional focus and switch the keyboard layout with a test window named `PEEKDOWS_AUDIT_PRIVATE_1247`. Review only fresh log lines. Check that the title stays out of the logs and that the window identifiers, process and placement rectangles are available.
+- [ ] Trigger the same Custom zone fallback twice with Show tray notifications off and then on. Check that the placement is the same both times and that the tray balloon appears only when enabled.
 - [ ] Un-ignore confirm: on the Ignored apps page uncheck an entry → a dark confirm modal names the app → "Keep ignoring" leaves it checked and untouched; "Stop ignoring" + Save removes it from `settings.json`.
 - [ ] Ignored classes stay collapsed under "Advanced: window classes" and still save one-entry-per-line.
 

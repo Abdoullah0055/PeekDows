@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using PeekDows.Core.Models;
@@ -585,11 +584,10 @@ public sealed class DirectionalFocusService : IDisposable
             return;
         }
 
-        var targetTitle = GetWindowTitle(hwnd.Value);
         var targetPid = GetWindowProcessId(hwnd.Value);
         var currentForeground = NativeMethods.GetForegroundWindow();
 
-        _logger?.Info($"Directional focus target: hwnd={hwnd.Value}, title={targetTitle}, pid={targetPid}, onCurrentDesktop={onCurrentDesktop}, isMinimized={isIconic}, currentForegroundHwnd={currentForeground}");
+        _logger?.Info($"Directional focus target: hwnd={hwnd.Value}, pid={targetPid}, onCurrentDesktop={onCurrentDesktop}, isMinimized={isIconic}, currentForegroundHwnd={currentForeground}");
 
         var status = _activationService.Activate(hwnd.Value);
 
@@ -600,19 +598,19 @@ public sealed class DirectionalFocusService : IDisposable
 
         if (status == ActivationStatus.Success)
         {
-            _logger?.Info($"Directional focus success: slot={slot}, hwnd={hwnd.Value}, title={targetTitle}");
+            _logger?.Info($"Directional focus success: slot={slot}, hwnd={hwnd.Value}");
         }
         else if (status == ActivationStatus.Pending)
         {
-            _logger?.Info($"Directional focus pending: slot={slot}, hwnd={hwnd.Value}, title={targetTitle}, delayed recheck scheduled");
+            _logger?.Info($"Directional focus pending: slot={slot}, hwnd={hwnd.Value}, delayed recheck scheduled");
         }
         else if (status == ActivationStatus.NotResponding)
         {
-            _logger?.Warn($"Directional focus target not responding: slot={slot}, hwnd={hwnd.Value}, title={targetTitle}");
+            _logger?.Warn($"Directional focus target not responding: slot={slot}, hwnd={hwnd.Value}");
         }
         else if (status == ActivationStatus.UnstableSkipped)
         {
-            _logger?.Info($"Directional focus skipped unstable target: slot={slot}, hwnd={hwnd.Value}, title={targetTitle}");
+            _logger?.Info($"Directional focus skipped unstable target: slot={slot}, hwnd={hwnd.Value}");
         }
         else // ForegroundDenied
         {
@@ -698,19 +696,6 @@ public sealed class DirectionalFocusService : IDisposable
         return (NativeMethods.GetAsyncKeyState(vk) & 0x8000) != 0;
     }
 
-    private static string GetWindowTitle(IntPtr hwnd)
-    {
-        try
-        {
-            var sb = new StringBuilder(256);
-            NativeMethods.GetWindowText(hwnd, sb, sb.Capacity);
-            return sb.ToString();
-        }
-        catch
-        {
-            return "<unknown>";
-        }
-    }
 
     private static uint GetWindowProcessId(IntPtr hwnd)
     {

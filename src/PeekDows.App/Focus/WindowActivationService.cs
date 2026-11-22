@@ -44,7 +44,6 @@ public interface IWindowActivationApi
     bool SetWindowPos(IntPtr hwnd, IntPtr hwndInsertAfter, int x, int y, int cx, int cy, uint flags);
     bool SetForegroundWindow(IntPtr hwnd);
     IntPtr SetFocus(IntPtr hwnd);
-    int GetWindowText(IntPtr hwnd, System.Text.StringBuilder sb, int maxCount);
     uint GetWindowProcessId(IntPtr hwnd);
 
     /// <summary>
@@ -90,7 +89,6 @@ public sealed class Win32ActivationApi : IWindowActivationApi
     public bool SetWindowPos(IntPtr hwnd, IntPtr hwndInsertAfter, int x, int y, int cx, int cy, uint flags) => NativeMethods.SetWindowPos(hwnd, hwndInsertAfter, x, y, cx, cy, flags);
     public bool SetForegroundWindow(IntPtr hwnd) => NativeMethods.SetForegroundWindow(hwnd);
     public IntPtr SetFocus(IntPtr hwnd) => NativeMethods.SetFocus(hwnd);
-    public int GetWindowText(IntPtr hwnd, System.Text.StringBuilder sb, int maxCount) => NativeMethods.GetWindowText(hwnd, sb, maxCount);
     public uint GetWindowProcessId(IntPtr hwnd) { NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid); return pid; }
 
     public bool IsResponsive(IntPtr hwnd, uint timeoutMs)
@@ -253,9 +251,8 @@ public sealed class WindowActivationService : IDisposable
             return ActivationStatus.NotResponding;
         }
 
-        var title = GetWindowTitle(hwnd);
         var pid = _api.GetWindowProcessId(hwnd);
-        _logger?.Info($"Activation step: target hwnd={hwnd}, title={title}, pid={pid}");
+        _logger?.Info($"Activation step: target hwnd={hwnd}, pid={pid}");
 
         // Restore minimised windows using the NON-BLOCKING variant.
         if (_api.IsIconic(hwnd))
@@ -362,17 +359,4 @@ public sealed class WindowActivationService : IDisposable
         }
     }
 
-    private string GetWindowTitle(IntPtr hwnd)
-    {
-        try
-        {
-            var sb = new System.Text.StringBuilder(256);
-            _api.GetWindowText(hwnd, sb, sb.Capacity);
-            return sb.ToString();
-        }
-        catch
-        {
-            return "<unknown>";
-        }
-    }
 }

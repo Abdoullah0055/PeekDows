@@ -52,7 +52,7 @@ body {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--green); margin-right: 6px;
 }
-.sidebar .foot.paused .dot { background: var(--muted); }
+.sidebar .foot.inactive .dot { background: var(--muted); }
 #pauseDuration {
   color-scheme: dark;
   font: inherit; font-size: 13px; color: var(--text); background: var(--bg);
@@ -169,6 +169,10 @@ body {
   border-radius: 50%; background: var(--muted); transition: .16s;
 }
 .switch input:checked ~ .track { background: var(--accent); border-color: var(--accent); }
+.switch input:focus-visible ~ .track {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
 .switch input:checked ~ .thumb { left: 23px; background: #101418; }
 
 /* Segmented preset */

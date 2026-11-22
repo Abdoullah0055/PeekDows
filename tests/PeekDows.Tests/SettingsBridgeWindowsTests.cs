@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
+using PeekDows.App;
 using PeekDows.App.Settings;
 using PeekDows.App.Tray;
 using PeekDows.Core.Models;
@@ -11,6 +13,81 @@ namespace PeekDows.Tests;
 
 public sealed class SettingsBridgeWindowsTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WindowsEligibility_UsesEffectiveRulesOnEachDisplay(bool globalIgnore)
+    {
+        var left = new MonitorInfo { Handle = (IntPtr)1, ProfileId = "left", WorkArea = new(0, 0, 1200, 900) };
+        var right = new MonitorInfo { Handle = (IntPtr)2, ProfileId = "right", WorkArea = new(1200, 0, 1200, 900) };
+        MonitorInfo ResolveMonitor(IntPtr hwnd) => hwnd == (IntPtr)1 ? left : right;
+        var settings = new AppSettings
+        {
+            AppRules = [new() { Process = "notes.exe", Action = globalIgnore ? "ignore" : "pin", Slot = "A" }],
+            MonitorProfiles = new()
+            {
+                ["left"] = new("Grid", [new() { Process = "notes", Action = "ignore" }])
+            }
+        };
+        if (globalIgnore)
+            settings.MonitorProfiles["right"] = new("Grid", [new() { Process = "notes", Action = "pin", Slot = "A" }]);
+        var windows = new[] { TestWindow(1), TestWindow(2) };
+        var discovery = new WindowDiscoveryService(() => windows);
+        var classifier = new WindowClassifier(settings);
+        var policy = new LoneWindowMaximizePolicy();
+
+        var rows = WindowsSnapshotProvider.Build(discovery, classifier, 200,
+            PeekDowsAppContext.CreateWindowsPlacementCheck(settings, ResolveMonitor, policy));
+        var excluded = rows.Single(row => row.Hwnd == "1");
+        var allowed = rows.Single(row => row.Hwnd == "2");
+        Assert.False(excluded.Eligible);
+        Assert.True(excluded.HasProfileRule);
+        Assert.Equal("ignored-by-profile", excluded.Reason);
+        Assert.True(allowed.Eligible);
+        Assert.Equal(globalIgnore, allowed.HasProfileRule);
+    }
+
+    [Fact]
+    public void WindowsEligibility_UsesPlacementCheckOnlyAfterBaseEligibility()
+    {
+        var settings = new AppSettings { IgnoredProcesses = ["notes.exe"] };
+        var discovery = new WindowDiscoveryService(() => [TestWindow(1), TestWindow(2)]);
+        var rows = WindowsSnapshotProvider.Build(discovery, new WindowClassifier(settings), 1,
+            placementReason: _ => throw new InvalidOperationException("Base exclusion must take precedence."));
+
+        var row = Assert.Single(rows);
+        Assert.Equal("ignored-process", row.Reason);
+        Assert.False(row.Eligible);
+        Assert.False(row.HasProfileRule);
+    }
+
+    [Fact]
+    public void WindowsEligibility_AllowsPeekDowsMaximizedWindowsWithRepositionSettingOff()
+    {
+        var settings = new AppSettings { AllowRepositionMaximizedWindows = false };
+        var monitor = new MonitorInfo { Handle = (IntPtr)1, WorkArea = new(0, 0, 1200, 900) };
+        var discovery = new WindowDiscoveryService(() => [TestWindow(1, true), TestWindow(2, true)]);
+        var policy = new LoneWindowMaximizePolicy();
+        policy.NotifyMaximizedByPeekDows((IntPtr)2);
+
+        var rows = WindowsSnapshotProvider.Build(discovery, new WindowClassifier(settings), 200,
+            PeekDowsAppContext.CreateWindowsPlacementCheck(settings, _ => monitor, policy));
+
+        Assert.Equal("maximized", rows.Single(row => row.Hwnd == "1").Reason);
+        Assert.True(rows.Single(row => row.Hwnd == "2").Eligible);
+    }
+
+    private static RawWindowInfo TestWindow(int handle, bool maximized = false) => new()
+    {
+        Hwnd = (IntPtr)handle,
+        Title = $"Notes {handle}",
+        ProcessId = Environment.ProcessId + 1,
+        ProcessName = "notes.exe",
+        CurrentRect = new(0, 0, 800, 600),
+        IsVisible = true,
+        IsMaximized = maximized
+    };
+
     [Fact]
     public void TryHandle_RequestWindows_ReturnsRows()
     {

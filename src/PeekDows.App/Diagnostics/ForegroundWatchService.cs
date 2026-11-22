@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
-using System.Text;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using PeekDows.Core.Services;
@@ -14,14 +13,13 @@ namespace PeekDows.App.Diagnostics;
 /// every Task Manager open into peekdows.log. Polling-only design: no keyboard
 /// hook is installed anywhere (the Ctrl+Win hold gesture has no OS layout
 /// toggle). Never throws (every tick path is guarded), never logs keystroke
-/// contents — only layout names, process names and window titles. Always
+/// contents or window titles. Always
 /// active, even when Directional Focus is off, so layout flips stay
 /// explainable in all configurations.
 /// </summary>
 public sealed class ForegroundWatchService : IDisposable
 {
     private const int PollIntervalMs = 250;
-    private const int MaxTitleChars = 40;
 
     private readonly FileLogger? _logger;
     private readonly Func<bool> _isEnabled;
@@ -307,7 +305,6 @@ public sealed class ForegroundWatchService : IDisposable
                 procName = _lastProcName;
             }
 
-            string title = GetForegroundTitle(hwnd);
 
             bool flipped;
             try
@@ -338,13 +335,13 @@ public sealed class ForegroundWatchService : IDisposable
                 {
                     newName = "?";
                 }
-                _logger?.Info($"KB_LAYOUT_FLIP {oldName} -> {newName} hwnd=0x{hwnd.ToInt64():X} tid={tid} sameHwnd={sameHwnd} fg=\"{title}\" proc={procName} pid={pid} gesture={_gestureActive}");
+                _logger?.Info($"KB_LAYOUT_FLIP {oldName} -> {newName} hwnd=0x{hwnd.ToInt64():X} tid={tid} sameHwnd={sameHwnd} proc={procName} pid={pid} gesture={_gestureActive}");
             }
 
             if (string.Equals(procName, "Taskmgr", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(prevProc, "Taskmgr", StringComparison.OrdinalIgnoreCase))
             {
-                _logger?.Info($"TASKMGR_OPEN fg=\"{title}\" gesture={_gestureActive} hint=(OS chord Ctrl+Shift+Esc, unrelated to the Ctrl+Win hold)");
+                _logger?.Info($"TASKMGR_OPEN hwnd=0x{hwnd.ToInt64():X} tid={tid} proc={procName} pid={pid} gesture={_gestureActive} hint=(OS chord Ctrl+Shift+Esc, unrelated to the Ctrl+Win hold)");
             }
 
             _prev = cur;
@@ -381,24 +378,6 @@ public sealed class ForegroundWatchService : IDisposable
         return "?";
     }
 
-    private static string GetForegroundTitle(IntPtr hwnd)
-    {
-        try
-        {
-            var sb = new StringBuilder(256);
-            int len = NativeMethods.GetWindowText(hwnd, sb, sb.Capacity);
-            if (len <= 0)
-                return string.Empty;
-            string title = sb.ToString();
-            if (title.Length > MaxTitleChars)
-                title = title.Substring(0, MaxTitleChars);
-            return title.Replace('"', '\'');
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
 
     /// <summary>
     /// Samples the current foreground window/thread (" hwnd=0x… tid=…") for

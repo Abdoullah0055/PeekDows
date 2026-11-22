@@ -12,7 +12,15 @@ function runInSettingsPage(scenario) {
   const sent = [];
   const timers = new Map();
   let nextTimer = 0;
-  const classList = () => ({ add() {}, remove() {}, toggle() {} });
+  const classList = () => {
+    const values = new Set();
+    return {
+      add: value => values.add(value),
+      remove: value => values.delete(value),
+      toggle(value, force = !values.has(value)) { force ? values.add(value) : values.delete(value); },
+      contains: value => values.has(value),
+    };
+  };
   const element = () => ({
     style: {},
     dataset: {},
@@ -112,6 +120,100 @@ test("Windows exclusion can be enabled and removed before saving", () => {
   `);
 });
 
+test("Windows eligibility uses the display rule and the current draft exclusions", () => {
+  runInSettingsPage(`
+    adoptSnapshot({ appRules: [{ process: "notes.exe", action: "ignore" }] });
+    receive({ type: "windows", data: [
+      { hwnd: "1", title: "Left", process: "notes.exe", eligible: false, reason: "ignored-by-profile", hasProfileRule: true },
+      { hwnd: "2", title: "Right", process: "notes.exe", eligible: true, hasProfileRule: true },
+      { hwnd: "3", title: "Default", process: "notes.exe", eligible: false, reason: "ignored-by-rule" },
+      { hwnd: "4", title: "System", process: "notes.exe", eligible: false, reason: "system" }
+    ] });
+    const cells = () => Array.from($("#windowsTable tbody").children, row => row.children[2].textContent);
+    assert.deepEqual(cells(), ["Ignored by display profile", "Yes", "Ignored", "system"]);
+    $("#windowsTable tbody").children[1].children[4].children[0].click();
+    assert.deepEqual(cells(), ["Ignored", "Ignored", "Ignored", "system"]);
+    $("#windowsTable tbody").children[1].children[4].children[0].click();
+    $("unignoreConfirm").click();
+    assert.deepEqual(cells(), ["Ignored by display profile", "Yes", "Ignored", "system"]);
+    state.draft.appRules = [];
+    renderWindowsRows();
+    assert.deepEqual(cells(), ["Ignored by display profile", "Yes", "Check after Save", "system"]);
+  `);
+});
+
+test("saving Windows exclusions reloads saved eligibility and keeps edits made during Save", () => {
+  runInSettingsPage(`
+    receive({ type: "settings", data: { ignoredProcesses: ["notes.exe"], autoArrange: false } });
+    const requests = () => sent.filter(message => message.type === "requestWindows").length;
+    assert.equal(requests(), 0);
+    receive({ type: "windows", data: [
+      { hwnd: "1", title: "Notes", process: "notes.exe", eligible: false, reason: "ignored-process" }
+    ] });
+    const row = () => $("#windowsTable tbody").children[0];
+    row().children[4].children[0].click();
+    $("unignoreConfirm").click();
+    assert.equal(row().children[2].textContent, "Check after Save");
+    $("saveBtn").click();
+    const { requestId } = sent.at(-1);
+    editCheckbox("autoArrange", true);
+    receive({ type: "applied", requestId, ok: true, data: { ignoredProcesses: [], autoArrange: false } });
+    assert.equal(requests(), 1);
+    receive({ type: "windows", data: [
+      { hwnd: "1", title: "Notes", process: "notes.exe", eligible: true }
+    ] });
+    assert.equal(row().children[2].textContent, "Yes");
+    assert.equal(state.dirty, true);
+    assert.equal(state.draft.autoArrange, true);
+    assert.equal(requests(), 1);
+  `);
+});
+
+test("Windows refreshes an adopted external profile and waits while its snapshot is deferred", () => {
+  runInSettingsPage(`
+    receive({ type: "settings", data: { animate: true } });
+    $("page-windows").classList.add("active");
+    const requests = () => sent.filter(message => message.type === "requestWindows").length;
+    receive({ type: "externalChange", data: { animate: true } });
+    assert.equal(requests(), 1);
+    receive({ type: "windows", data: [
+      { hwnd: "1", title: "Notes", process: "notes.exe", eligible: true }
+    ] });
+    const label = () => $("#windowsTable tbody").children[0].children[2].textContent;
+    assert.equal(label(), "Yes");
+    $("page-windows").classList.remove("active");
+    editCheckbox("animate", false);
+    receive({ type: "externalChange", data: { animate: true } });
+    assert.equal(requests(), 1);
+    assert.equal(label(), "Yes");
+    assert.equal(state.draft.animate, false);
+    $("cancelBtn").click();
+    assert.equal(requests(), 2);
+    receive({ type: "windows", data: [
+      { hwnd: "1", title: "Notes", process: "notes.exe", eligible: false,
+        reason: "ignored-by-profile", hasProfileRule: true }
+    ] });
+    assert.equal(label(), "Ignored by display profile");
+    assert.equal(requests(), 2);
+  `);
+});
+
+test("all settings switches have an accessible label and keyboard focus style", () => {
+  const root = path.join(__dirname, "../src/PeekDows.App/wwwroot");
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(root, "app.css"), "utf8");
+  const switches = [...html.matchAll(/class="switch"><input([^>]+)>/g)];
+  assert.equal(switches.length, 10);
+  for (const [, input] of switches) {
+    for (const attribute of ["aria-labelledby", "aria-describedby"]) {
+      const id = input.match(new RegExp(`${attribute}="([^"]+)"`))?.[1];
+      assert.ok(id, `${input} needs ${attribute}`);
+      assert.equal(html.split(`id="${id}"`).length, 2);
+    }
+  }
+  assert.match(css, /\.switch input:focus-visible ~ \.track\s*\{[^}]*outline:/);
+});
+
 test("Cancel restores the latest external snapshot and keeps newly imported sounds", () => {
   runInSettingsPage(`
     adoptSnapshot({ animate: true, autoArrange: false, userSounds: ["old.wav"] });
@@ -149,6 +251,31 @@ test("timed pause updates status without resetting an unsaved draft", () => {
     $("resume").click();
     assert.equal(sent.at(-1).type, "resume");
     receive({ type: "runtimeStatus", data: { isPaused: false } });
+    assert.equal($("previewArrange").disabled, false);
+
+    state.draft.enabled = false;
+    syncDirty();
+    $("saveBtn").click();
+    const requestId = sent.at(-1).requestId;
+    editCheckbox("animate", false);
+    receive({ type: "applied", ok: true, requestId,
+      data: { enabled: false, animate: true, runtime: { enabled: false, isPaused: false } } });
+    assert.equal($("statusFoot").textContent, "Disabled");
+    assert.equal($("pauseFor").disabled, true);
+    assert.equal($("previewArrange").disabled, true);
+    assert.equal(state.draft.animate, false);
+
+    receive({ type: "runtimeStatus", data: { enabled: false, isPaused: true, pauseDescription: "Paused until 14:30" } });
+    assert.equal($("statusFoot").textContent, "Disabled");
+    receive({ type: "externalChange", data: { enabled: true, animate: true,
+      runtime: { enabled: true, isPaused: true, pauseDescription: "Paused until 14:30" } } });
+    assert.equal($("statusFoot").textContent, "Paused until 14:30");
+    assert.equal($("resume").hidden, false);
+    assert.equal(state.draft.animate, false);
+    receive({ type: "runtimeStatus", data: { enabled: true, isPaused: false } });
+    $("cancelBtn").click();
+    assert.equal($("statusFoot").textContent, "Running");
+    assert.equal($("pauseFor").disabled, false);
     assert.equal($("previewArrange").disabled, false);
   `);
 });

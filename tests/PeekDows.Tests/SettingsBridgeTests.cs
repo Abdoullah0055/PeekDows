@@ -83,6 +83,17 @@ public class SettingsBridgeTests : IDisposable
     }
 
     [Fact]
+    public void DisabledSetting_IsIncludedInSnapshotsAndLiveRuntimeStatus()
+    {
+        Settings.Enabled = false;
+
+        using var settings = JsonDocument.Parse(_bridge.BuildSnapshotMessage());
+        Assert.False(settings.RootElement.GetProperty("data").GetProperty("runtime").GetProperty("enabled").GetBoolean());
+        using var runtime = JsonDocument.Parse(_bridge.BuildRuntimeStatusMessage());
+        Assert.False(runtime.RootElement.GetProperty("data").GetProperty("enabled").GetBoolean());
+    }
+
+    [Fact]
     public void BuildExternalChangeMessage_HasTypeExternalChange()
     {
         using var doc = JsonDocument.Parse(_bridge.BuildExternalChangeMessage());

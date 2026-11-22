@@ -174,25 +174,28 @@ public sealed class MultiMonitorLayoutService
         return allPlacements;
     }
 
+    public MonitorInfo ResolveWindowMonitor(IntPtr hwnd)
+    {
+        try
+        {
+            return _monitorResolver.GetMonitorForWindow(hwnd);
+        }
+        catch (Exception ex)
+        {
+            _logger?.Warn($"Monitor detection failed for hwnd={hwnd}, using primary monitor: {ex.Message}");
+            return _monitorResolver.GetPrimaryMonitor();
+        }
+    }
+
     internal Dictionary<MonitorInfo, List<ManagedWindow>> GroupWindowsByMonitor(IReadOnlyList<ManagedWindow> windows)
     {
         var groups = new Dictionary<MonitorInfo, List<ManagedWindow>>(new MonitorInfoEqualityComparer());
 
         foreach (var window in windows)
         {
-            MonitorInfo monitor;
+            var monitor = ResolveWindowMonitor(window.Hwnd);
 
-            try
-            {
-                monitor = _monitorResolver.GetMonitorForWindow(window.Hwnd);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Warn($"Monitor detection failed for hwnd={window.Hwnd}, using primary monitor: {ex.Message}");
-                monitor = _monitorResolver.GetPrimaryMonitor();
-            }
-
-            _logger?.Info($"Window assigned to monitor: hwnd={window.Hwnd}, title={window.Title}, workArea={monitor.WorkArea}, isPrimary={monitor.IsPrimary}");
+            _logger?.Info($"Window assigned to monitor: hwnd={window.Hwnd}, process={window.ProcessName}, workArea={monitor.WorkArea}, isPrimary={monitor.IsPrimary}");
 
             // Never compute placements against a synthetic fallback monitor. If the real
             // monitor could not be resolved (GetMonitorInfo failed), the resolver returns a
@@ -200,7 +203,7 @@ public sealed class MultiMonitorLayoutService
             // bogus placements on an invented monitor, so skip the window entirely.
             if (monitor.IsFallback)
             {
-                _logger?.Warn($"Window on fallback monitor skipped (monitor resolve failed): hwnd={window.Hwnd}, title={window.Title}, no placement computed");
+                _logger?.Warn($"Window on fallback monitor skipped (monitor resolve failed): hwnd={window.Hwnd}, process={window.ProcessName}, no placement computed");
                 continue;
             }
 

@@ -1039,7 +1039,7 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 var sb = new System.Text.StringBuilder(eligibleWindows.Count * 96);
                 sb.AppendLine($"Eligible windows ({eligibleWindows.Count}):");
                 foreach (var w in eligibleWindows)
-                    sb.AppendLine($"  hwnd={w.Hwnd}, title={w.Title}, process={w.ProcessName}, class={w.ClassName}, rect={w.CurrentRect}, fg={w.IsForeground}");
+                    sb.AppendLine($"  hwnd={w.Hwnd}, process={w.ProcessName}, class={w.ClassName}, rect={w.CurrentRect}, fg={w.IsForeground}");
                 _logger.Info(sb.ToString().TrimEnd());
             }
 
@@ -1106,26 +1106,24 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
                 // AllowRepositionMaximizedWindows is false — otherwise a lone window that
                 // was auto-maximized could never be un-maximized when a second window
                 // appears (spec §1, PeekDows-maximized tracking).
-                bool maximizedByPeekDows = policy.WasMaximizedByPeekDows(w.Hwnd);
-                if (w.IsMaximized && !_settings.AllowRepositionMaximizedWindows && !maximizedByPeekDows)
+                if (!CanRepositionWindow(w.Hwnd, w.IsMaximized, _settings, policy))
                 {
                     skippedMaximized.Add(w.Hwnd);
-                    _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, title={w.Title}, isMaximized=true, allowRepositionMaximized=false, decision=skip maximized");
+                    _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, process={w.ProcessName}, isMaximized=true, allowRepositionMaximized=false, decision=skip maximized");
                 }
                 else
                 {
                     if (w.IsMaximized)
                     {
-                        _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, title={w.Title}, isMaximized=true, allowRepositionMaximized=true, decision=arrange");
-                        _logger.Info($"Maximized window will be restored and arranged: hwnd={w.Hwnd}, title={w.Title}");
+                        _logger.Info($"Maximized window will be restored and arranged: hwnd={w.Hwnd}, process={w.ProcessName}, allowRepositionMaximized={_settings.AllowRepositionMaximizedWindows}");
                     }
                     else if (IsNearFullscreenWorkArea(w.CurrentRect, _monitorService.GetWorkArea(GetCachedMonitor(w.Hwnd))))
                     {
-                        _logger.Info($"Near-fullscreen non-maximized window will be arranged: hwnd={w.Hwnd}, title={w.Title}, rect={w.CurrentRect}");
+                        _logger.Info($"Near-fullscreen non-maximized window will be arranged: hwnd={w.Hwnd}, process={w.ProcessName}, rect={w.CurrentRect}");
                     }
                     else
                     {
-                        _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, title={w.Title}, isMaximized=false, allowRepositionMaximized={_settings.AllowRepositionMaximizedWindows}, decision=arrange");
+                        _logger.Info($"Window arrange eligibility: hwnd={w.Hwnd}, process={w.ProcessName}, isMaximized=false, allowRepositionMaximized={_settings.AllowRepositionMaximizedWindows}, decision=arrange");
                     }
                     arrangeable.Add(w);
                 }
@@ -1167,14 +1165,8 @@ public partial class PeekDowsAppContext : ApplicationContext, IPeekDowsControlle
             {
                 var sb2 = new System.Text.StringBuilder(placements.Count * 64);
                 sb2.AppendLine($"Placements ({placements.Count}):");
-                // avoid LINQ FirstOrDefault per placement — build hwnd→title map once
-                var titleMap = new System.Collections.Generic.Dictionary<IntPtr, string>(arrangeable.Count);
-                foreach (var w in arrangeable) titleMap[w.Hwnd] = w.Title;
                 foreach (var p in placements)
-                {
-                    titleMap.TryGetValue(p.Hwnd, out var t);
-                    sb2.AppendLine($"  {p.SlotId}: hwnd={p.Hwnd}, title={t ?? "unknown"}, rect={p.TargetRect}, bringToFront={p.BringToFront}");
-                }
+                    sb2.AppendLine($"  {p.SlotId}: hwnd={p.Hwnd}, rect={p.TargetRect}, bringToFront={p.BringToFront}");
                 _logger.Info(sb2.ToString().TrimEnd());
             }
 

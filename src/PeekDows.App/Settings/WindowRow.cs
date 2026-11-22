@@ -1,10 +1,11 @@
 namespace PeekDows.App.Settings;
 
-/// <summary>Ligne lecture-seule pour la page Windows v2. Aucune donnée perso.</summary>
+/// <summary>Read-only window details for the local Settings page.</summary>
 public sealed record WindowRow(
     string Hwnd,
     string Title,
     string Process,
     string ClassName,
     bool Eligible,
-    string Reason);
+    string Reason,
+    bool HasProfileRule = false);
